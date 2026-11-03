@@ -1,0 +1,6 @@
+{
+  "name": "Apex AI-Native IT Operating System",
+  "description": "Enterprise AI-Native IT Services Marketplace, Managed IT Layer, ITSM Desk, CMDB, RMM, Field Dispatch, Procurement RFQ, and Hardware OS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

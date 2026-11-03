@@ -1,0 +1,430 @@
+export type UserRole = 
+  | 'BUSINESS_OWNER' 
+  | 'SALES_MANAGER' 
+  | 'ENTERPRISE_IT_HEAD' 
+  | 'FIELD_ENGINEER' 
+  | 'PROCUREMENT_LEAD';
+
+export interface TenantInfo {
+  id: string;
+  name: string;
+  gstin: string;
+  state: string;
+  currency: string;
+  logoText: string;
+}
+
+export interface Lead {
+  id: string;
+  companyName: string;
+  contactPerson: string;
+  email: string;
+  phone: string;
+  source: 'Website' | 'WhatsApp' | 'IndiaMART' | 'Referral' | 'Cold Outreach';
+  score: 'HOT' | 'WARM' | 'COLD';
+  scoreValue: number;
+  stage: 'New' | 'Qualified' | 'BOM Created' | 'Quotation Sent' | 'Negotiation' | 'Won' | 'Lost';
+  estimatedValue: number;
+  requirementSummary: string;
+  createdAt: string;
+  assignedTo: string;
+}
+
+export interface ProductItem {
+  id: string;
+  sku: string;
+  name: string;
+  brand: string;
+  category: 'Laptop' | 'Desktop' | 'Server' | 'Networking' | 'Power' | 'Component' | 'Storage' | 'Peripheral';
+  specs: string;
+  purchaseCost: number;
+  marketPrice: number;
+  sellingPrice: number;
+  minPrice: number;
+  targetMarginPercent: number;
+  stockAvailable: number;
+  stockReserved: number;
+  warehouseLocation: string;
+  hsn: string;
+  gstPercent: number;
+  warrantyYears: number;
+  serialTrackingRequired: boolean;
+}
+
+export interface BOMItem {
+  id: string;
+  productId?: string;
+  category: string;
+  sku: string;
+  name: string;
+  brand: string;
+  specs: string;
+  qty: number;
+  purchaseCost: number;
+  sellingPrice: number;
+  warrantyYears: number;
+  hsn: string;
+  gstPercent: number;
+}
+
+export interface ServiceIncluded {
+  id: string;
+  name: string;
+  price: number;
+  sla: string;
+}
+
+export interface BOMSolution {
+  id: string;
+  solutionName: string;
+  category: string;
+  summary: string;
+  compatibilityStatus: 'VERIFIED_COMPATIBLE' | 'CONDITIONAL' | 'INCOMPATIBLE';
+  compatibilityNotes: string;
+  recommendedMargin: number;
+  items: BOMItem[];
+  servicesIncluded: ServiceIncluded[];
+  autonomousNextSteps: string[];
+}
+
+export interface Quotation {
+  id: string;
+  quoteNumber: string;
+  customerName: string;
+  customerGstin: string;
+  customerState: string;
+  solutionName: string;
+  items: BOMItem[];
+  services: ServiceIncluded[];
+  subtotal: number;
+  discountAmount: number;
+  marginPercent: number;
+  gstAmount: number;
+  totalAmount: number;
+  status: 'DRAFT' | 'PENDING_OWNER_APPROVAL' | 'APPROVED' | 'SENT_TO_CUSTOMER' | 'ACCEPTED' | 'REJECTED';
+  approvalReason?: string;
+  createdDate: string;
+  validUntil: string;
+  paymentTerms: string;
+}
+
+export interface TelegramMessage {
+  id: string;
+  sender: 'bot' | 'owner' | 'system';
+  text: string;
+  timestamp: string;
+  approvalData?: {
+    type: 'QUOTE_MARGIN' | 'HIGH_VALUE_PO' | 'CREDIT_LIMIT' | 'REFUND';
+    referenceId: string;
+    amount: number;
+    margin?: number;
+    details: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  };
+  suggestedActions?: string[];
+}
+
+export interface SupplierInfo {
+  id: string;
+  name: string;
+  rating: number;
+  deliveryScore: number;
+  defectRate: number;
+  paymentTerms: string;
+  authorizedBrands: string[];
+  contactPerson: string;
+  phone: string;
+}
+
+export interface RFQItem {
+  id: string;
+  productName: string;
+  requiredQty: number;
+  urgency: 'HIGH' | 'MEDIUM' | 'LOW';
+  supplierQuotes: {
+    supplierId: string;
+    supplierName: string;
+    unitCost: number;
+    leadTimeDays: number;
+    inStock: boolean;
+    recommended?: boolean;
+  }[];
+  status: 'OPEN' | 'COMPARED' | 'PO_DISPATCHED';
+}
+
+export interface ITSMTicket {
+  id: string;
+  ticketNumber: string;
+  title: string;
+  category: 'Hardware Fault' | 'Network Outage' | 'Access Request' | 'Asset Procurement' | 'Software License';
+  priority: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
+  requesterName: string;
+  requesterDept: string;
+  assignedAgent: string;
+  status: 'OPEN' | 'IN_PROGRESS' | 'WAITING_ON_PARTS' | 'RESOLVED';
+  slaExpiresAt: string;
+  slaPercentUsed: number;
+  deviceAffected?: string;
+  rootCause?: string;
+  createdAt: string;
+}
+
+export interface EndpointHealth {
+  id: string;
+  deviceName: string;
+  assignedUser: string;
+  os: string;
+  cpuLoad: number;
+  ramUsagePercent: number;
+  diskFreePercent: number;
+  smartStatus: 'HEALTHY' | 'WARNING' | 'CRITICAL';
+  batteryHealthPercent: number;
+  antivirusStatus: 'UP_TO_DATE' | 'EXPIRED';
+  lastSeen: string;
+}
+
+export interface FieldJob {
+  id: string;
+  jobCode: string;
+  title: string;
+  customerName: string;
+  address: string;
+  technicianName: string;
+  technicianPhone: string;
+  status: 'SCHEDULED' | 'EN_ROUTE' | 'CHECKED_IN' | 'DIAGNOSING' | 'PARTS_REPLACED' | 'COMPLETED';
+  scheduledTime: string;
+  partsConsumed: { partName: string; qty: number; cost: number }[];
+  customerSignatureObtained: boolean;
+  customerRating?: number;
+}
+
+export interface CMDBNode {
+  id: string;
+  name: string;
+  type: 'Service' | 'Server' | 'Switch' | 'Firewall' | 'Database' | 'Storage';
+  status: 'ONLINE' | 'DEGRADED' | 'OFFLINE';
+  ipAddress: string;
+  impactScore: number;
+}
+
+export interface AutonomousEvent {
+  id: string;
+  timestamp: string;
+  eventType: string;
+  agent: 'Sales Agent' | 'Pricing Agent' | 'Procurement Agent' | 'SLA Monitor' | 'Telegram Orchestrator';
+  summary: string;
+  autonomousActionTaken: string;
+  humanApprovalRequired: boolean;
+  approvalStatus?: 'AUTO_APPROVED' | 'PENDING_TELEGRAM' | 'AUTHORIZED' | 'REJECTED';
+  confidenceScore: number;
+}
+
+export interface ProjectMilestone {
+  id: string;
+  title: string;
+  amount: number;
+  status: 'PENDING_FUNDING' | 'ESCROW_HELD' | 'IN_PROGRESS' | 'COMPLETED' | 'RELEASED';
+  dueDate: string;
+}
+
+export interface Project {
+  id: string;
+  projectCode: string;
+  title: string;
+  clientName: string;
+  clientLocation: string;
+  budget: number;
+  category: 'Cloud Migration' | 'Enterprise Cabling' | 'Network Security' | 'Hardware Overhaul' | 'Disaster Recovery';
+  scopeDescription: string;
+  deliverables: string[];
+  skillsRequired: string[];
+  status: 'PROPOSALS_OPEN' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  proposalsCount: number;
+  createdAt: string;
+  milestones: ProjectMilestone[];
+}
+
+export interface Proposal {
+  id: string;
+  projectId: string;
+  providerName: string;
+  providerRating: number;
+  providerVerified: boolean;
+  commercialBid: number;
+  timelineDays: number;
+  matchScore: number;
+  matchExplanation: string;
+  technicalApproach: string;
+  oemCertifications: string[];
+  status: 'SUBMITTED' | 'SHORTLISTED' | 'ACCEPTED' | 'REJECTED';
+}
+
+export interface ProviderProfile {
+  id: string;
+  name: string;
+  tagline: string;
+  city: string;
+  rating: number;
+  reviewsCount: number;
+  jobsCompleted: number;
+  slaPerformance: number;
+  hourlyRate: number;
+  distanceKm: number;
+  verified: boolean;
+  certifications: string[];
+  currentCapacity: 'AVAILABLE' | 'BUSY' | 'OVERLOADED';
+  skills: string[];
+}
+
+export interface AssetItem {
+  id: string;
+  assetTag: string;
+  serialNumber: string;
+  name: string;
+  category: 'Laptop' | 'Server' | 'Switch' | 'Firewall' | 'Workstation' | 'UPS';
+  brand: string;
+  model: string;
+  assignedUser: string;
+  department: string;
+  location: string;
+  purchaseDate: string;
+  purchaseCost: number;
+  warrantyExpiresAt: string;
+  status: 'IN_USE' | 'AVAILABLE_IN_STOCK' | 'UNDER_REPAIR' | 'RETIRED';
+}
+
+export interface SoftwareLicense {
+  id: string;
+  softwareName: string;
+  publisher: string;
+  tier: string;
+  purchasedSeats: number;
+  assignedSeats: number;
+  activeLast30Days: number;
+  unusedSeats: number;
+  costPerSeatPerYear: number;
+  annualWastedSpend: number;
+  renewalDate: string;
+}
+
+export interface AMCContract {
+  id: string;
+  contractNumber: string;
+  clientName: string;
+  type: 'COMPREHENSIVE' | 'NON_COMPREHENSIVE' | 'PER_DEVICE_ONCALL';
+  deviceCount: number;
+  annualValue: number;
+  startDate: string;
+  endDate: string;
+  status: 'ACTIVE' | 'EXPIRING_SOON' | 'RENEWED';
+  nextPMDate: string;
+  slaResponseHours: number;
+}
+
+export interface AutomationWorkflow {
+  id: string;
+  name: string;
+  description: string;
+  triggerEvent: string;
+  condition: string;
+  autonomousAction: string;
+  humanApprovalRequired: boolean;
+  active: boolean;
+  executionCount: number;
+  lastExecuted: string;
+}
+
+export interface IntegrationConnector {
+  id: string;
+  name: string;
+  category: 'Identity & SSO' | 'MDM & RMM' | 'Cloud Infrastructure' | 'Messaging' | 'Finance & ERP';
+  icon: string;
+  status: 'CONNECTED' | 'DISCONNECTED' | 'SYNCING';
+  recordsSynced: string;
+  lastSyncTime: string;
+  description: string;
+}
+
+export type OperatingMode = 
+  | 'MODEL_A_MARKETPLACE' 
+  | 'MODEL_B_MANAGED_IT' 
+  | 'MODEL_C_ENTERPRISE_OS' 
+  | 'HYBRID';
+
+export interface RMAClaim {
+  id: string;
+  rmaNumber: string;
+  assetTag: string;
+  assetName: string;
+  serialNumber: string;
+  oemBrand: string;
+  oemCaseNumber: string;
+  faultSymptom: string;
+  warrantyStatus: 'ACTIVE_WARRANTY' | 'OUT_OF_WARRANTY' | 'EXTENDED_CARE';
+  courierTracking: string;
+  courierPartner: string;
+  stage: 'FAULT_LOGGED' | 'OEM_APPROVED' | 'IN_TRANSIT' | 'SERVICE_CENTER' | 'REPLACED_RETURN' | 'TESTED_CLOSED';
+  createdAt: string;
+  resolvedAt?: string;
+}
+
+export interface KnowledgeArticle {
+  id: string;
+  title: string;
+  category: 'Network & VPN' | 'Windows & OS' | 'Security & Auth' | 'Hardware & Peripherals' | 'SaaS & M365';
+  readTime: string;
+  views: number;
+  solvedCount: number;
+  tags: string[];
+  summary: string;
+  symptoms: string[];
+  selfServiceSteps: string[];
+}
+
+export interface CRMOpportunity {
+  id: string;
+  title: string;
+  clientName: string;
+  contactPerson: string;
+  value: number;
+  stage: 'LEAD' | 'QUALIFIED' | 'TECHNICAL_SCOPING' | 'PROPOSAL_SENT' | 'NEGOTIATION' | 'WON';
+  winProbability: number;
+  expectedCloseDate: string;
+  assignedEngineer: string;
+  category: string;
+}
+
+export interface MarketplaceDispute {
+  id: string;
+  disputeNumber: string;
+  projectId: string;
+  projectTitle: string;
+  customerName: string;
+  providerName: string;
+  disputedAmount: number;
+  escrowHeld: number;
+  reason: string;
+  customerClaim: string;
+  providerRebuttal: string;
+  aiMediationVerdict: string;
+  status: 'UNDER_REVIEW' | 'AWAITING_EVIDENCE' | 'RESOLVED_REFUND' | 'RESOLVED_RELEASED' | 'RESOLVED_REWORK';
+  createdAt: string;
+}
+
+export interface DistributorVendorProfile {
+  id: string;
+  name: string;
+  gstin: string;
+  pan: string;
+  headquarters: string;
+  oemAuthorizations: string[];
+  creditLimit: number;
+  availableCredit: number;
+  creditDays: number;
+  deliveryPerformanceRate: number;
+  averageRmaHours: number;
+  priceIndex: number;
+  activeContracts: number;
+  tier: 'TIER_1_NATIONAL' | 'TIER_2_REGIONAL' | 'AUTHORIZED_PARTNER';
+}
+
