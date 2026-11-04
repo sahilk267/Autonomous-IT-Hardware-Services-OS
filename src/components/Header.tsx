@@ -135,21 +135,15 @@ export const Header: React.FC<HeaderProps> = ({
               </select>
             </div>
 
-            {/* Reset / Start Fresh Button */}
+            {/* Organization Setup Button */}
             {onOpenResetModal && (
               <button
                 onClick={onOpenResetModal}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition shadow-sm ${
-                  isCleanSlate 
-                    ? 'bg-emerald-950/70 border-emerald-700/80 text-emerald-300 hover:bg-emerald-900/60' 
-                    : 'bg-slate-800 hover:bg-slate-700/90 border-slate-700 text-slate-300 hover:text-white'
-                }`}
-                title="Reset Workspace / Switch Between Clean Slate & Demo Data"
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border bg-slate-800 hover:bg-slate-700/90 border-slate-700 text-slate-300 hover:text-white text-xs font-semibold cursor-pointer transition shadow-sm"
+                title="Configure Company Profile & Workspace Setup"
               >
-                <RotateCcw className={`w-3.5 h-3.5 ${isCleanSlate ? 'text-emerald-400' : 'text-amber-400'}`} />
-                <span className="hidden sm:inline">
-                  {isCleanSlate ? 'Clean Slate' : 'Reset Data'}
-                </span>
+                <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+                <span className="hidden sm:inline">Organization</span>
               </button>
             )}
 

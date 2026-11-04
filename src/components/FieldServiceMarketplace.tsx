@@ -43,38 +43,16 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
   // Dispatch Job Modal State
   const [showDispatchModal, setShowDispatchModal] = useState(false);
-  const [dispatchTitle, setDispatchTitle] = useState(
-    isCleanSlate ? '' : 'Windows Server 2025 Active Directory & Hyper-V Cluster'
-  );
-  const [dispatchCustomer, setDispatchCustomer] = useState(isCleanSlate ? '' : 'Metro Health Care HQ');
-  const [dispatchAddress, setDispatchAddress] = useState(
-    isCleanSlate ? '' : 'Andheri East, MIDC Tech Park, Mumbai, MH'
-  );
-  const [dispatchTech, setDispatchTech] = useState(
-    isCleanSlate ? '' : 'Amit Deshmukh (L2 Network Specialist)'
-  );
-  const [dispatchPhone, setDispatchPhone] = useState(isCleanSlate ? '' : '+91 98201 44512');
-  const [dispatchSlot, setDispatchSlot] = useState(isCleanSlate ? '' : 'Today • Within 2 Hours');
+  const [dispatchTitle, setDispatchTitle] = useState('');
+  const [dispatchCustomer, setDispatchCustomer] = useState('');
+  const [dispatchAddress, setDispatchAddress] = useState('');
+  const [dispatchTech, setDispatchTech] = useState('');
+  const [dispatchPhone, setDispatchPhone] = useState('');
+  const [dispatchSlot, setDispatchSlot] = useState('');
 
   useEffect(() => {
-    if (isCleanSlate) {
-      setSelectedJobId('');
-      setDispatchTitle('');
-      setDispatchCustomer('');
-      setDispatchAddress('');
-      setDispatchTech('');
-      setDispatchPhone('');
-      setDispatchSlot('');
-    } else {
-      setSelectedJobId(jobs[0]?.id || '');
-      setDispatchTitle('Windows Server 2025 Active Directory & Hyper-V Cluster');
-      setDispatchCustomer('Metro Health Care HQ');
-      setDispatchAddress('Andheri East, MIDC Tech Park, Mumbai, MH');
-      setDispatchTech('Amit Deshmukh (L2 Network Specialist)');
-      setDispatchPhone('+91 98201 44512');
-      setDispatchSlot('Today • Within 2 Hours');
-    }
-  }, [isCleanSlate, jobs]);
+    setSelectedJobId(jobs[0]?.id || '');
+  }, [jobs]);
 
   const selectedJob = (selectedJobId ? jobs.find(j => j.id === selectedJobId) : null) || (isCleanSlate ? null : jobs[0]) || null;
 
@@ -144,15 +122,13 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
       onCreateJob({
         title: pkg.title,
         customerName: 'Enterprise Client',
-        address: 'Bandra-Kurla Complex (BKC), Mumbai, MH',
-        technicianName: 'Suresh Patil (L2 Senior)',
-        technicianPhone: '+91 98201 55122',
+        address: 'Client Operational Facility',
+        technicianName: 'Assigned Field Specialist',
+        technicianPhone: '',
         status: 'SCHEDULED',
         scheduledTime: pkg.sla,
         partsConsumed: []
       });
-    } else {
-      alert(`Booked ${pkg.title} with SLA ${pkg.sla}.`);
     }
   };
 

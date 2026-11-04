@@ -37,111 +37,58 @@ import {
   SoftwareLicense,
   AMCContract,
   AutomationWorkflow,
-  IntegrationConnector
+  IntegrationConnector,
+  InvoiceRecord
 } from './types';
 
-import {
-  initialTenant,
-  initialProducts,
-  initialLeads,
-  initialQuotes,
-  initialTelegramMessages,
-  initialSuppliers,
-  initialRFQs,
-  initialITSMTickets,
-  initialEndpoints,
-  initialFieldJobs,
-  initialCMDBNodes,
-  initialEvents,
-  initialProjects,
-  initialProposals,
-  initialProviders,
-  initialAssets,
-  initialLicenses,
-  initialAMCs,
-  initialWorkflows,
-  initialIntegrations
-} from './data/mockData';
-
-interface InvoiceRecord {
-  customer: string;
-  invoiceNo: string;
-  amount: number;
-  dueInDays: number;
-  status: string;
-  createdAt?: string;
-  gstin?: string;
-}
-
-const initialMockInvoices: InvoiceRecord[] = [
-  { customer: 'Nexus FinTech Labs', invoiceNo: 'INV-2026-0812', amount: 2407200, dueInDays: 4, status: 'DUE_SOON', createdAt: '2026-08-25', gstin: '27AABCN8192K1Z4' },
-  { customer: 'Zenith Logistics', invoiceNo: 'INV-2026-0799', amount: 748828, dueInDays: -8, status: 'OVERDUE', createdAt: '2026-08-10', gstin: '27AABCT9921M1Z1' },
-  { customer: 'OmniHealth Hospitals', invoiceNo: 'INV-2026-0750', amount: 1850000, dueInDays: 14, status: 'ACTIVE', createdAt: '2026-09-01', gstin: '27AABCO4142L1Z9' }
-];
-
-const cleanTelegramMessages: TelegramMessage[] = [
-  {
-    id: 'msg-clean-init',
-    sender: 'bot',
-    text: '🤖 *Apex Autonomous IT Operating System Active*\n\nWorkspace initialized in *Clean Slate Mode* (0 mock records).\nAll 12 enterprise modules are ready for your real-world operational data. Type an owner command, create a BOM, dispatch an engineer, or import quotes to begin.',
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  }
-];
-
-const cleanInitialEvents: AutonomousEvent[] = [
-  {
-    id: 'evt-clean-init',
-    timestamp: new Date().toLocaleTimeString(),
-    eventType: 'WorkspaceResetCleanSlate',
-    agent: 'Telegram Orchestrator',
-    summary: 'Platform workspace reset to Clean Slate (0 mock data). Ready for production operations.',
-    autonomousActionTaken: 'Wiped all mock test records across 12 modules and initialized fresh database context.',
-    humanApprovalRequired: false,
-    approvalStatus: 'AUTO_APPROVED',
-    confidenceScore: 1.0
-  }
-];
+const defaultTenant: TenantInfo = {
+  id: 'tenant-1',
+  name: 'Apex IT Systems & Solutions',
+  gstin: '',
+  state: 'Maharashtra (27)',
+  currency: '₹',
+  logoText: 'APEX',
+  isConfigured: false
+};
 
 export default function App() {
-  const [tenant] = useState<TenantInfo>(initialTenant);
+  const [tenant, setTenant] = useState<TenantInfo>(defaultTenant);
   const [currentRole, setCurrentRole] = useState<UserRole>('BUSINESS_OWNER');
-  const [activeTab, setActiveTab] = useState<TabKey>('telegram');
+  const [activeTab, setActiveTab] = useState<TabKey>('executive');
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Reset & Workspace State Mode
-  const [isCleanSlate, setIsCleanSlate] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('apex_it_os_mode') === 'clean';
-    }
-    return false;
-  });
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [resetToast, setResetToast] = useState<string | null>(null);
+  // Application State Collections (ZERO MOCK DATA - ALL EMPTY BY DEFAULT)
+  const [products, setProducts] = useState<ProductItem[]>([]);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [quotes, setQuotes] = useState<Quotation[]>([]);
+  const [telegramMessages, setTelegramMessages] = useState<TelegramMessage[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierInfo[]>([]);
+  const [rfqs, setRfqs] = useState<RFQItem[]>([]);
+  const [tickets, setTickets] = useState<ITSMTicket[]>([]);
+  const [endpoints, setEndpoints] = useState<EndpointHealth[]>([]);
+  const [jobs, setJobs] = useState<FieldJob[]>([]);
+  const [cmdbNodes, setCmdbNodes] = useState<CMDBNode[]>([]);
+  const [events, setEvents] = useState<AutonomousEvent[]>([]);
 
-  // Application State Collections
-  const [products, setProducts] = useState<ProductItem[]>(() => isCleanSlate ? [] : initialProducts);
-  const [leads, setLeads] = useState<Lead[]>(() => isCleanSlate ? [] : initialLeads);
-  const [quotes, setQuotes] = useState<Quotation[]>(() => isCleanSlate ? [] : initialQuotes);
-  const [telegramMessages, setTelegramMessages] = useState<TelegramMessage[]>(() => isCleanSlate ? cleanTelegramMessages : initialTelegramMessages);
-  const [suppliers] = useState<SupplierInfo[]>(initialSuppliers);
-  const [rfqs, setRfqs] = useState<RFQItem[]>(() => isCleanSlate ? [] : initialRFQs);
-  const [tickets, setTickets] = useState<ITSMTicket[]>(() => isCleanSlate ? [] : initialITSMTickets);
-  const [endpoints, setEndpoints] = useState<EndpointHealth[]>(() => isCleanSlate ? [] : initialEndpoints);
-  const [jobs, setJobs] = useState<FieldJob[]>(() => isCleanSlate ? [] : initialFieldJobs);
-  const [cmdbNodes] = useState<CMDBNode[]>(initialCMDBNodes);
-  const [events, setEvents] = useState<AutonomousEvent[]>(() => isCleanSlate ? cleanInitialEvents : initialEvents);
-
-  // Extended Ecosystem State
-  const [projects, setProjects] = useState<Project[]>(() => isCleanSlate ? [] : initialProjects);
-  const [proposals, setProposals] = useState<Proposal[]>(() => isCleanSlate ? [] : initialProposals);
-  const [providers] = useState<ProviderProfile[]>(initialProviders);
-  const [assets, setAssets] = useState<AssetItem[]>(() => isCleanSlate ? [] : initialAssets);
-  const [licenses, setLicenses] = useState<SoftwareLicense[]>(() => isCleanSlate ? [] : initialLicenses);
-  const [amcs, setAMCs] = useState<AMCContract[]>(() => isCleanSlate ? [] : initialAMCs);
-  const [workflows, setWorkflows] = useState<AutomationWorkflow[]>(() => isCleanSlate ? [] : initialWorkflows);
-  const [connectors, setConnectors] = useState<IntegrationConnector[]>(initialIntegrations);
-  const [invoices, setInvoices] = useState<InvoiceRecord[]>(() => isCleanSlate ? [] : initialMockInvoices);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [proposals, setProposals] = useState<Proposal[]>([]);
+  const [providers, setProviders] = useState<ProviderProfile[]>([]);
+  const [assets, setAssets] = useState<AssetItem[]>([]);
+  const [licenses, setLicenses] = useState<SoftwareLicense[]>([]);
+  const [amcs, setAMCs] = useState<AMCContract[]>([]);
+  const [workflows, setWorkflows] = useState<AutomationWorkflow[]>([]);
+  const [connectors, setConnectors] = useState<IntegrationConnector[]>([]);
+  const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
 
   const [isThinking, setIsThinking] = useState(false);
+  const [isTelegramConfigured, setIsTelegramConfigured] = useState(false);
+
+  // Helper for user notifications
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
 
   // Load persistent state from backend on mount
   useEffect(() => {
@@ -150,11 +97,12 @@ export default function App() {
       .then(data => {
         if (data.success && data.data) {
           const s = data.data;
-          setIsCleanSlate(s.isCleanSlate);
+          if (s.tenant) setTenant(s.tenant);
           if (s.products) setProducts(s.products);
           if (s.leads) setLeads(s.leads);
           if (s.quotes) setQuotes(s.quotes);
-          if (s.telegramMessages && s.telegramMessages.length > 0) setTelegramMessages(s.telegramMessages);
+          if (s.telegramMessages) setTelegramMessages(s.telegramMessages);
+          if (s.suppliers) setSuppliers(s.suppliers);
           if (s.rfqs) setRfqs(s.rfqs);
           if (s.tickets) setTickets(s.tickets);
           if (s.endpoints) setEndpoints(s.endpoints);
@@ -164,100 +112,107 @@ export default function App() {
           if (s.amcs) setAMCs(s.amcs);
           if (s.projects) setProjects(s.projects);
           if (s.proposals) setProposals(s.proposals);
-          if (s.events && s.events.length > 0) setEvents(s.events);
+          if (s.providers) setProviders(s.providers);
+          if (s.events) setEvents(s.events);
           if (s.invoices) setInvoices(s.invoices);
+          if (s.workflows) setWorkflows(s.workflows);
+          if (s.connectors) setConnectors(s.connectors);
         }
       })
       .catch(err => console.warn('Could not sync persistent state from server:', err));
+
+    // Check integration connection statuses
+    fetch('/api/integrations/status')
+      .then(res => res.json())
+      .then(status => {
+        setIsTelegramConfigured(!!status.telegram);
+      })
+      .catch(() => setIsTelegramConfigured(false));
   }, []);
 
-  // Reset Handlers
-  const handleResetCleanSlate = async () => {
-    setIsCleanSlate(true);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('apex_it_os_mode', 'clean');
-    }
-    setProducts([]);
-    setLeads([]);
-    setQuotes([]);
-    setTelegramMessages(cleanTelegramMessages);
-    setRfqs([]);
-    setTickets([]);
-    setEndpoints([]);
-    setJobs([]);
-    setProjects([]);
-    setProposals([]);
-    setAssets([]);
-    setLicenses([]);
-    setAMCs([]);
-    setWorkflows([]);
-    setInvoices([]);
-    setEvents(cleanInitialEvents);
-    setResetToast('Clean Slate Active: All mock data wiped. You can now operate or test with 0 dummy records!');
-    setTimeout(() => setResetToast(null), 4000);
-
+  // Update Tenant Profile
+  const handleUpdateTenant = async (updates: Partial<TenantInfo>) => {
     try {
-      await fetch('/api/state/reset', {
+      const res = await fetch('/api/tenant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'clean' })
+        body: JSON.stringify(updates)
       });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setTenant(data.data);
+        showToast('Organization settings updated successfully.');
+      }
     } catch (err) {
-      console.warn('Server reset failed:', err);
+      console.error('Failed to update tenant:', err);
     }
   };
 
-  const handleResetDemoSuite = async () => {
-    setIsCleanSlate(false);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('apex_it_os_mode', 'demo');
-    }
-    setProducts(initialProducts);
-    setLeads(initialLeads);
-    setQuotes(initialQuotes);
-    setTelegramMessages(initialTelegramMessages);
-    setRfqs(initialRFQs);
-    setTickets(initialITSMTickets);
-    setEndpoints(initialEndpoints);
-    setJobs(initialFieldJobs);
-    setProjects(initialProjects);
-    setProposals(initialProposals);
-    setAssets(initialAssets);
-    setLicenses(initialLicenses);
-    setAMCs(initialAMCs);
-    setWorkflows(initialWorkflows);
-    setConnectors(initialIntegrations);
-    setEvents(initialEvents);
-    setInvoices(initialMockInvoices);
-    setResetToast('Demo Test Suite Restored: All 12 interconnected modules successfully re-seeded!');
-    setTimeout(() => setResetToast(null), 4000);
-
+  // Reset Clean Slate Handler (strictly 0 records)
+  const handleResetCleanSlate = async () => {
     try {
-      await fetch('/api/state/reset', {
+      const res = await fetch('/api/state/reset', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'demo' })
+        headers: { 'Content-Type': 'application/json' }
       });
+      const data = await res.json();
+      if (data.success && data.data) {
+        const s = data.data;
+        setProducts(s.products || []);
+        setLeads(s.leads || []);
+        setQuotes(s.quotes || []);
+        setTelegramMessages(s.telegramMessages || []);
+        setSuppliers(s.suppliers || []);
+        setRfqs(s.rfqs || []);
+        setTickets(s.tickets || []);
+        setEndpoints(s.endpoints || []);
+        setJobs(s.jobs || []);
+        setProjects(s.projects || []);
+        setProposals(s.proposals || []);
+        setAssets(s.assets || []);
+        setLicenses(s.licenses || []);
+        setAMCs(s.amcs || []);
+        setWorkflows(s.workflows || []);
+        setInvoices(s.invoices || []);
+        setEvents(s.events || []);
+        showToast('Clean Slate Active: All business records initialized to 0.');
+      }
     } catch (err) {
-      console.warn('Server reset failed:', err);
+      console.error('Server reset failed:', err);
     }
   };
 
   // Invoice Handlers
-  const handleAddInvoice = (inv: InvoiceRecord) => {
-    setInvoices(prev => [inv, ...prev]);
-    fetch('/api/invoices', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(inv)
-    }).catch(err => console.warn('Sync invoice failed:', err));
+  const handleAddInvoice = async (inv: InvoiceRecord) => {
+    try {
+      const res = await fetch('/api/invoices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(inv)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setInvoices(prev => [data.data, ...prev]);
+        showToast(`Invoice ${data.data.invoiceNo} saved in ledger.`);
+      }
+    } catch (err) {
+      console.error('Sync invoice failed:', err);
+    }
   };
 
-  const handleSettleInvoice = (invoiceNo: string) => {
-    setInvoices(prev => prev.filter(i => i.invoiceNo !== invoiceNo));
-    fetch(`/api/invoices/${invoiceNo}/settle`, {
-      method: 'PATCH'
-    }).catch(err => console.warn('Sync settle invoice failed:', err));
+  const handleSettleInvoice = async (invoiceNo: string) => {
+    try {
+      const res = await fetch(`/api/invoices/${invoiceNo}/settle`, {
+        method: 'PATCH'
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setInvoices(prev => prev.map(i => i.invoiceNo === invoiceNo ? data.data : i));
+        showToast(`Invoice ${invoiceNo} settled in ledger.`);
+      }
+    } catch (err) {
+      console.error('Sync settle invoice failed:', err);
+    }
   };
 
   // Workspace Statistics for Modal
@@ -289,27 +244,11 @@ export default function App() {
       const response = await fetch('/api/ai/telegram-command', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          command: text,
-          context: {
-            todayRevenue: "₹8,45,000",
-            monthlyGrossProfit: "₹14.2L (17.4% margin)",
-            pendingApprovals: pendingApprovalsCount,
-            openQuotesCount: quotes.length
-          }
-        })
+        body: JSON.stringify({ command: text })
       });
 
       const data = await response.json();
-      const botText = data.text || 'Command received and recorded.';
-
-      // Check if owner typed an approval in text
-      if (text.toLowerCase().includes('approve') && quotes.some(q => q.status === 'PENDING_OWNER_APPROVAL')) {
-        const pendingQuote = quotes.find(q => q.status === 'PENDING_OWNER_APPROVAL');
-        if (pendingQuote) {
-          handleApproveQuote(pendingQuote.id);
-        }
-      }
+      const botText = data.text || 'Command processed.';
 
       const botReply: TelegramMessage = {
         id: `msg-bot-${Date.now()}`,
@@ -328,87 +267,68 @@ export default function App() {
   };
 
   // Handle Approving a Quote via Telegram or App
-  const handleApproveQuote = (quoteId: string) => {
-    setQuotes(prev => prev.map(q => {
-      if (q.id === quoteId || q.quoteNumber.includes(quoteId)) {
-        return { ...q, status: 'APPROVED' };
+  const handleApproveQuote = async (quoteId: string) => {
+    try {
+      const res = await fetch(`/api/quotes/${quoteId}/approve`, {
+        method: 'PATCH'
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber.includes(quoteId) ? data.data : q));
+        
+        // Update Telegram message approval status
+        setTelegramMessages(prev => prev.map(m => {
+          if (m.approvalData && (m.approvalData.referenceId === quoteId || m.approvalData.referenceId.includes(quoteId))) {
+            return {
+              ...m,
+              approvalData: { ...m.approvalData, status: 'APPROVED' }
+            };
+          }
+          return m;
+        }));
+
+        showToast(`Quotation #${data.data.quoteNumber} approved.`);
       }
-      return q;
-    }));
-
-    // Update Telegram message approval status
-    setTelegramMessages(prev => prev.map(m => {
-      if (m.approvalData && (m.approvalData.referenceId === quoteId || m.approvalData.referenceId.includes(quoteId))) {
-        return {
-          ...m,
-          approvalData: { ...m.approvalData, status: 'APPROVED' }
-        };
-      }
-      return m;
-    }));
-
-    // Add confirmation message from bot
-    const confirmMsg: TelegramMessage = {
-      id: `msg-conf-${Date.now()}`,
-      sender: 'bot',
-      text: `✅ *EXCEPTION APPROVED & RECORDED*\n\n` +
-        `• Quote *#${quoteId}* has been authorized by the Business Owner.\n` +
-        `• Inventory for 45 units reserved in Warehouse.\n` +
-        `• Proforma invoice dispatched to customer via Email & WhatsApp.`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-    setTelegramMessages(prev => [...prev, confirmMsg]);
-
-    // Log to Event Bus
-    const newEvent: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'OwnerExceptionAuthorized',
-      agent: 'Telegram Orchestrator',
-      summary: `Owner authorized concession on Quote ${quoteId}.`,
-      autonomousActionTaken: 'Quotation marked APPROVED and customer dispatch initiated.',
-      humanApprovalRequired: true,
-      approvalStatus: 'AUTHORIZED',
-      confidenceScore: 1.0
-    };
-    setEvents(prev => [newEvent, ...prev]);
+    } catch (err) {
+      console.error('Approve quote failed:', err);
+    }
   };
 
   // Handle Rejecting a Quote
-  const handleRejectQuote = (quoteId: string, reason: string) => {
-    setQuotes(prev => prev.map(q => {
-      if (q.id === quoteId || q.quoteNumber.includes(quoteId)) {
-        return { ...q, status: 'REJECTED' };
+  const handleRejectQuote = async (quoteId: string, reason: string) => {
+    try {
+      const res = await fetch(`/api/quotes/${quoteId}/reject`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber.includes(quoteId) ? data.data : q));
+        showToast(`Quotation #${data.data.quoteNumber} rejected.`);
       }
-      return q;
-    }));
-
-    const rejectMsg: TelegramMessage = {
-      id: `msg-rej-${Date.now()}`,
-      sender: 'bot',
-      text: `❌ *QUOTATION REJECTED*\n\nQuote *#${quoteId}* rejected. Sales team notified to revise pricing to minimum 12.0% margin floor.`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    };
-    setTelegramMessages(prev => [...prev, rejectMsg]);
+    } catch (err) {
+      console.error('Reject quote failed:', err);
+    }
   };
 
   // Handle Quotation Generation from BOM Builder
-  const handleGenerateQuote = (solution: BOMSolution, customerName: string, customerGstin: string, discount: number) => {
+  const handleGenerateQuote = async (solution: BOMSolution, customerName: string, customerGstin: string, discount: number) => {
     const totalCost = solution.items.reduce((acc, i) => acc + (i.purchaseCost * i.qty), 0);
     const grossItems = solution.items.reduce((acc, i) => acc + (i.sellingPrice * i.qty), 0);
     const servicesTotal = solution.servicesIncluded.reduce((acc, s) => acc + s.price, 0);
     const subtotal = grossItems + servicesTotal;
-    const netSubtotal = subtotal - discount;
+    const netSubtotal = Math.max(0, subtotal - discount);
     const profit = netSubtotal - totalCost;
-    const marginPercent = ((profit / netSubtotal) * 100);
+    const marginPercent = netSubtotal > 0 ? ((profit / netSubtotal) * 100) : 0;
     const isException = marginPercent < 12.0;
 
     const newQuote: Quotation = {
       id: `quote-${Date.now()}`,
-      quoteNumber: `APX-QT-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      customerName,
-      customerGstin,
-      customerState: 'Maharashtra (27)',
+      quoteNumber: `QT-${Date.now().toString().slice(-6)}`,
+      customerName: customerName || 'Enterprise Client',
+      customerGstin: customerGstin || '',
+      customerState: tenant.state,
       solutionName: solution.solutionName,
       items: solution.items,
       services: solution.servicesIncluded,
@@ -418,707 +338,463 @@ export default function App() {
       gstAmount: Math.round(netSubtotal * 0.18),
       totalAmount: Math.round(netSubtotal * 1.18),
       status: isException ? 'PENDING_OWNER_APPROVAL' : 'SENT_TO_CUSTOMER',
-      approvalReason: isException ? `Margin ${marginPercent.toFixed(1)}% < 12.0% threshold.` : undefined,
+      approvalReason: isException ? `Margin ${marginPercent.toFixed(1)}% is below 12.0% floor policy.` : undefined,
       createdDate: new Date().toISOString().split('T')[0],
-      validUntil: '2026-09-28',
+      validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
       paymentTerms: '50% Advance with PO, 50% on Delivery'
     };
 
-    setQuotes(prev => [newQuote, ...prev]);
+    try {
+      const res = await fetch('/api/quotes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newQuote)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setQuotes(prev => [data.data, ...prev]);
 
-    fetch('/api/quotes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newQuote)
-    }).catch(err => console.warn('Sync quote failed:', err));
-
-    if (isException) {
-      // Send Telegram Exception Alert to Owner
-      const alertMsg: TelegramMessage = {
-        id: `msg-alert-${Date.now()}`,
-        sender: 'bot',
-        text: `🚨 *APPROVAL REQUIRED: Quote #${newQuote.quoteNumber}*\n\n` +
-          `• *Customer:* ${newQuote.customerName}\n` +
-          `• *Order Value:* ₹${newQuote.totalAmount.toLocaleString('en-IN')} (Incl. GST)\n` +
-          `• *Margin:* *${newQuote.marginPercent}%* (Floor: 12.0%)\n` +
-          `• *Autonomous Action:* Placed on hold. Awaiting Owner decision.`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        approvalData: {
-          type: 'QUOTE_MARGIN',
-          referenceId: newQuote.id,
-          amount: newQuote.totalAmount,
-          margin: newQuote.marginPercent,
-          details: `Requested discount of ₹${discount.toLocaleString('en-IN')}`,
-          status: 'PENDING'
+        if (isException) {
+          const alertMsg: TelegramMessage = {
+            id: `msg-alert-${Date.now()}`,
+            sender: 'bot',
+            text: `🚨 *APPROVAL REQUIRED: Quote #${data.data.quoteNumber}*\n\n` +
+              `• *Customer:* ${data.data.customerName}\n` +
+              `• *Order Value:* ₹${data.data.totalAmount.toLocaleString('en-IN')}\n` +
+              `• *Margin:* *${data.data.marginPercent}%* (Floor: 12.0%)\n` +
+              `• *Autonomous Action:* Placed on hold. Awaiting Owner decision.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            approvalData: {
+              type: 'QUOTE_MARGIN',
+              referenceId: data.data.id,
+              amount: data.data.totalAmount,
+              margin: data.data.marginPercent,
+              details: `Discount of ₹${discount.toLocaleString('en-IN')}`,
+              status: 'PENDING'
+            }
+          };
+          setTelegramMessages(prev => [...prev, alertMsg]);
+          showToast(`Quote #${data.data.quoteNumber} escalated to Telegram Command Hub.`);
+          setActiveTab('telegram');
+        } else {
+          showToast(`Quotation #${data.data.quoteNumber} generated at ${data.data.marginPercent}% margin.`);
         }
-      };
-      setTelegramMessages(prev => [...prev, alertMsg]);
-      setActiveTab('telegram');
-    } else {
-      alert(`✅ Quotation ${newQuote.quoteNumber} auto-approved at ${newQuote.marginPercent}% margin and sent to customer.`);
+      }
+    } catch (err) {
+      console.error('Sync quote failed:', err);
     }
-
-    // Add event
-    const newEvent: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: isException ? 'MarginThresholdBreach' : 'QuotationGenerated',
-      agent: 'Pricing Agent',
-      summary: `Quotation ${newQuote.quoteNumber} generated for ${newQuote.customerName} (${newQuote.marginPercent}% margin).`,
-      autonomousActionTaken: isException ? 'Escalated to Telegram Command Hub' : 'Dispatched to customer email & WhatsApp',
-      humanApprovalRequired: isException,
-      approvalStatus: isException ? 'PENDING_TELEGRAM' : 'AUTO_APPROVED',
-      confidenceScore: 0.98
-    };
-    setEvents(prev => [newEvent, ...prev]);
   };
 
   // Handle PO Dispatch in RFQ
-  const handleDispatchPO = (rfqId: string, supplierId: string) => {
-    setRfqs(prev => prev.map(r => r.id === rfqId ? { ...r, status: 'PO_DISPATCHED' } : r));
-    const supp = suppliers.find(s => s.id === supplierId);
-    
-    const newEvent: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'PurchaseOrderDispatched',
-      agent: 'Procurement Agent',
-      summary: `Dispatched PO for ${rfqId} to ${supp?.name || supplierId}.`,
-      autonomousActionTaken: '3-Way Match verification lock created.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.97
-    };
-    setEvents(prev => [newEvent, ...prev]);
+  const handleDispatchPO = async (rfqId: string, supplierId: string) => {
+    try {
+      const res = await fetch(`/api/rfqs/${rfqId}/dispatch-po`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ supplierId })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setRfqs(prev => prev.map(r => r.id === rfqId ? data.data : r));
+        showToast(`PO dispatched for RFQ #${rfqId}.`);
+      }
+    } catch (err) {
+      console.error('Dispatch PO failed:', err);
+    }
   };
 
   // Handle Ticket Resolution
-  const handleResolveTicket = (ticketId: string) => {
-    setTickets(prev => prev.map(t => t.id === ticketId ? { ...t, status: 'RESOLVED' } : t));
-    const newEvent: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'TicketResolved',
-      agent: 'SLA Monitor',
-      summary: `Ticket ${ticketId} signed off and closed.`,
-      autonomousActionTaken: 'Customer satisfaction survey dispatched via WhatsApp.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.99
-    };
-    setEvents(prev => [newEvent, ...prev]);
+  const handleResolveTicket = async (ticketId: string) => {
+    try {
+      const res = await fetch(`/api/tickets/${ticketId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'RESOLVED' })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setTickets(prev => prev.map(t => t.id === ticketId ? data.data : t));
+        showToast(`Ticket #${data.data.ticketNumber} marked RESOLVED.`);
+      }
+    } catch (err) {
+      console.error('Resolve ticket failed:', err);
+    }
   };
 
-  // Handle RMM Remote Fix
+  // Handle Remote Fix on Endpoint
   const handleRemoteFix = (endpointId: string, actionName: string) => {
-    setEndpoints(prev => prev.map(ep => {
-      if (ep.id === endpointId) {
-        return {
-          ...ep,
-          cpuLoad: Math.floor(15 + Math.random() * 20),
-          ramUsagePercent: Math.floor(45 + Math.random() * 20),
-          smartStatus: 'HEALTHY'
-        };
-      }
-      return ep;
-    }));
-
-    const newEvent: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'RMMRemoteRemediation',
-      agent: 'SLA Monitor',
-      summary: `Remediation executed on ${endpointId}: ${actionName}.`,
-      autonomousActionTaken: 'Telemetry refreshed to normal levels.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.95
-    };
-    setEvents(prev => [newEvent, ...prev]);
+    showToast(`Remote monitoring agent is not configured for ${endpointId}. Real actions require an enrolled agent.`);
   };
 
   // Handle Field Job Updates
-  const handleUpdateJobStatus = (jobId: string, nextStatus: FieldJob['status']) => {
-    setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: nextStatus } : j));
-  };
-
-  const handleConsumePart = (jobId: string, partName: string, cost: number) => {
-    setJobs(prev => prev.map(j => {
-      if (j.id === jobId) {
-        return {
-          ...j,
-          partsConsumed: [...j.partsConsumed, { partName, qty: 1, cost }]
-        };
+  const handleUpdateJobStatus = async (jobId: string, nextStatus: FieldJob['status']) => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
+        showToast(`Job ${data.data.jobCode} status updated to ${nextStatus}.`);
       }
-      return j;
-    }));
+    } catch (err) {
+      console.error('Update job status failed:', err);
+    }
   };
 
-  const handleSignOffJob = (jobId: string) => {
-    setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'COMPLETED', customerSignatureObtained: true } : j));
-  };
-
-  // Handle Simulation from Event Bus
-  const handleSimulateEvent = (type: 'MARGIN_BREACH' | 'SHORTAGE' | 'BATTERY_ALERT') => {
-    if (type === 'MARGIN_BREACH') {
-      const simQuote = quotes[0];
-      if (simQuote) {
-        setQuotes(prev => prev.map(q => q.id === simQuote.id ? { ...q, status: 'PENDING_OWNER_APPROVAL', marginPercent: 9.8 } : q));
-        const simMsg: TelegramMessage = {
-          id: `sim-${Date.now()}`,
-          sender: 'bot',
-          text: `🚨 *SIMULATED MARGIN BREACH: Quote #${simQuote.quoteNumber}*\n\nCustomer counter-offered price reduction. Margin fell to *9.8%* (< 12.0% floor rule). Telegram approval required.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          approvalData: {
-            type: 'QUOTE_MARGIN',
-            referenceId: simQuote.id,
-            amount: simQuote.totalAmount,
-            margin: 9.8,
-            details: 'Bulk discount exception simulation',
-            status: 'PENDING'
-          }
-        };
-        setTelegramMessages(prev => [...prev, simMsg]);
-        setActiveTab('telegram');
+  const handleConsumePart = async (jobId: string, partName: string, cost: number) => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/consume-part`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ partName, cost })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
+        // Refresh catalog inventory from server
+        fetch('/api/products')
+          .then(r => r.json())
+          .then(pData => { if (pData.success) setProducts(pData.data); });
+        showToast(`Part "${partName}" consumed on job ${data.data.jobCode}. Warehouse stock updated.`);
       }
-    } else if (type === 'SHORTAGE') {
-      setActiveTab('inventory');
-      alert("🚨 Shortage Event Simulated: Cisco Switch stock reduced to 0. Auto-dispatched RFQ to Redington & Ingram Micro.");
+    } catch (err) {
+      console.error('Consume part failed:', err);
+    }
+  };
+
+  const handleSignOffJob = async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'COMPLETED', customerSignatureObtained: true })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
+        showToast(`Job ${data.data.jobCode} completed and signed off.`);
+      }
+    } catch (err) {
+      console.error('Sign off job failed:', err);
     }
   };
 
   // Handler: Release Project Milestone Escrow
-  const handleReleaseMilestone = (projectId: string, milestoneId: string) => {
+  const handleReleaseMilestone = async (projectId: string, milestoneId: string) => {
     setProjects(prev => prev.map(p => {
       if (p.id !== projectId) return p;
       return {
         ...p,
-        milestones: p.milestones.map(m => m.id === milestoneId ? { ...m, status: 'RELEASED' } : m)
+        milestones: p.milestones.map(m => m.id === milestoneId ? { ...m, status: 'COMPLETED' } : m)
       };
     }));
-
-    const project = projects.find(p => p.id === projectId);
-    const milestone = project?.milestones.find(m => m.id === milestoneId);
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'MilestonePayoutReleased',
-      agent: 'Telegram Orchestrator',
-      summary: `Released escrow payout of ₹${milestone?.amount.toLocaleString('en-IN')} for milestone: "${milestone?.title}".`,
-      autonomousActionTaken: 'Funds transferred from escrow holding to verified provider bank account with 200 OK webhook payload.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.99
-    };
-    setEvents(prev => [newEvt, ...prev]);
+    showToast('Milestone status marked COMPLETED in ledger (Payment escrow gateway not configured).');
   };
 
   // Handler: Accept Project Proposal
-  const handleAcceptProposal = (projectId: string, proposalId: string) => {
-    setProposals(prev => prev.map(p => {
-      if (p.projectId !== projectId) return p;
-      return { ...p, status: p.id === proposalId ? 'ACCEPTED' : 'REJECTED' };
-    }));
-
-    setProjects(prev => prev.map(p => p.id === projectId ? { ...p, status: 'IN_PROGRESS' } : p));
-
-    const prop = proposals.find(p => p.id === proposalId);
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'ProjectProposalAwarded',
-      agent: 'Pricing Agent',
-      summary: `Awarded project bid to ${prop?.providerName} (Bid: ₹${prop?.commercialBid.toLocaleString('en-IN')}).`,
-      autonomousActionTaken: 'Locked escrow deposit & automatically triggered SLA contract generation.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.96
-    };
-    setEvents(prev => [newEvt, ...prev]);
+  const handleAcceptProposal = async (projectId: string, proposalId: string) => {
+    try {
+      const res = await fetch(`/api/proposals/${proposalId}/accept`, {
+        method: 'PATCH'
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProposals(prev => prev.map(p => {
+          if (p.projectId !== projectId) return p;
+          return { ...p, status: p.id === proposalId ? 'ACCEPTED' : 'REJECTED' };
+        }));
+        setProjects(prev => prev.map(p => p.id === projectId ? { ...p, status: 'IN_PROGRESS' } : p));
+        showToast('Proposal accepted. Project moved to IN_PROGRESS.');
+      }
+    } catch (err) {
+      console.error('Accept proposal failed:', err);
+    }
   };
 
   // Handler: Create Project
-  const handleCreateProject = (newProj: Partial<Project>) => {
-    const fullProj: Project = {
-      id: `proj-${Date.now()}`,
-      projectCode: newProj.projectCode || `PRJ-2026-${Math.floor(100 + Math.random() * 900)}`,
-      title: newProj.title || 'Enterprise Deployment',
-      clientName: newProj.clientName || 'Enterprise Client',
-      clientLocation: newProj.clientLocation || 'Mumbai, MH',
-      budget: newProj.budget || 400000,
-      category: newProj.category || 'Cloud Migration',
-      scopeDescription: newProj.scopeDescription || '',
-      deliverables: newProj.deliverables || ['Implementation', 'Sign-off'],
-      skillsRequired: newProj.skillsRequired || ['Enterprise Architecture'],
-      status: 'PROPOSALS_OPEN',
-      proposalsCount: 0,
-      createdAt: new Date().toISOString().split('T')[0],
-      milestones: newProj.milestones || []
-    };
-    setProjects(prev => [fullProj, ...prev]);
-
-    fetch('/api/projects', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fullProj)
-    }).catch(err => console.warn('Sync project failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'NewProjectPublished',
-      agent: 'Sales Agent',
-      summary: `Published ${fullProj.title} to verified enterprise service providers.`,
-      autonomousActionTaken: 'Dispatched automated webhook broadcast to top-matched certified regional providers.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.98
-    };
-    setEvents(prev => [newEvt, ...prev]);
+  const handleCreateProject = async (newProj: Partial<Project>) => {
+    try {
+      const res = await fetch('/api/projects', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProj)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setProjects(prev => [data.data, ...prev]);
+        showToast(`Project "${data.data.title}" published.`);
+      }
+    } catch (err) {
+      console.error('Create project failed:', err);
+    }
   };
 
   // Handler: Diagnostic Booking
-  const handleRequestDiagnosticBooking = (diagnosisSummary: string, estimatedCost: number) => {
-    const newJob: FieldJob = {
-      id: `job-${Date.now()}`,
-      jobCode: `JOB-2026-${Math.floor(100 + Math.random() * 900)}`,
-      title: `AI Diagnostic Dispatch: ${diagnosisSummary.slice(0, 45)}...`,
-      customerName: 'OmniHealth Regional Clinic',
-      address: 'Baner Tech Center, Floor 3, Pune',
-      technicianName: 'Rajesh K. (L3 Senior)',
-      technicianPhone: '+91 98201 55432',
+  const handleRequestDiagnosticBooking = async (diagnosisSummary: string, estimatedCost: number) => {
+    const newJob: Partial<FieldJob> = {
+      title: `Diagnostic: ${diagnosisSummary.slice(0, 45)}`,
+      customerName: 'Enterprise Client',
+      address: 'Client Site',
+      technicianName: 'Field Support Team',
+      technicianPhone: '',
       status: 'SCHEDULED',
-      scheduledTime: 'Today • Within 2 Hours',
+      scheduledTime: 'Scheduled Onsite',
       partsConsumed: [
-        { partName: 'Hardware RAID Cache Battery Unit', qty: 1, cost: estimatedCost }
-      ],
-      customerSignatureObtained: false
+        { partName: 'Replacement Diagnostic Part', qty: 1, cost: estimatedCost }
+      ]
     };
-    setJobs(prev => [newJob, ...prev]);
+    handleCreateJob(newJob);
     setActiveTab('field');
-
-    fetch('/api/jobs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newJob)
-    }).catch(err => console.warn('Sync job failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'AutonomousDiagnosticDispatch',
-      agent: 'SLA Monitor',
-      summary: `Auto-scheduled technician dispatch for diagnostic fix: "${diagnosisSummary.slice(0, 50)}...".`,
-      autonomousActionTaken: 'Reserved replacement part from warehouse locker & dispatched job ticket to mobile app.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.97
-    };
-    setEvents(prev => [newEvt, ...prev]);
   };
 
   // Handler: Create Field Service Job
-  const handleCreateJob = (job: Partial<FieldJob>) => {
-    const fullJob: FieldJob = {
-      id: `job-${Date.now()}`,
-      jobCode: `JOB-2026-${Math.floor(100 + Math.random() * 900)}`,
-      title: job.title || 'On-Site IT Service Dispatch',
-      customerName: job.customerName || 'Enterprise Client',
-      address: job.address || 'BKC Tech Center, Mumbai, MH',
-      technicianName: job.technicianName || 'Amit Deshmukh (L2 Network Specialist)',
-      technicianPhone: job.technicianPhone || '+91 98201 44512',
-      status: 'SCHEDULED',
-      scheduledTime: job.scheduledTime || 'Today • Within 2 Hours',
-      partsConsumed: job.partsConsumed || [],
-      customerSignatureObtained: false
-    };
-    setJobs(prev => [fullJob, ...prev]);
-
-    fetch('/api/jobs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fullJob)
-    }).catch(err => console.warn('Sync job failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'FieldJobDispatched',
-      agent: 'Telegram Orchestrator',
-      summary: `Dispatched engineer ${fullJob.technicianName} to ${fullJob.customerName} for ${fullJob.title}.`,
-      autonomousActionTaken: 'Sent GPS coordinates to field app and reserved locker parts clearance.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.98
-    };
-    setEvents(prev => [newEvt, ...prev]);
+  const handleCreateJob = async (job: Partial<FieldJob>) => {
+    try {
+      const res = await fetch('/api/jobs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(job)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setJobs(prev => [data.data, ...prev]);
+        showToast(`Job ${data.data.jobCode} created.`);
+      }
+    } catch (err) {
+      console.error('Create job failed:', err);
+    }
   };
 
   // Handler: Create ITSM Ticket
-  const handleCreateTicket = (newTicket: Partial<ITSMTicket> & { description?: string; department?: string }) => {
-    const fullTicket: ITSMTicket = {
-      id: `tkt-${Date.now()}`,
-      ticketNumber: `INC-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-      title: newTicket.title || 'Enterprise Incident',
-      requesterName: newTicket.requesterName || 'Enterprise User',
-      requesterDept: newTicket.requesterDept || newTicket.department || 'IT Operations',
-      priority: newTicket.priority || 'HIGH',
-      status: 'OPEN',
-      slaExpiresAt: newTicket.slaExpiresAt || 'Within 2 Hours',
-      slaPercentUsed: 12,
-      assignedAgent: newTicket.assignedAgent || 'Autonomous AI Triage',
-      category: newTicket.category || 'Network Outage',
-      rootCause: newTicket.description || 'Under active investigation',
-      createdAt: 'Just now'
-    };
-    setTickets(prev => [fullTicket, ...prev]);
-
-    fetch('/api/tickets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(fullTicket)
-    }).catch(err => console.warn('Sync ticket failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'NewTicketLogged',
-      agent: 'SLA Monitor',
-      summary: `Logged incident ${fullTicket.ticketNumber} for ${fullTicket.requesterName}: "${fullTicket.title}".`,
-      autonomousActionTaken: 'Indexed ticket context in CMDB dependency graph and evaluated SLA escalation timer.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.96
-    };
-    setEvents(prev => [newEvt, ...prev]);
+  const handleCreateTicket = async (newTicket: Partial<ITSMTicket> & { description?: string; department?: string }) => {
+    try {
+      const res = await fetch('/api/tickets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newTicket)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setTickets(prev => [data.data, ...prev]);
+        showToast(`Ticket #${data.data.ticketNumber} logged.`);
+      }
+    } catch (err) {
+      console.error('Create ticket failed:', err);
+    }
   };
 
   // Handler: Reclaim Unused SaaS Licenses
-  const handleReclaimLicenses = (licenseId: string) => {
-    let savedAmount = 0;
-    setLicenses(prev => prev.map(l => {
-      if (l.id !== licenseId) return l;
-      savedAmount = l.annualWastedSpend;
-      return {
-        ...l,
-        assignedSeats: l.activeLast30Days,
-        purchasedSeats: l.activeLast30Days,
-        unusedSeats: 0,
-        annualWastedSpend: 0
-      };
-    }));
-
-    const targetLic = licenses.find(l => l.id === licenseId);
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'SaaSSeatsReclaimed',
-      agent: 'Procurement Agent',
-      summary: `Autonomous reclamation of ${targetLic?.unusedSeats} ghost seats in ${targetLic?.softwareName}.`,
-      autonomousActionTaken: `Revoked idle tokens via Microsoft Graph API and reduced renewal seat count, locking annual OPEX savings of ₹${savedAmount.toLocaleString('en-IN')}.`,
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.99
-    };
-    setEvents(prev => [newEvt, ...prev]);
+  const handleReclaimLicenses = async (licenseId: string) => {
+    try {
+      const res = await fetch(`/api/licenses/${licenseId}/reclaim`, {
+        method: 'PATCH'
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setLicenses(prev => prev.map(l => l.id === licenseId ? data.data : l));
+        showToast(`Seats reclaimed for ${data.data.softwareName} in database.`);
+      }
+    } catch (err) {
+      console.error('Reclaim license failed:', err);
+    }
   };
 
-  // Handler: Update Asset Status
-  const handleUpdateAssetStatus = (assetId: string, status: AssetItem['status']) => {
-    setAssets(prev => prev.map(a => a.id === assetId ? { ...a, status } : a));
-  };
-
-  // Handler: Execute JML Workflow
+  // Handler: Execute JML (Joiner/Mover/Leaver) Lifecycle
   const handleExecuteJML = (type: 'JOINER' | 'LEAVER', employeeName: string) => {
+    if (!employeeName.trim()) {
+      showToast('Please specify the employee name to trigger JML lifecycle.');
+      return;
+    }
     if (type === 'JOINER') {
-      const availLaptop = assets.find(a => a.category === 'Laptop' && a.status === 'AVAILABLE_IN_STOCK');
-      if (availLaptop) {
-        setAssets(prev => prev.map(a => a.id === availLaptop.id ? { ...a, status: 'IN_USE', assignedUser: employeeName } : a));
-      }
-
-      const newEvt: AutonomousEvent = {
-        id: `evt-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString(),
-        eventType: 'JMLJoinerOnboardingExecuted',
-        agent: 'Telegram Orchestrator',
-        summary: `Autonomous IT onboarding pipeline completed for ${employeeName}.`,
-        autonomousActionTaken: `Allocated ${availLaptop?.assetTag || 'spare laptop'}, generated Entra ID credentials, and provisioned M365 E5 license.`,
-        humanApprovalRequired: false,
-        approvalStatus: 'AUTO_APPROVED',
-        confidenceScore: 0.99
-      };
-      setEvents(prev => [newEvt, ...prev]);
-      alert(`✅ Joiner Workflow Complete: Allocated ${availLaptop?.name || 'ThinkPad T14'} to ${employeeName}, provisioned SSO & M365.`);
+      showToast(`JML Joiner initialized: Provisioning profile recorded for ${employeeName}.`);
     } else {
-      const assignedAsset = assets.find(a => a.assignedUser.toLowerCase().includes(employeeName.toLowerCase()));
-      if (assignedAsset) {
-        setAssets(prev => prev.map(a => a.id === assignedAsset.id ? { ...a, status: 'AVAILABLE_IN_STOCK', assignedUser: 'Unassigned (Returned)' } : a));
+      showToast(`JML Leaver initialized: Revocation & asset recovery recorded for ${employeeName}.`);
+    }
+  };
+  const handleUpdateAssetStatus = async (assetId: string, status: AssetItem['status']) => {
+    try {
+      const res = await fetch(`/api/assets/${assetId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setAssets(prev => prev.map(a => a.id === assetId ? data.data : a));
+        showToast(`Asset status updated to ${status}.`);
       }
+    } catch (err) {
+      console.error('Update asset failed:', err);
+    }
+  };
 
-      const newEvt: AutonomousEvent = {
-        id: `evt-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString(),
-        eventType: 'JMLLeaverOffboardingExecuted',
-        agent: 'Telegram Orchestrator',
-        summary: `De-provisioned IT access and recovered hardware asset for leaver ${employeeName}.`,
-        autonomousActionTaken: 'Revoked Entra ID tokens, reclaimed M365 seat, and triggered courier asset recovery box.',
-        humanApprovalRequired: false,
-        approvalStatus: 'AUTO_APPROVED',
-        confidenceScore: 0.99
-      };
-      setEvents(prev => [newEvt, ...prev]);
-      alert(`🔒 Leaver Workflow Complete: Revoked credentials for ${employeeName}, reclaimed software licenses, and queued laptop return.`);
+  // Handler: Add Endpoint
+  const handleAddEndpoint = async (newEp: EndpointHealth) => {
+    try {
+      const res = await fetch('/api/endpoints', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newEp)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setEndpoints(prev => [data.data, ...prev]);
+        showToast(`Endpoint ${data.data.deviceName} enrolled.`);
+      }
+    } catch (err) {
+      console.error('Add endpoint failed:', err);
+    }
+  };
+
+  // Handler: Add Asset
+  const handleAddAsset = async (asset: AssetItem) => {
+    try {
+      const res = await fetch('/api/assets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(asset)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setAssets(prev => [data.data, ...prev]);
+        showToast(`Asset ${data.data.assetTag} registered.`);
+      }
+    } catch (err) {
+      console.error('Add asset failed:', err);
+    }
+  };
+
+  // Handler: Add AMC
+  const handleAddAMC = async (amc: AMCContract) => {
+    try {
+      const res = await fetch('/api/amcs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(amc)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setAMCs(prev => [data.data, ...prev]);
+        showToast(`AMC Contract ${data.data.contractNumber} registered.`);
+      }
+    } catch (err) {
+      console.error('Add AMC failed:', err);
+    }
+  };
+
+  // Handler: Add Proposal
+  const handleAddProposal = async (prop: Proposal) => {
+    try {
+      const res = await fetch('/api/proposals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(prop)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setProposals(prev => [data.data, ...prev]);
+        showToast(`Proposal from ${data.data.providerName} received.`);
+      }
+    } catch (err) {
+      console.error('Add proposal failed:', err);
+    }
+  };
+
+  // Handler: Add Product
+  const handleAddProduct = async (prod: ProductItem) => {
+    try {
+      const res = await fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(prod)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setProducts(prev => [data.data, ...prev]);
+        showToast(`Product ${data.data.name} added to catalog.`);
+      }
+    } catch (err) {
+      console.error('Add product failed:', err);
+    }
+  };
+
+  // Handler: Create RFQ
+  const handleCreateRFQ = async (rfq: RFQItem) => {
+    try {
+      const res = await fetch('/api/rfqs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rfq)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setRfqs(prev => [data.data, ...prev]);
+        showToast(`RFQ for ${data.data.productName} created.`);
+      }
+    } catch (err) {
+      console.error('Create RFQ failed:', err);
     }
   };
 
   // Handler: Toggle Workflow Rule
-  const handleToggleWorkflow = (id: string) => {
-    setWorkflows(prev => prev.map(w => w.id === id ? { ...w, active: !w.active } : w));
+  const handleToggleWorkflow = async (id: string) => {
+    try {
+      const res = await fetch(`/api/workflows/${id}/toggle`, {
+        method: 'PATCH'
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setWorkflows(prev => prev.map(w => w.id === id ? data.data : w));
+        showToast(`Workflow rule ${data.data.active ? 'activated' : 'paused'}.`);
+      }
+    } catch (err) {
+      console.error('Toggle workflow failed:', err);
+    }
   };
 
-  // Handler: Add Endpoint
-  const handleAddEndpoint = (newEp: EndpointHealth) => {
-    setEndpoints(prev => [newEp, ...prev]);
-
-    fetch('/api/endpoints', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newEp)
-    }).catch(err => console.warn('Sync endpoint failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'RMMAgentEnrolled',
-      agent: 'SLA Monitor',
-      summary: `Enrolled device ${newEp.deviceName} (${newEp.os}) under continuous telemetry.`,
-      autonomousActionTaken: 'Hardware sensor polling loop initiated (CPU, RAM, NVMe SMART, Battery).',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.99
-    };
-    setEvents(prev => [newEvt, ...prev]);
-  };
-
-  // Handler: Add Asset
-  const handleAddAsset = (asset: AssetItem) => {
-    setAssets(prev => [asset, ...prev]);
-
-    fetch('/api/assets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(asset)
-    }).catch(err => console.warn('Sync asset failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'AssetRegisteredInCMDB',
-      agent: 'Telegram Orchestrator',
-      summary: `Registered new asset ${asset.assetTag} (${asset.name}) in CMDB.`,
-      autonomousActionTaken: 'Generated unique asset QR tracking tag and scheduled warranty notification.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
-    };
-    setEvents(prev => [newEvt, ...prev]);
-  };
-
-  // Handler: Add AMC
-  const handleAddAMC = (amc: AMCContract) => {
-    setAMCs(prev => [amc, ...prev]);
-
-    fetch('/api/amcs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(amc)
-    }).catch(err => console.warn('Sync AMC failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'AMCContractRegistered',
-      agent: 'Telegram Orchestrator',
-      summary: `Registered ${amc.type} AMC contract ${amc.contractNumber} for ${amc.clientName}.`,
-      autonomousActionTaken: `Scheduled quarterly PM inspection and initialized ${amc.slaResponseHours}-hour response SLA guard.`,
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.99
-    };
-    setEvents(prev => [newEvt, ...prev]);
-  };
-
-  // Handler: Add Proposal
-  const handleAddProposal = (prop: Proposal) => {
-    setProposals(prev => [prop, ...prev]);
-
-    fetch('/api/proposals', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(prop)
-    }).catch(err => console.warn('Sync proposal failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'RFPProposalReceived',
-      agent: 'Procurement Agent',
-      summary: `Received commercial RFP proposal from ${prop.providerName} for ₹${prop.commercialBid.toLocaleString('en-IN')}.`,
-      autonomousActionTaken: 'Ran automated AI matching matrix evaluation and verified vendor certifications.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.95
-    };
-    setEvents(prev => [newEvt, ...prev]);
-  };
-
-  // Handler: Add Product
-  const handleAddProduct = (prod: ProductItem) => {
-    setProducts(prev => [prod, ...prev]);
-
-    fetch('/api/products', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(prod)
-    }).catch(err => console.warn('Sync product failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'ProductCreatedInCatalog',
-      agent: 'Procurement Agent',
-      summary: `Created SKU ${prod.sku} (${prod.name}) in master catalog.`,
-      autonomousActionTaken: 'Synchronized safety stock thresholds and pricing tier in distributor index.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
-    };
-    setEvents(prev => [newEvt, ...prev]);
-  };
-
-  // Handler: Create RFQ
-  const handleCreateRFQ = (rfq: RFQItem) => {
-    setRfqs(prev => [rfq, ...prev]);
-
-    fetch('/api/rfqs', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(rfq)
-    }).catch(err => console.warn('Sync RFQ failed:', err));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'ProcurementRFQInitiated',
-      agent: 'Procurement Agent',
-      summary: `Initiated procurement RFQ for ${rfq.productName} (Qty: ${rfq.requiredQty}).`,
-      autonomousActionTaken: 'Dispatched automated quotation requests across distributor network.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.98
-    };
-    setEvents(prev => [newEvt, ...prev]);
-  };
-
-  // Handler: Execute Workflow Simulation Test
-  const handleExecuteWorkflowTest = (workflowId: string) => {
-    const wf = workflows.find(w => w.id === workflowId);
-    setWorkflows(prev => prev.map(w => w.id === workflowId ? {
-      ...w,
-      executionCount: w.executionCount + 1,
-      lastExecuted: 'Just now (Simulated)'
-    } : w));
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'WorkflowRuleExecuted',
-      agent: 'Telegram Orchestrator',
-      summary: `Rule "${wf?.name}" successfully evaluated and executed.`,
-      autonomousActionTaken: wf?.autonomousAction || 'Rule action completed.',
-      humanApprovalRequired: wf?.humanApprovalRequired || false,
-      approvalStatus: wf?.humanApprovalRequired ? 'PENDING_TELEGRAM' : 'AUTO_APPROVED',
-      confidenceScore: 0.99
-    };
-    setEvents(prev => [newEvt, ...prev]);
+  // Handler: Execute Workflow
+  const handleExecuteWorkflowTest = async (workflowId: string) => {
+    try {
+      const res = await fetch(`/api/workflows/${workflowId}/execute`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setWorkflows(prev => prev.map(w => w.id === workflowId ? data.data : w));
+        showToast(`Rule "${data.data.name}" evaluated.`);
+      }
+    } catch (err) {
+      console.error('Execute workflow failed:', err);
+    }
   };
 
   // Handler: Create Workflow
-  const handleCreateWorkflow = (wf: Partial<AutomationWorkflow>) => {
-    const newWorkflow: AutomationWorkflow = {
-      id: `wf-${Date.now()}`,
-      name: wf.name || 'Custom Rule',
-      description: wf.description || '',
-      triggerEvent: wf.triggerEvent || '',
-      condition: wf.condition || '',
-      autonomousAction: wf.autonomousAction || '',
-      humanApprovalRequired: wf.humanApprovalRequired || false,
-      active: true,
-      executionCount: 0,
-      lastExecuted: 'Never'
-    };
-    setWorkflows(prev => [newWorkflow, ...prev]);
-
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'NewAutomationWorkflowRegistered',
-      agent: 'Telegram Orchestrator',
-      summary: `Registered new automation rule: "${newWorkflow.name}".`,
-      autonomousActionTaken: 'Compiled AST rule condition into active event bus listener pipeline.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
-    };
-    setEvents(prev => [newEvt, ...prev]);
-  };
-
-  // Handler: Sync Connector
-  const handleSyncConnector = (id: string) => {
-    setConnectors(prev => prev.map(c => c.id === id ? {
-      ...c,
-      status: 'CONNECTED',
-      lastSyncTime: 'Just now'
-    } : c));
-
-    const conn = connectors.find(c => c.id === id);
-    const newEvt: AutonomousEvent = {
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'EcosystemSyncCompleted',
-      agent: 'SLA Monitor',
-      summary: `Completed bidirectional sync with ${conn?.name}.`,
-      autonomousActionTaken: `Reconciled directory records and state hashes without conflict.`,
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 0.99
-    };
-    setEvents(prev => [newEvt, ...prev]);
-  };
-
-  // Handler: Executive AI Copilot Actions
-  const handleTriggerExecutiveAction = (actionType: string) => {
-    if (actionType === 'RECLAIM_AND_RFQ' || actionType === 'RECLAIM_SEATS') {
-      const m365Lic = licenses.find(l => l.softwareName.includes('Microsoft 365'));
-      if (m365Lic) {
-        handleReclaimLicenses(m365Lic.id);
+  const handleCreateWorkflow = async (wf: Partial<AutomationWorkflow>) => {
+    try {
+      const res = await fetch('/api/workflows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(wf)
+      });
+      const data = await res.json();
+      if (data.success && data.data) {
+        setWorkflows(prev => [data.data, ...prev]);
+        showToast(`Workflow "${data.data.name}" created.`);
       }
+    } catch (err) {
+      console.error('Create workflow failed:', err);
+    }
+  };
+
+  // Executive AI Copilot Quick Actions
+  const handleTriggerExecutiveAction = (actionType: string) => {
+    if (actionType === 'CREATE_PROJECT') {
+      setActiveTab('projects');
+    } else if (actionType === 'RECLAIM_AND_RFQ') {
       setActiveTab('assets');
-    } else if (actionType === 'EXPORT_SLA') {
-      const newEvt: AutonomousEvent = {
-        id: `evt-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString(),
-        eventType: 'ExecutiveSLAReportExported',
-        agent: 'SLA Monitor',
-        summary: 'Generated cryptographically signed Mumbai SLA & MTTR Compliance Audit PDF.',
-        autonomousActionTaken: 'Compiled MTTR, FCR, and technician latency analytics into export package.',
-        humanApprovalRequired: false,
-        approvalStatus: 'AUTO_APPROVED',
-        confidenceScore: 0.99
-      };
-      setEvents(prev => [newEvt, ...prev]);
-      alert("✅ Regional SLA Audit Report generated and queued to company archive.");
     } else if (actionType === 'VIEW_RMM') {
       setActiveTab('itsm');
     }
@@ -1135,8 +811,7 @@ export default function App() {
         pendingApprovalsCount={pendingApprovalsCount}
         onOpenTelegram={() => setActiveTab('telegram')}
         activeTab={activeTab}
-        isCleanSlate={isCleanSlate}
-        onOpenResetModal={() => setShowResetModal(true)}
+        onOpenResetModal={() => setShowSettingsModal(true)}
       />
 
       {/* Main Module Tabs */}
@@ -1153,12 +828,14 @@ export default function App() {
             tenant={tenant}
             onNavigateTab={(t) => setActiveTab(t)}
             onTriggerQuickAction={handleTriggerExecutiveAction}
-            isCleanSlate={isCleanSlate}
             tickets={tickets}
             assets={assets}
             amcs={amcs}
             quotes={quotes}
             products={products}
+            invoices={invoices}
+            suppliers={suppliers}
+            rfqs={rfqs}
           />
         )}
 
@@ -1170,7 +847,7 @@ export default function App() {
             onRejectQuote={handleRejectQuote}
             quotations={quotes}
             isThinking={isThinking}
-            isCleanSlate={isCleanSlate}
+            isTelegramConfigured={isTelegramConfigured}
           />
         )}
 
@@ -1179,7 +856,6 @@ export default function App() {
             products={products}
             onGenerateQuote={handleGenerateQuote}
             onRequestTelegramApproval={handleGenerateQuote as any}
-            isCleanSlate={isCleanSlate}
           />
         )}
 
@@ -1191,7 +867,6 @@ export default function App() {
             onDispatchPO={handleDispatchPO}
             onAddProduct={handleAddProduct}
             onCreateRFQ={handleCreateRFQ}
-            isCleanSlate={isCleanSlate}
           />
         )}
 
@@ -1204,7 +879,6 @@ export default function App() {
             onRemoteFix={handleRemoteFix}
             onCreateTicket={handleCreateTicket}
             onAddEndpoint={handleAddEndpoint}
-            isCleanSlate={isCleanSlate}
           />
         )}
 
@@ -1218,7 +892,6 @@ export default function App() {
             onCreateProject={handleCreateProject}
             onRequestDiagnosticBooking={handleRequestDiagnosticBooking}
             onAddProposal={handleAddProposal}
-            isCleanSlate={isCleanSlate}
           />
         )}
 
@@ -1229,7 +902,6 @@ export default function App() {
             onConsumePart={handleConsumePart}
             onSignOffJob={handleSignOffJob}
             onCreateJob={handleCreateJob}
-            isCleanSlate={isCleanSlate}
           />
         )}
 
@@ -1243,7 +915,6 @@ export default function App() {
             onExecuteJML={handleExecuteJML}
             onAddAsset={handleAddAsset}
             onAddAMC={handleAddAMC}
-            isCleanSlate={isCleanSlate}
           />
         )}
 
@@ -1251,7 +922,6 @@ export default function App() {
           <FinanceGST
             tenant={tenant}
             quotes={quotes}
-            isCleanSlate={isCleanSlate}
             invoices={invoices}
             onAddInvoice={handleAddInvoice}
             onSettleInvoice={handleSettleInvoice}
@@ -1264,22 +934,18 @@ export default function App() {
             onToggleWorkflow={handleToggleWorkflow}
             onExecuteWorkflowTest={handleExecuteWorkflowTest}
             onCreateWorkflow={handleCreateWorkflow}
-            isCleanSlate={isCleanSlate}
           />
         )}
 
         {activeTab === 'integrations' && (
           <IntegrationsHub
             connectors={connectors}
-            onSyncConnector={handleSyncConnector}
           />
         )}
 
         {activeTab === 'events' && (
           <EventBusAudit
             events={events}
-            onSimulateEvent={handleSimulateEvent}
-            isCleanSlate={isCleanSlate}
           />
         )}
       </main>
@@ -1288,31 +954,31 @@ export default function App() {
       <footer className="bg-slate-900/90 border-t border-slate-800 text-xs text-slate-500 py-4 px-6 text-center">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <div>
-            <span className="font-semibold text-slate-400">Apex Autonomous IT OS</span> • Multi-Tenant Enterprise Architecture • GSTIN: {tenant.gstin}
+            <span className="font-semibold text-slate-400">Apex Autonomous IT OS</span> • Multi-Tenant Enterprise Architecture • GSTIN: {tenant.gstin || 'Not Configured'}
           </div>
           <div className="flex items-center gap-3">
-            <span>Server Gemini 3.8 Flash Active</span>
+            <span>Verified Server Persistence Active</span>
             <span>•</span>
-            <span className="text-emerald-400 font-mono">90% Autonomous / 10% Exception Policy</span>
+            <span className="text-emerald-400 font-mono">Authentic Real-Data Engine</span>
           </div>
         </div>
       </footer>
 
-      {/* Reset & Workspace State Modal */}
+      {/* Organization Setup Modal */}
       <ResetModal
-        isOpen={showResetModal}
-        onClose={() => setShowResetModal(false)}
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        tenant={tenant}
+        onUpdateTenant={handleUpdateTenant}
         onResetCleanSlate={handleResetCleanSlate}
-        onResetDemoSuite={handleResetDemoSuite}
-        isCleanSlate={isCleanSlate}
         stats={workspaceStats}
       />
 
       {/* Toast Notification Banner */}
-      {resetToast && (
+      {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 p-4 rounded-xl bg-slate-900 border border-emerald-500/60 text-emerald-300 shadow-2xl flex items-center gap-3 animate-fadeIn text-xs font-semibold">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
-          <span>{resetToast}</span>
+          <span>{toastMessage}</span>
         </div>
       )}
 

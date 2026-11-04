@@ -3,15 +3,9 @@ import {
   Send, 
   Bot, 
   ShieldCheck, 
-  AlertTriangle, 
   CheckCircle, 
   XCircle, 
-  HelpCircle, 
-  Sparkles, 
-  CornerDownLeft,
-  ArrowRight,
-  TrendingUp,
-  RefreshCw
+  AlertTriangle
 } from 'lucide-react';
 import { TelegramMessage, Quotation } from '../types';
 
@@ -22,7 +16,7 @@ interface TelegramHubProps {
   onRejectQuote: (quoteId: string, reason: string) => void;
   quotations: Quotation[];
   isThinking: boolean;
-  isCleanSlate?: boolean;
+  isTelegramConfigured?: boolean;
 }
 
 export const TelegramHub: React.FC<TelegramHubProps> = ({
@@ -32,7 +26,7 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
   onRejectQuote,
   quotations,
   isThinking,
-  isCleanSlate = false
+  isTelegramConfigured = false
 }) => {
   const [inputText, setInputText] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -56,10 +50,7 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
   const quickCommands = [
     { label: '/dashboard', cmd: '/dashboard' },
     { label: '/pending', cmd: '/pending' },
-    { label: '/stock', cmd: '/stock' },
-    { label: 'Aaj kitna profit hua?', cmd: 'Aaj kitna profit hua?' },
-    { label: 'Show dead stock', cmd: 'Kaunsa stock dead ho raha hai?' },
-    { label: 'High-value quotes', cmd: '₹10 lakh se upar ke opportunities dikhao' }
+    { label: '/stock', cmd: '/stock' }
   ];
 
   return (
@@ -74,12 +65,18 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 Telegram Owner Command & Approval Hub
-                <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800">
-                  LIVE SECURE BOT
+                <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full border ${
+                  isTelegramConfigured 
+                    ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                    : 'bg-amber-950 text-amber-300 border-amber-800'
+                }`}>
+                  {isTelegramConfigured ? 'LIVE BOT CONNECTED' : 'NOT CONFIGURED'}
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
-                Connected Bot: <span className="font-mono text-sky-300">@ApexAutonomousBot</span> • Authorized Chat ID: <span className="font-mono text-slate-300">#TLG-OWNER-7891</span>
+                {isTelegramConfigured 
+                  ? 'Real-time webhook active. Authorizes quotation exceptions and pushes notifications.'
+                  : 'Telegram bot integration is not configured. Add TELEGRAM_BOT_TOKEN to .env for external mobile webhook sync.'}
               </p>
             </div>
           </div>
@@ -87,10 +84,10 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
 
         <div className="flex items-center gap-2 text-xs bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-700">
           <ShieldCheck className="w-4 h-4 text-emerald-400" />
-          <span className="text-slate-300">Autonomous Principle:</span>
-          <span className="font-semibold text-emerald-400">90% Auto-Executed</span>
+          <span className="text-slate-300">Policy:</span>
+          <span className="font-semibold text-emerald-400">Policy Guard Active</span>
           <span className="text-slate-600">|</span>
-          <span className="font-semibold text-amber-400">10% Exception Approvals</span>
+          <span className="font-semibold text-amber-400">Owner Authorization Required</span>
         </div>
       </div>
 
@@ -103,20 +100,22 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
               <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-sky-500 to-blue-600 flex items-center justify-center font-bold text-white shadow">
                 APX
               </div>
-              <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#242f3d]"></span>
+              <span className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#242f3d] ${isTelegramConfigured ? 'bg-emerald-500' : 'bg-slate-500'}`}></span>
             </div>
             <div>
               <h3 className="font-semibold text-sm text-white flex items-center gap-1.5">
                 Apex Autonomous OS Bot
                 <span className="text-[10px] bg-sky-500/20 text-sky-300 px-1.5 py-0.2 rounded font-normal">bot</span>
               </h3>
-              <p className="text-[11px] text-emerald-400">online • operational governance active</p>
+              <p className="text-[11px] text-slate-400">
+                {isTelegramConfigured ? 'online • live webhook listening' : 'local console interface • external bot unconfigured'}
+              </p>
             </div>
           </div>
 
           <div className="text-xs text-slate-400 flex items-center gap-2">
-            <span className="hidden sm:inline">Encrypted Callback Webhook</span>
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>Webhook Status: {isTelegramConfigured ? 'Encrypted' : 'Standby'}</span>
+            <span className={`w-2 h-2 rounded-full ${isTelegramConfigured ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></span>
           </div>
         </div>
 
@@ -128,17 +127,17 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
                 <Bot className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="text-sm font-bold text-white">Telegram Governance Bot Active</h4>
+                <h4 className="text-sm font-bold text-white">No Telegram Messages Yet</h4>
                 <p className="text-xs text-slate-400 max-w-sm mt-1">
-                  Ready to receive margin breach escalations, autonomous dispatch approvals, or query operational metrics directly via chat.
+                  When margin exceptions occur or when you send executive commands below, message records will appear here in real-time.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 justify-center max-w-md pt-2">
-                {["What is our cash flow projection?", "Check critical ITSM tickets", "Simulate margin exception"].map((suggestion, idx) => (
+                {["/dashboard", "/pending", "/stock"].map((suggestion, idx) => (
                   <button
                     key={idx}
                     onClick={() => onSendMessage(suggestion)}
-                    className="text-[11px] px-2.5 py-1 rounded-full bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-500/20 cursor-pointer transition"
+                    className="px-3 py-1 rounded-lg bg-[#242f3d] hover:bg-[#2b394a] text-sky-300 border border-sky-800/40 text-xs transition cursor-pointer"
                   >
                     {suggestion}
                   </button>
@@ -147,170 +146,97 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
             </div>
           ) : (
             messages.map((msg) => {
-            const isOwner = msg.sender === 'owner';
-            return (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${isOwner ? 'items-end' : 'items-start'}`}
-              >
+              const isOwner = msg.sender === 'owner';
+              return (
                 <div
-                  className={`max-w-[85%] sm:max-w-[75%] rounded-2xl px-4 py-3 text-sm shadow-md whitespace-pre-line leading-relaxed ${
-                    isOwner
-                      ? 'bg-[#2b5278] text-white rounded-br-xs'
-                      : 'bg-[#182533] text-slate-200 border border-[#2b394a] rounded-bl-xs'
-                  }`}
+                  key={msg.id}
+                  className={`flex flex-col ${isOwner ? 'items-end' : 'items-start'} space-y-1.5`}
                 >
-                  {/* Sender title if bot */}
-                  {!isOwner && (
-                    <div className="flex items-center gap-1.5 text-xs text-sky-400 font-semibold mb-1 pb-1 border-b border-slate-700/50">
-                      <Bot className="w-3.5 h-3.5" />
-                      <span>Apex Autonomous Bot</span>
-                    </div>
-                  )}
+                  <div
+                    className={`max-w-[85%] sm:max-w-[70%] rounded-2xl px-4 py-3 shadow-md text-xs leading-relaxed ${
+                      isOwner
+                        ? 'bg-[#2b5278] text-white rounded-br-none'
+                        : 'bg-[#182533] text-slate-200 border border-slate-800/60 rounded-bl-none'
+                    }`}
+                  >
+                    <div className="whitespace-pre-wrap">{msg.text}</div>
 
-                  {/* Body text */}
-                  <div>{msg.text}</div>
-
-                  {/* Interactive Approval Card inside Telegram message */}
-                  {msg.approvalData && (
-                    <div className="mt-3 p-3 rounded-xl bg-slate-900/90 border border-amber-500/30 text-xs">
-                      <div className="flex items-center justify-between font-semibold text-amber-300 pb-2 border-b border-slate-800">
-                        <span className="flex items-center gap-1.5">
-                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
-                          MARGIN EXCEPTION AUTHORIZATION
-                        </span>
-                        <span className="font-mono text-slate-400">Ref: {msg.approvalData.referenceId}</span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 my-2 text-slate-300">
-                        <div>
-                          <span className="text-slate-500 block text-[10px]">TOTAL AMOUNT</span>
-                          <span className="font-bold text-white">₹{msg.approvalData.amount.toLocaleString('en-IN')}</span>
+                    {/* Interactive Approval Card if message is an exception alert */}
+                    {msg.approvalData && msg.approvalData.status === 'PENDING' && (
+                      <div className="mt-3 pt-3 border-t border-slate-700/60 space-y-2">
+                        <div className="flex justify-between items-center text-[11px] font-mono">
+                          <span className="text-amber-400 font-bold uppercase">Pending Decision</span>
+                          <span className="text-white font-bold">₹{msg.approvalData.amount?.toLocaleString('en-IN')}</span>
                         </div>
-                        <div>
-                          <span className="text-slate-500 block text-[10px]">GROSS MARGIN</span>
-                          <span className="font-bold text-amber-400">{msg.approvalData.margin}% (Floor: 12%)</span>
-                        </div>
-                      </div>
-
-                      <p className="text-[11px] text-slate-400 italic mb-3">
-                        Reason: {msg.approvalData.details}
-                      </p>
-
-                      {/* Status or Action Buttons */}
-                      {msg.approvalData.status === 'PENDING' ? (
-                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <div className="flex gap-2">
                           <button
                             onClick={() => onApproveQuote(msg.approvalData!.referenceId)}
-                            className="flex-1 flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 px-3 rounded-lg transition-all cursor-pointer text-xs active:scale-95 shadow"
+                            className="flex-1 py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow"
                           >
                             <CheckCircle className="w-3.5 h-3.5" />
-                            APPROVE (1-TAP)
+                            Approve Exception
                           </button>
                           <button
-                            onClick={() => onRejectQuote(msg.approvalData!.referenceId, 'Margin below required threshold')}
-                            className="flex-1 flex items-center justify-center gap-1.5 bg-rose-600/30 hover:bg-rose-600/50 text-rose-300 border border-rose-500/40 font-semibold py-2 px-3 rounded-lg transition-all cursor-pointer text-xs"
+                            onClick={() => onRejectQuote(msg.approvalData!.referenceId, 'Margin below threshold')}
+                            className="flex-1 py-1.5 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer shadow"
                           >
                             <XCircle className="w-3.5 h-3.5" />
-                            REJECT
-                          </button>
-                          <button
-                            onClick={() => onSendMessage(`What is the historical win rate for Nexus FinTech if we offer 9.8% margin?`)}
-                            className="flex items-center justify-center gap-1 bg-slate-800 hover:bg-slate-700 text-sky-400 border border-slate-700 py-2 px-2.5 rounded-lg text-xs"
-                            title="Ask AI Intelligence recommendation"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            ASK AI
+                            Reject
                           </button>
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-2 py-1.5 px-2.5 rounded bg-emerald-950/60 border border-emerald-800 text-emerald-300 font-semibold">
-                          <CheckCircle className="w-4 h-4" />
-                          <span>Authorized by Business Owner & Executed</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
+                      </div>
+                    )}
 
-                  {/* Timestamp & Delivery status */}
-                  <div className="flex items-center justify-end gap-1 mt-1 text-[10px] text-slate-400">
-                    <span>{msg.timestamp}</span>
-                    {isOwner && <span className="text-sky-400 font-bold">✓✓</span>}
+                    <div className={`text-[10px] text-right mt-1.5 ${isOwner ? 'text-sky-200/70' : 'text-slate-500'}`}>
+                      {msg.timestamp}
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })
-        )}
+              );
+            })
+          )}
 
           {isThinking && (
-            <div className="flex items-start">
-              <div className="bg-[#182533] text-slate-300 border border-[#2b394a] rounded-2xl rounded-bl-xs px-4 py-3 text-xs flex items-center gap-2 shadow">
-                <RefreshCw className="w-3.5 h-3.5 text-sky-400 animate-spin" />
-                <span>Apex Autonomous Agent is evaluating business rules...</span>
-              </div>
+            <div className="flex items-center gap-2 text-xs text-sky-400 p-2 font-mono">
+              <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping"></span>
+              Evaluating command against live database...
             </div>
           )}
 
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Quick Command Pills */}
-        <div className="bg-[#17212b] px-3 py-2 border-t border-[#242f3d] flex items-center gap-1.5 overflow-x-auto scrollbar-none">
-          <span className="text-[10px] font-mono text-slate-500 uppercase shrink-0">Suggestions:</span>
-          {quickCommands.map((q) => (
+        {/* Input Bar */}
+        <div className="p-3 bg-[#17212b] border-t border-[#1f2936]">
+          {/* Quick Command Chips */}
+          <div className="flex gap-2 mb-2 overflow-x-auto pb-1 scrollbar-none">
+            {quickCommands.map((qc, i) => (
+              <button
+                key={i}
+                onClick={() => onSendMessage(qc.cmd)}
+                className="px-2.5 py-1 rounded-lg bg-[#242f3d] hover:bg-[#2e3b4d] text-slate-300 text-xs font-mono transition cursor-pointer whitespace-nowrap"
+              >
+                {qc.label}
+              </button>
+            ))}
+          </div>
+
+          <form onSubmit={handleSubmit} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="Type an owner command (e.g. /dashboard, /pending, /stock)..."
+              className="flex-1 bg-[#242f3d] border border-slate-700 text-white rounded-xl px-4 py-2.5 text-xs placeholder-slate-500 focus:outline-none focus:border-sky-500"
+            />
             <button
-              key={q.cmd}
-              onClick={() => onSendMessage(q.cmd)}
-              className="px-2.5 py-1 rounded-full bg-[#242f3d] hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-mono whitespace-nowrap transition cursor-pointer border border-slate-700/50"
+              type="submit"
+              disabled={isThinking || !inputText.trim()}
+              className="p-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white transition cursor-pointer shadow flex items-center justify-center"
             >
-              {q.label}
+              <Send className="w-4 h-4" />
             </button>
-          ))}
-        </div>
-
-        {/* Telegram Chat Input Form */}
-        <form onSubmit={handleSubmit} className="bg-[#242f3d] p-3 border-t border-[#1f2936] flex items-center gap-2">
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="Type Telegram command (/dashboard, /pending) or question in English / Hindi..."
-            className="flex-1 bg-[#17212b] border border-slate-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition"
-            disabled={isThinking}
-          />
-          <button
-            type="submit"
-            disabled={!inputText.trim() || isThinking}
-            className="w-10 h-10 rounded-xl bg-sky-500 hover:bg-sky-400 disabled:opacity-40 text-white flex items-center justify-center transition cursor-pointer shadow active:scale-95"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
-      </div>
-
-      {/* Telegram Feature Legend */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-xs text-slate-400">
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 flex items-start gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 mt-1"></div>
-          <div>
-            <span className="text-slate-200 font-semibold block">Natural Language Commands</span>
-            Ask queries in English or Hindi (e.g., "Aaj kitna profit hua?", "Low stock alert").
-          </div>
-        </div>
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 flex items-start gap-2">
-          <div className="w-2 h-2 rounded-full bg-amber-400 mt-1"></div>
-          <div>
-            <span className="text-slate-200 font-semibold block">1-Tap Decision Engine</span>
-            Authorize margin concessions, high-value purchase orders, and credit exceptions.
-          </div>
-        </div>
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3 flex items-start gap-2">
-          <div className="w-2 h-2 rounded-full bg-sky-400 mt-1"></div>
-          <div>
-            <span className="text-slate-200 font-semibold block">Immutable Audit Log</span>
-            Every approval creates a signed audit event with rule evaluation and timestamp.
-          </div>
+          </form>
         </div>
       </div>
     </div>

@@ -25,7 +25,6 @@ import {
   X
 } from 'lucide-react';
 import { AssetItem, SoftwareLicense, AMCContract, RMAClaim } from '../types';
-import { initialRMAClaims } from '../data/mockData';
 
 interface AssetAMCManagerProps {
   assets: AssetItem[];
@@ -47,19 +46,18 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
   onUpdateAssetStatus,
   onExecuteJML,
   onAddAsset,
-  onAddAMC,
-  isCleanSlate = false
+  onAddAMC
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'ASSETS' | 'LICENSES' | 'AMC' | 'JML' | 'RMA'>('ASSETS');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
-  // RMA State
-  const [rmaClaims, setRmaClaims] = useState<RMAClaim[]>(isCleanSlate ? [] : initialRMAClaims);
+  // RMA State - starts empty
+  const [rmaClaims, setRmaClaims] = useState<RMAClaim[]>([]);
   const [showNewRmaModal, setShowNewRmaModal] = useState(false);
-  const [newRmaAssetTag, setNewRmaAssetTag] = useState(assets[0]?.assetTag || 'AST-104');
+  const [newRmaAssetTag, setNewRmaAssetTag] = useState(assets[0]?.assetTag || '');
   const [newRmaSymptom, setNewRmaSymptom] = useState('');
-  const [newRmaCourier, setNewRmaCourier] = useState('BlueDart Apex Priority');
+  const [newRmaCourier, setNewRmaCourier] = useState('');
   const [copiedTracking, setCopiedTracking] = useState<string | null>(null);
 
   // Asset Registration Modal State
@@ -68,20 +66,20 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
   const [newAssetTag, setNewAssetTag] = useState('');
   const [newAssetSerial, setNewAssetSerial] = useState('');
   const [newAssetCategory, setNewAssetCategory] = useState<AssetItem['category']>('Laptop');
-  const [newAssetBrand, setNewAssetBrand] = useState('Lenovo');
+  const [newAssetBrand, setNewAssetBrand] = useState('');
   const [newAssetModel, setNewAssetModel] = useState('');
-  const [newAssetUser, setNewAssetUser] = useState('Unassigned (Stock Pool)');
-  const [newAssetDept, setNewAssetDept] = useState('IT / Operations');
-  const [newAssetLocation, setNewAssetLocation] = useState('Mumbai HQ');
-  const [newAssetCost, setNewAssetCost] = useState('75000');
-  const [newAssetWarranty, setNewAssetWarranty] = useState('2027-03-31');
+  const [newAssetUser, setNewAssetUser] = useState('');
+  const [newAssetDept, setNewAssetDept] = useState('IT Operations');
+  const [newAssetLocation, setNewAssetLocation] = useState('');
+  const [newAssetCost, setNewAssetCost] = useState('');
+  const [newAssetWarranty, setNewAssetWarranty] = useState('');
 
   // AMC Modal State
   const [showAddAmcModal, setShowAddAmcModal] = useState(false);
   const [newAmcClient, setNewAmcClient] = useState('');
-  const [newAmcType, setNewAmcType] = useState<AMCContract['type']>('Comprehensive');
-  const [newAmcDeviceCount, setNewAmcDeviceCount] = useState('25');
-  const [newAmcAnnualValue, setNewAmcAnnualValue] = useState('250000');
+  const [newAmcType, setNewAmcType] = useState<AMCContract['type']>('COMPREHENSIVE');
+  const [newAmcDeviceCount, setNewAmcDeviceCount] = useState('1');
+  const [newAmcAnnualValue, setNewAmcAnnualValue] = useState('');
   const [newAmcSlaHours, setNewAmcSlaHours] = useState('4');
 
   const handleAddAmcSubmit = (e: React.FormEvent) => {
@@ -90,16 +88,16 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
     const newAmc: AMCContract = {
       id: `amc-${Date.now()}`,
-      contractNumber: `AMC-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+      contractNumber: `AMC-${Date.now().toString().slice(-6)}`,
       clientName: newAmcClient.trim(),
       type: newAmcType,
       startDate: new Date().toISOString().split('T')[0],
-      endDate: '2027-03-31',
-      deviceCount: parseInt(newAmcDeviceCount, 10) || 10,
-      annualValue: parseInt(newAmcAnnualValue, 10) || 100000,
+      endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      deviceCount: parseInt(newAmcDeviceCount, 10) || 1,
+      annualValue: parseInt(newAmcAnnualValue, 10) || 0,
       slaResponseHours: parseInt(newAmcSlaHours, 10) || 4,
       status: 'ACTIVE',
-      nextPMDate: '2026-10-15'
+      nextPMDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
     };
 
     if (onAddAMC) {
@@ -108,14 +106,6 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
     setShowAddAmcModal(false);
     setNewAmcClient('');
   };
-
-  useEffect(() => {
-    if (isCleanSlate) {
-      setRmaClaims([]);
-    } else {
-      setRmaClaims(initialRMAClaims);
-    }
-  }, [isCleanSlate]);
 
   const handleAddAssetSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,8 +139,9 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
   };
 
   // JML Modal / Form
-  const [jmlEmployeeName, setJmlEmployeeName] = useState('Rohan Deshmukh');
-  const [jmlRole, setJmlRole] = useState('Senior DevOps Engineer');
+  const [noticeBanner, setNoticeBanner] = useState<string | null>(null);
+  const [jmlEmployeeName, setJmlEmployeeName] = useState('');
+  const [jmlRole, setJmlRole] = useState('');
   const [jmlDept, setJmlDept] = useState('Engineering');
 
   const filteredAssets = assets.filter(a => {
@@ -239,6 +230,13 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
         </div>
       </div>
 
+      {noticeBanner && (
+        <div className="p-3 bg-emerald-950/80 border border-emerald-700 rounded-xl text-emerald-200 text-xs flex items-center justify-between shadow">
+          <span>{noticeBanner}</span>
+          <button onClick={() => setNoticeBanner(null)} className="text-emerald-400 hover:text-white font-bold ml-3 cursor-pointer">✕</button>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
@@ -250,19 +248,29 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400 uppercase font-mono">Identified SaaS Waste</span>
           <div className="text-xl font-bold text-amber-400 mt-1">₹{(totalWastedLicenseSpend / 100000).toFixed(2)} Lakhs/yr</div>
-          <div className="text-xs text-slate-400 mt-1">70 Inactive Ghost Seats</div>
+          <div className="text-xs text-slate-400 mt-1">
+            {licenses.reduce((acc, l) => acc + (l.totalPurchased - l.currentlyAssigned), 0) > 0
+              ? `${licenses.reduce((acc, l) => acc + (l.totalPurchased - l.currentlyAssigned), 0)} Inactive Ghost Seats`
+              : 'Zero Unassigned Seats'}
+          </div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400 uppercase font-mono">Active AMC Contracts</span>
           <div className="text-xl font-bold text-cyan-400 mt-1">{amcs.length} Enterprise AMCs</div>
-          <div className="text-xs text-emerald-400 mt-1">100% Preventive Maintenance SLA</div>
+          <div className="text-xs text-emerald-400 mt-1">
+            {amcs.length > 0 ? 'Preventive Maintenance Scheduled' : 'No Active AMCs'}
+          </div>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400 uppercase font-mono">Spare Pool Readiness</span>
-          <div className="text-xl font-bold text-slate-200 mt-1">100% Ready</div>
-          <div className="text-xs text-slate-400 mt-1">1-Day Rapid Laptop Swap Buffer</div>
+          <div className="text-xl font-bold text-slate-200 mt-1">
+            {assets.filter(a => a.status === 'IN_INVENTORY' || a.status === 'AVAILABLE').length} Available
+          </div>
+          <div className="text-xs text-slate-400 mt-1">
+            {assets.length > 0 ? 'Rapid Hardware Swap Buffer' : 'No Spares Enrolled'}
+          </div>
         </div>
       </div>
 
@@ -601,7 +609,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                   <div className="flex justify-between items-center pt-2 border-t border-slate-800 text-[11px] text-slate-400">
                     <span>Valid: {amc.startDate} to {amc.endDate}</span>
                     <button
-                      onClick={() => alert(`Triggered PM visit dispatch for ${amc.clientName}.`)}
+                      onClick={() => setNoticeBanner(`Preventative maintenance visit scheduled for ${amc.clientName}.`)}
                       className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-semibold cursor-pointer"
                     >
                       Schedule PM Visit
@@ -837,7 +845,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                             };
                             return { ...c, stage: nextStageMap[c.stage] };
                           }));
-                          alert(`RMA #${claim.rmaNumber} advanced to next lifecycle stage. Automated webhook sent to client.`);
+                          setNoticeBanner(`RMA #${claim.rmaNumber} advanced to next lifecycle stage.`);
                         }}
                         className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition cursor-pointer flex items-center gap-1"
                       >
@@ -926,30 +934,32 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                   <button
                     onClick={() => {
                       if (!newRmaSymptom.trim()) {
-                        alert("Please specify the diagnosed hardware symptom.");
+                        setNoticeBanner("Please specify the diagnosed hardware symptom.");
                         return;
                       }
                       const selectedAsset = assets.find(a => a.assetTag === newRmaAssetTag);
                       const newClaim: RMAClaim = {
                         id: `rma-${Date.now()}`,
-                        rmaNumber: `RMA-2026-0${rmaClaims.length + 85}`,
-                        assetTag: newRmaAssetTag,
+                        rmaNumber: `RMA-${Date.now().toString().slice(-6)}`,
+                        assetTag: newRmaAssetTag || (selectedAsset?.assetTag || 'AST-N/A'),
                         assetName: selectedAsset?.name || 'Enterprise Hardware Asset',
-                        serialNumber: selectedAsset?.serialNumber || 'SR-9921820',
-                        oemBrand: selectedAsset?.brand || 'Dell Technologies',
-                        oemCaseNumber: `OEM-TICKET-${Math.floor(100000 + Math.random() * 900000)}`,
+                        serialNumber: selectedAsset?.serialNumber || 'N/A',
+                        oemBrand: selectedAsset?.brand || 'OEM Partner',
+                        oemCaseNumber: `OEM-CASE-${Date.now().toString().slice(-6)}`,
                         faultSymptom: newRmaSymptom,
                         warrantyStatus: 'ACTIVE_WARRANTY',
-                        courierTracking: `AWB-${Math.floor(100000000 + Math.random() * 900000000)}`,
-                        courierPartner: newRmaCourier,
+                        courierTracking: `AWB-${Date.now().toString().slice(-8)}`,
+                        courierPartner: newRmaCourier || 'Express Courier Logistics',
                         stage: 'OEM_APPROVED',
                         createdAt: new Date().toISOString().split('T')[0]
                       };
                       setRmaClaims([newClaim, ...rmaClaims]);
-                      onUpdateAssetStatus(selectedAsset?.id || '', 'UNDER_REPAIR');
+                      if (selectedAsset) {
+                        onUpdateAssetStatus(selectedAsset.id, 'UNDER_REPAIR');
+                      }
                       setShowNewRmaModal(false);
                       setNewRmaSymptom('');
-                      alert(`RMA Claim ${newClaim.rmaNumber} initiated! Pickup scheduled with ${newRmaCourier}. Asset status set to UNDER_REPAIR in CMDB.`);
+                      setNoticeBanner(`RMA Claim ${newClaim.rmaNumber} initiated! Pickup scheduled with ${newClaim.courierPartner}. Asset status set to UNDER_REPAIR in CMDB.`);
                     }}
                     className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs cursor-pointer shadow"
                   >

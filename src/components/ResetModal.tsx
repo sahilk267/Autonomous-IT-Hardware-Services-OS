@@ -1,23 +1,22 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
-  RefreshCw, 
+  Building2, 
   Trash2, 
-  Sparkles, 
   CheckCircle2, 
   AlertTriangle, 
   Database, 
   X,
-  Layers,
-  ArrowRight,
-  ShieldCheck
+  ShieldCheck,
+  Save
 } from 'lucide-react';
+import { TenantInfo } from '../types';
 
 interface ResetModalProps {
   isOpen: boolean;
   onClose: () => void;
+  tenant: TenantInfo;
+  onUpdateTenant: (updates: Partial<TenantInfo>) => void;
   onResetCleanSlate: () => void;
-  onResetDemoSuite: () => void;
-  isCleanSlate: boolean;
   stats: {
     quotesCount: number;
     projectsCount: number;
@@ -31,12 +30,35 @@ interface ResetModalProps {
 export const ResetModal: React.FC<ResetModalProps> = ({
   isOpen,
   onClose,
+  tenant,
+  onUpdateTenant,
   onResetCleanSlate,
-  onResetDemoSuite,
-  isCleanSlate,
   stats
 }) => {
+  const [orgName, setOrgName] = useState(tenant.name || '');
+  const [gstin, setGstin] = useState(tenant.gstin || '');
+  const [state, setState] = useState(tenant.state || 'Maharashtra (27)');
+  const [contactEmail, setContactEmail] = useState(tenant.contactEmail || '');
+  const [contactPhone, setContactPhone] = useState(tenant.contactPhone || '');
+  const [pan, setPan] = useState(tenant.pan || '');
+  const [savedSuccess, setSavedSuccess] = useState(false);
+
   if (!isOpen) return null;
+
+  const handleSaveOrganization = (e: React.FormEvent) => {
+    e.preventDefault();
+    onUpdateTenant({
+      name: orgName.trim(),
+      gstin: gstin.trim(),
+      state: state.trim(),
+      contactEmail: contactEmail.trim(),
+      contactPhone: contactPhone.trim(),
+      pan: pan.trim(),
+      isConfigured: true
+    });
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 3000);
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
@@ -45,12 +67,12 @@ export const ResetModal: React.FC<ResetModalProps> = ({
         {/* Modal Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-950/60">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center">
-              <Database className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 flex items-center justify-center">
+              <Building2 className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-white">System Data & Workspace State Manager</h3>
-              <p className="text-xs text-slate-400">Switch between testing sample data and 100% clean production slate</p>
+              <h3 className="font-bold text-base text-white">Organization & Workspace Setup</h3>
+              <p className="text-xs text-slate-400">Configure your company identity and manage persistent database state</p>
             </div>
           </div>
           <button
@@ -61,24 +83,18 @@ export const ResetModal: React.FC<ResetModalProps> = ({
           </button>
         </div>
 
-        {/* Current State Status Banner */}
+        {/* Live Metrics Bar */}
         <div className="px-6 pt-5 pb-2">
-          <div className={`p-3.5 rounded-xl border flex items-center justify-between text-xs ${
-            isCleanSlate 
-              ? 'bg-emerald-950/40 border-emerald-800/80 text-emerald-300' 
-              : 'bg-indigo-950/40 border-indigo-800/80 text-indigo-300'
-          }`}>
+          <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-current animate-ping"></span>
-              <span className="font-semibold">Active Workspace State:</span>
-              <span className="font-mono font-bold uppercase">
-                {isCleanSlate ? 'Clean Slate (0 Mock Records)' : 'Full Demo Test Suite Active'}
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-slate-300">Live Enterprise Database:</span>
+              <span className="font-mono font-bold text-emerald-400 uppercase">
+                Zero Mock Data (Authentic Records Only)
               </span>
             </div>
-            <span className="text-[11px] font-mono opacity-80">Auto-saved to Browser</span>
           </div>
 
-          {/* Quick Metrics Bar */}
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 mt-3 text-center text-[11px]">
             <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
               <span className="text-slate-500 block text-[10px]">Quotes</span>
@@ -107,80 +123,119 @@ export const ResetModal: React.FC<ResetModalProps> = ({
           </div>
         </div>
 
-        {/* Modal Actions */}
+        {/* Organization Form */}
         <div className="p-6 space-y-4">
-          
-          {/* Option 1: Clean Slate / Fresh Start */}
-          <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-rose-900/60 transition space-y-3">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 flex items-center justify-center">
-                  <Trash2 className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">Start Fresh (100% Clean Slate)</h4>
-                  <p className="text-xs text-slate-400">
-                    Wipes all dummy leads, quotes, tickets, field jobs, assets, RFQs, and projects.
-                  </p>
-                </div>
+          <form onSubmit={handleSaveOrganization} className="space-y-3">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Company & Tax Profile</h4>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Company / Organization Name</label>
+                <input
+                  type="text"
+                  value={orgName}
+                  onChange={(e) => setOrgName(e.target.value)}
+                  placeholder="e.g. Apex IT Services Ltd"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">GSTIN Number</label>
+                <input
+                  type="text"
+                  value={gstin}
+                  onChange={(e) => setGstin(e.target.value)}
+                  placeholder="e.g. 27AAAAA0000A1Z5"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 uppercase font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">State / Province</label>
+                <input
+                  type="text"
+                  value={state}
+                  onChange={(e) => setState(e.target.value)}
+                  placeholder="e.g. Maharashtra (27)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Company PAN</label>
+                <input
+                  type="text"
+                  value={pan}
+                  onChange={(e) => setPan(e.target.value)}
+                  placeholder="e.g. AAAAA0000A"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500 uppercase font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Contact Email</label>
+                <input
+                  type="email"
+                  value={contactEmail}
+                  onChange={(e) => setContactEmail(e.target.value)}
+                  placeholder="operations@company.com"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">Contact Phone</label>
+                <input
+                  type="tel"
+                  value={contactPhone}
+                  onChange={(e) => setContactPhone(e.target.value)}
+                  placeholder="+91 98200 00000"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-cyan-500"
+                />
               </div>
             </div>
 
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Use this mode when you are ready to input your actual real-world IT products, customer leads, and production service tickets. No mock or placeholder entries will remain.
-            </p>
+            <div className="flex items-center justify-between pt-2">
+              <span className="text-[11px] text-emerald-400">
+                {savedSuccess ? 'Organization details saved to server.' : ''}
+              </span>
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Organization Details</span>
+              </button>
+            </div>
+          </form>
 
+          {/* Clean Slate Action */}
+          <div className="pt-4 border-t border-slate-800 flex items-center justify-between">
+            <div>
+              <h5 className="font-bold text-xs text-white">Reset Database to Clean Slate</h5>
+              <p className="text-[11px] text-slate-400">Clear all records and start fresh with zero items.</p>
+            </div>
             <button
               onClick={() => {
-                onResetCleanSlate();
-                onClose();
+                if (window.confirm('Are you sure you want to initialize a 100% clean slate with 0 records?')) {
+                  onResetCleanSlate();
+                  onClose();
+                }
               }}
-              className="w-full py-2.5 rounded-xl bg-rose-600/90 hover:bg-rose-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg active:scale-98"
+              className="px-3 py-1.5 rounded-lg bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-semibold flex items-center gap-1 cursor-pointer transition"
             >
               <Trash2 className="w-3.5 h-3.5" />
-              <span>Wipe Mock Data & Start Fresh</span>
+              <span>Initialize Clean Slate</span>
             </button>
           </div>
-
-          {/* Option 2: Restore Demo Suite */}
-          <div className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 hover:border-indigo-800/60 transition space-y-3">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 flex items-center justify-center">
-                  <RefreshCw className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-white">Restore End-to-End Demo Suite</h4>
-                  <p className="text-xs text-slate-400">
-                    Pre-populates all 12 modules with integrated test cases for evaluation.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <p className="text-[11px] text-slate-400 leading-relaxed">
-              Restores Dell workstations, Cisco switch RFQs, Mumbai Metro projects, Telegram autonomous notifications, and Fortinet field dispatches for iterative demonstration.
-            </p>
-
-            <button
-              onClick={() => {
-                onResetDemoSuite();
-                onClose();
-              }}
-              className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer shadow-lg active:scale-98"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Restore Pre-Seeded Demo Data</span>
-            </button>
-          </div>
-
         </div>
 
         {/* Modal Footer */}
         <div className="p-4 border-t border-slate-800 bg-slate-950/40 flex items-center justify-between text-xs text-slate-500">
           <div className="flex items-center gap-1.5 text-[11px]">
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>State changes persist across sessions & browser tabs</span>
+            <span>Multi-Tenant Scoped • Changes Saved Permanently</span>
           </div>
           <button
             onClick={onClose}

@@ -19,98 +19,6 @@ import {
 } from 'lucide-react';
 import { BOMSolution, BOMItem, Quotation, ProductItem } from '../types';
 
-const initialSampleSolution: BOMSolution = {
-  id: 'sol-fintech-25',
-  solutionName: '25-Workstation Enterprise Turnkey Setup',
-  category: 'Office Setup',
-  summary: 'Turnkey enterprise architecture engineered for 25 financial analysts featuring commercial-grade small form-factor workstations, gigabit managed PoE network, next-gen Fortinet firewall, centralized pure sine wave UPS, and 1-year onsite SLA.',
-  compatibilityStatus: 'VERIFIED_COMPATIBLE',
-  compatibilityNotes: 'Thermal envelopes, power draw (4.2kW peak, under 75% of 6kVA UPS threshold), 48-port PoE switch budget (370W vs 125W required), and DDR5 RAM compatibility verified.',
-  recommendedMargin: 16.8,
-  items: [
-    {
-      id: 'bi-1',
-      category: 'Desktop',
-      sku: 'DELL-OPT-7010-I5',
-      name: 'Dell OptiPlex 7010 Small Form Factor',
-      brand: 'Dell',
-      specs: 'Intel Core i5-13500, 16GB DDR5 4800MHz, 512GB PCIe Gen4 NVMe, Win 11 Pro',
-      qty: 25,
-      purchaseCost: 44200,
-      sellingPrice: 51800,
-      warrantyYears: 3,
-      hsn: '84713010',
-      gstPercent: 18
-    },
-    {
-      id: 'bi-2',
-      category: 'Peripheral',
-      sku: 'DELL-P2422H',
-      name: 'Dell Professional P2422H 24" IPS Monitor',
-      brand: 'Dell',
-      specs: '1080p IPS, 99% sRGB, Height/Pivot stand, DP/HDMI',
-      qty: 25,
-      purchaseCost: 11200,
-      sellingPrice: 13500,
-      warrantyYears: 3,
-      hsn: '85285200',
-      gstPercent: 18
-    },
-    {
-      id: 'bi-3',
-      category: 'Networking',
-      sku: 'CISCO-CBS350-48P',
-      name: 'Cisco CBS350-48P-4G 48-Port PoE+ Gigabit Switch',
-      brand: 'Cisco',
-      specs: '48x Gigabit PoE+ (370W), 4x SFP Uplinks, Layer 3 Routing',
-      qty: 1,
-      purchaseCost: 78500,
-      sellingPrice: 92000,
-      warrantyYears: 5,
-      hsn: '85176290',
-      gstPercent: 18
-    },
-    {
-      id: 'bi-4',
-      category: 'Networking',
-      sku: 'FORTI-FG-60F',
-      name: 'Fortinet FortiGate 60F Next-Gen Firewall',
-      brand: 'Fortinet',
-      specs: '10x GE RJ45, 1Gbps Threat Protection, 1-Yr UTP Bundle',
-      qty: 1,
-      purchaseCost: 56000,
-      sellingPrice: 65500,
-      warrantyYears: 1,
-      hsn: '85176290',
-      gstPercent: 18
-    },
-    {
-      id: 'bi-5',
-      category: 'Power',
-      sku: 'APC-SRT-6KXLI',
-      name: 'APC Smart-UPS On-Line 6kVA 230V Pure Sine Wave',
-      brand: 'APC Schneider',
-      specs: '6000VA / 6000W, Extended Runtime Rack/Tower',
-      qty: 1,
-      purchaseCost: 168000,
-      sellingPrice: 195000,
-      warrantyYears: 2,
-      hsn: '85044090',
-      gstPercent: 18
-    }
-  ],
-  servicesIncluded: [
-    { id: 's-1', name: 'Onsite Physical Cabling, Rack Mount & Patching', price: 28000, sla: '24 Hours' },
-    { id: 's-2', name: 'FortiGate Firewall Hardening & VLAN Segmentation', price: 18000, sla: 'Same Day' },
-    { id: 's-3', name: '1-Year Comprehensive Managed IT & AMC Support', price: 42000, sla: '4-Hour Onsite SLA' }
-  ],
-  autonomousNextSteps: [
-    'Warehouse allocation check: 25 Dell OptiPlex available in Mumbai Hub',
-    'Cisco Switch stock is 0 units - Auto-dispatched RFQ to Redington & Ingram Micro',
-    'Quotation prepared with 16.8% gross margin - Ready for Customer or Telegram Authorization'
-  ]
-};
-
 const emptyBOMSolution: BOMSolution = {
   id: 'sol-blank',
   solutionName: 'New Architecture Solution',
@@ -122,7 +30,6 @@ const emptyBOMSolution: BOMSolution = {
   items: [],
   servicesIncluded: [],
   autonomousNextSteps: [
-    'Canvas initialized in Clean Slate mode',
     'Add catalog products or run AI solution architecting to build BOM'
   ]
 };
@@ -137,52 +44,30 @@ interface BOMBuilderProps {
 export const BOMBuilder: React.FC<BOMBuilderProps> = ({
   products,
   onGenerateQuote,
-  onRequestTelegramApproval,
-  isCleanSlate = false
+  onRequestTelegramApproval
 }) => {
-  const [requirementText, setRequirementText] = useState(
-    isCleanSlate ? '' : 'Setup a high-reliability 25-user fintech branch with Dell i5 desktops, dual IPS monitors, managed PoE network, next-gen firewall, and 6kVA online UPS.'
-  );
-  const [officeSize, setOfficeSize] = useState(isCleanSlate ? '' : '25');
+  const [requirementText, setRequirementText] = useState('');
+  const [officeSize, setOfficeSize] = useState('');
   const [budgetTier, setBudgetTier] = useState<'Standard' | 'Enterprise' | 'Premium'>('Enterprise');
   const [isGenerating, setIsGenerating] = useState(false);
 
-  // Active solution state
-  const [currentSolution, setCurrentSolution] = useState<BOMSolution>(
-    isCleanSlate ? emptyBOMSolution : initialSampleSolution
-  );
+  // Active solution state - always starts empty
+  const [currentSolution, setCurrentSolution] = useState<BOMSolution>(emptyBOMSolution);
 
-  // Client Details Modal & Negotiation Simulator
-  const [customerName, setCustomerName] = useState(isCleanSlate ? '' : 'Nexus FinTech Labs');
-  const [customerGstin, setCustomerGstin] = useState(isCleanSlate ? '' : '27AABCN8192K1Z4');
-  const [discountAmount, setDiscountAmount] = useState(isCleanSlate ? 0 : 30000);
+  // Client Details Modal & Negotiation
+  const [customerName, setCustomerName] = useState('');
+  const [customerGstin, setCustomerGstin] = useState('');
+  const [discountAmount, setDiscountAmount] = useState(0);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
   const [negotiationText, setNegotiationText] = useState('');
   const [negotiationResult, setNegotiationResult] = useState<string | null>(null);
+  const [aiErrorMessage, setAiErrorMessage] = useState<string | null>(null);
 
   // Add Component Modal State
   const [showAddComponentModal, setShowAddComponentModal] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState<string>(products[0]?.id || '');
   const [addComponentQty, setAddComponentQty] = useState(1);
   const [addComponentCustomPrice, setAddComponentCustomPrice] = useState<number>(0);
-
-  useEffect(() => {
-    if (isCleanSlate) {
-      setCurrentSolution(emptyBOMSolution);
-      setRequirementText('');
-      setOfficeSize('');
-      setCustomerName('');
-      setCustomerGstin('');
-      setDiscountAmount(0);
-    } else {
-      setCurrentSolution(initialSampleSolution);
-      setRequirementText('Setup a high-reliability 25-user fintech branch with Dell i5 desktops, dual IPS monitors, managed PoE network, next-gen firewall, and 6kVA online UPS.');
-      setOfficeSize('25');
-      setCustomerName('Nexus FinTech Labs');
-      setCustomerGstin('27AABCN8192K1Z4');
-      setDiscountAmount(30000);
-    }
-  }, [isCleanSlate]);
 
   // Financial calculations
   const totalCost = currentSolution.items.reduce((acc, i) => acc + (i.purchaseCost * i.qty), 0);
@@ -214,9 +99,13 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
           ...resData.data,
           id: `sol-${Date.now()}`
         });
+        setAiErrorMessage(null);
+      } else {
+        setAiErrorMessage(resData.error || 'Gemini AI is not available. Please assemble components manually from catalog or configure GEMINI_API_KEY in .env.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error generating BOM:', err);
+      setAiErrorMessage('Network or server error while generating AI BOM.');
     } finally {
       setIsGenerating(false);
     }
@@ -266,6 +155,13 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
           </button>
         </div>
       </div>
+
+      {aiErrorMessage && (
+        <div className="p-3 bg-rose-950/80 border border-rose-800 rounded-xl text-rose-200 text-xs flex items-center justify-between shadow">
+          <span>{aiErrorMessage}</span>
+          <button onClick={() => setAiErrorMessage(null)} className="text-rose-400 hover:text-white font-bold ml-3 cursor-pointer">✕</button>
+        </div>
+      )}
 
       {/* Requirement Input Bar */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl">
@@ -914,7 +810,7 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
                   onClick={() => {
                     const prod = products.find(p => p.id === selectedProductId) || products[0];
                     if (!prod) {
-                      alert("Please select a valid product.");
+                      setAiErrorMessage("Please select or add a catalog product before adding to BOM.");
                       return;
                     }
                     const newItem: BOMItem = {

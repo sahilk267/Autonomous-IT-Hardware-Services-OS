@@ -22,7 +22,6 @@ import {
   X
 } from 'lucide-react';
 import { ITSMTicket, EndpointHealth, CMDBNode, KnowledgeArticle } from '../types';
-import { initialKnowledgeArticles } from '../data/mockData';
 
 interface ITSMDeskProps {
   tickets: ITSMTicket[];
@@ -42,8 +41,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
   onResolveTicket,
   onRemoteFix,
   onCreateTicket,
-  onAddEndpoint,
-  isCleanSlate = false
+  onAddEndpoint
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'tickets' | 'rmm' | 'cmdb' | 'lifecycle' | 'kb'>('tickets');
   const [selectedTicketId, setSelectedTicketId] = useState<string>(tickets[0]?.id || '');
@@ -54,7 +52,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
   const [showNewTicketModal, setShowNewTicketModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newRequester, setNewRequester] = useState('');
-  const [newDept, setNewDept] = useState('Engineering');
+  const [newDept, setNewDept] = useState('IT Operations');
   const [newPriority, setNewPriority] = useState<ITSMTicket['priority']>('HIGH');
   const [newCategory, setNewCategory] = useState<ITSMTicket['category']>('Network Outage');
   const [newDescription, setNewDescription] = useState('');
@@ -74,11 +72,11 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
       deviceName: newEpDeviceName.trim(),
       assignedUser: newEpUser.trim() || 'Unassigned',
       os: newEpOs,
-      lastSeen: 'Just now',
-      cpuLoad: 24,
-      ramUsagePercent: 52,
-      diskFreePercent: 68,
-      batteryHealthPercent: 98,
+      lastSeen: new Date().toISOString(),
+      cpuLoad: 0,
+      ramUsagePercent: 0,
+      diskFreePercent: 0,
+      batteryHealthPercent: 100,
       smartStatus: 'HEALTHY',
       antivirusStatus: 'UP_TO_DATE'
     };
@@ -94,38 +92,19 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
   const selectedTicket = tickets.find(t => t.id === selectedTicketId) || tickets[0] || null;
 
   // Knowledge Base & RAG state
-  const [kbArticles, setKbArticles] = useState<KnowledgeArticle[]>(
-    isCleanSlate ? [] : initialKnowledgeArticles
-  );
+  const [kbArticles, setKbArticles] = useState<KnowledgeArticle[]>([]);
   const [kbSearchTerm, setKbSearchTerm] = useState('');
   const [selectedKbCat, setSelectedKbCat] = useState<string>('ALL');
-  const [selectedArticleId, setSelectedArticleId] = useState<string>(
-    isCleanSlate ? '' : (initialKnowledgeArticles[0]?.id || 'kb-1')
-  );
-  const [resolvedKbCount, setResolvedKbCount] = useState<number>(isCleanSlate ? 0 : 1565);
+  const [selectedArticleId, setSelectedArticleId] = useState<string>('');
+  const [resolvedKbCount, setResolvedKbCount] = useState<number>(0);
   const [copiedStepIndex, setCopiedStepIndex] = useState<number | null>(null);
   const [solvedBanner, setSolvedBanner] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isCleanSlate) {
-      setKbArticles([]);
-      setSelectedArticleId('');
-      setResolvedKbCount(0);
-      setSelectedTicketId('');
-    } else {
-      setKbArticles(initialKnowledgeArticles);
-      setSelectedArticleId(initialKnowledgeArticles[0]?.id || 'kb-1');
-      setResolvedKbCount(1565);
-      setSelectedTicketId(tickets[0]?.id || '');
-    }
-  }, [isCleanSlate]);
-
-  // Remote Shell & Support Modal State (Blueprint Section 21)
+  // Remote Shell & Support Modal State
   const [remoteSessionDevice, setRemoteSessionDevice] = useState<EndpointHealth | null>(null);
   const [terminalOutput, setTerminalOutput] = useState<string[]>([
-    'Apex RMM Remote Terminal Gateway v4.8 [Secure TLS 1.3 Session #RMM-9921]',
-    'User consent confirmed: Authorized by user with time-stamped 2FA token',
-    'Ready. Type or select any diagnostic command below to execute remotely.'
+    'Apex RMM Terminal Gateway: Remote monitoring agent is not configured.',
+    'External command execution is disabled. Real remote sessions require an enrolled agent with verified credentials.'
   ]);
   const [commandInput, setCommandInput] = useState('');
   const [isExecutingCmd, setIsExecutingCmd] = useState(false);
@@ -134,27 +113,13 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
     const command = (cmdText || commandInput).trim();
     if (!command) return;
     setIsExecutingCmd(true);
-    setTerminalOutput(prev => [...prev, `PS C:\\Windows\\system32> ${command}`]);
-
-    setTimeout(() => {
-      let result = '';
-      if (command.includes('gpupdate')) {
-        result = 'Updating policy...\nComputer Policy update has completed successfully.\nUser Policy update has completed successfully.';
-      } else if (command.includes('systeminfo')) {
-        result = `OS Name: Microsoft Windows 11 Enterprise\nOS Version: 10.0.22631 N/A Build 22631\nSystem Manufacturer: ThinkPad T14 / Dell OptiPlex\nTotal Physical Memory: 32,580 MB\nHotfix(s): 14 Security Patches Installed.\nNetwork Adapter: Intel Wi-Fi 6E AX211 (IP: 192.168.10.142)`;
-      } else if (command.includes('sfc')) {
-        result = 'Beginning system scan.\nVerification 100% complete.\nWindows Resource Protection did not find any integrity violations.';
-      } else if (command.includes('tasklist') || command.includes('cpu')) {
-        result = 'Image Name                     PID Session Name        Mem Usage\nSystem                           4 Services                    124 K\nmsedge.exe                    8492 Console                 182,420 K\ncode.exe                     11048 Console                 245,880 K\nsvchost.exe                   1940 Services                 24,190 K';
-      } else if (command.includes('netstat')) {
-        result = '  Proto  Local Address          Foreign Address        State           PID\n  TCP    192.168.10.142:58210   52.167.214.18:443      ESTABLISHED     11048\n  TCP    192.168.10.142:58221   20.190.159.23:443      ESTABLISHED     8492';
-      } else {
-        result = `[OK] Command "${command}" executed with exit code 0. Standard output stream flushed.`;
-      }
-      setTerminalOutput(prev => [...prev, result]);
-      setIsExecutingCmd(false);
-      setCommandInput('');
-    }, 600);
+    setTerminalOutput(prev => [
+      ...prev,
+      `PS C:\\> ${command}`,
+      '[ERROR] Execution blocked: Remote monitoring agent is not configured for this endpoint. Simulated outputs are prohibited.'
+    ]);
+    setIsExecutingCmd(false);
+    setCommandInput('');
   };
 
   const handleRunRemediation = (endpointId: string, action: string) => {
@@ -377,7 +342,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                       Mark Resolved with Customer Sign-Off
                     </button>
                     <button
-                      onClick={() => alert("Parts requisition auto-dispatched to inventory store.")}
+                      onClick={() => setSolvedBanner("Parts requisition dispatched to inventory store.")}
                       className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs border border-slate-700 cursor-pointer"
                     >
                       Request Spare Part
@@ -666,10 +631,22 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 Reserves Dell OptiPlex from warehouse, provisions Win 11 image, creates Entra ID user & issues M365 Business Premium license.
               </p>
               <button 
-                onClick={() => alert("Simulation Triggered: New Joiner Workstation kit reserved in Mumbai Hub Bin A-14.")}
+                onClick={() => {
+                  if (onCreateTicket) {
+                    onCreateTicket({
+                      title: 'New Hire Hardware & M365 Provisioning',
+                      category: 'Hardware Replacement',
+                      priority: 'HIGH',
+                      department: 'Human Resources',
+                      description: 'Zero-touch workstation reservation, Entra ID creation, and M365 Business Premium assignment.'
+                    });
+                  }
+                  setSolvedBanner('Logged: New Joiner Onboarding ticket created in ITSM queue.');
+                  setActiveSubTab('tickets');
+                }}
                 className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs cursor-pointer"
               >
-                Simulate New Joiner Onboarding
+                Log Joiner Onboarding Ticket
               </button>
             </div>
 
@@ -682,10 +659,22 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 Audits current software licenses, updates department cost center, and reconfigures VLAN network group.
               </p>
               <button 
-                onClick={() => alert("Simulation Triggered: License audit passed. Department cost center transferred.")}
+                onClick={() => {
+                  if (onCreateTicket) {
+                    onCreateTicket({
+                      title: 'Department Access Review & VLAN Reconfiguration',
+                      category: 'Software Configuration',
+                      priority: 'MEDIUM',
+                      department: 'IT Operations',
+                      description: 'License entitlement audit, department cost center update, and VLAN migration.'
+                    });
+                  }
+                  setSolvedBanner('Logged: Department Transfer ticket created in ITSM queue.');
+                  setActiveSubTab('tickets');
+                }}
                 className="w-full py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs cursor-pointer"
               >
-                Simulate Department Transfer
+                Log Department Transfer Ticket
               </button>
             </div>
 
@@ -698,10 +687,22 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 Instantly revokes session tokens, schedules courier laptop recovery, releases SaaS licenses back into pool.
               </p>
               <button 
-                onClick={() => alert("Simulation Triggered: Account suspended and courier return label generated.")}
+                onClick={() => {
+                  if (onCreateTicket) {
+                    onCreateTicket({
+                      title: 'Employee Offboarding & Asset Retrieval',
+                      category: 'Incident',
+                      priority: 'HIGH',
+                      department: 'Security & Compliance',
+                      description: 'Session revocation, M365 license release, and courier laptop recovery schedule.'
+                    });
+                  }
+                  setSolvedBanner('Logged: Employee Offboarding ticket created in ITSM queue.');
+                  setActiveSubTab('tickets');
+                }}
                 className="w-full py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs cursor-pointer"
               >
-                Simulate Employee Exit
+                Log Employee Offboarding Ticket
               </button>
             </div>
           </div>
@@ -815,14 +816,30 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
               </div>
               <button
                 onClick={() => {
-                  setKbArticles(initialKnowledgeArticles);
-                  setSelectedArticleId(initialKnowledgeArticles[0]?.id || 'kb-1');
-                  setResolvedKbCount(1565);
+                  const newArticle: KnowledgeArticle = {
+                    id: `sop-${Date.now()}`,
+                    title: 'New Enterprise IT SOP Runbook',
+                    category: 'Network & VPN',
+                    readTime: '3 min read',
+                    views: 1,
+                    solvedCount: 0,
+                    tags: ['SOP', 'Operations', 'Internal'],
+                    summary: 'Standard operating procedure for incident troubleshooting and resolution.',
+                    symptoms: ['Document observed symptoms, event log errors, or failure indicators.'],
+                    selfServiceSteps: [
+                      'Verify physical layer and network IP configuration.',
+                      'Check endpoint event logs for correlating error codes.',
+                      'Restart target service daemon and verify port binding.'
+                    ]
+                  };
+                  setKbArticles([newArticle]);
+                  setSelectedArticleId(newArticle.id);
+                  setResolvedKbCount(0);
                 }}
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer shadow-lg inline-flex items-center gap-2 transition"
               >
-                <Sparkles className="w-4 h-4" />
-                <span>Load Standard Enterprise IT SOP Library</span>
+                <Plus className="w-4 h-4" />
+                <span>Create Standard IT SOP Template</span>
               </button>
             </div>
           ) : (
@@ -982,7 +999,15 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
 
                         <button
                           onClick={() => {
-                            alert(`Creating pre-filled ITSM Ticket with diagnostic summary from SOP: ${activeArt.title}. Assigning L2 network engineer.`);
+                            if (onCreateTicket) {
+                              onCreateTicket({
+                                title: `Escalation: ${activeArt.title}`,
+                                category: 'Incident',
+                                priority: 'HIGH',
+                                description: `Self-service step failed for SOP "${activeArt.title}". Symptoms: ${activeArt.symptoms.join(', ')}.`
+                              });
+                            }
+                            setSolvedBanner(`Escalated to IT Helpdesk. Ticket logged for "${activeArt.title}".`);
                             setActiveSubTab('tickets');
                           }}
                           className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition cursor-pointer"

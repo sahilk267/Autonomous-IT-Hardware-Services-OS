@@ -5,6 +5,23 @@ export type UserRole =
   | 'FIELD_ENGINEER' 
   | 'PROCUREMENT_LEAD';
 
+export type IntegrationStatus = 
+  | 'NOT_CONFIGURED' 
+  | 'CONFIGURED' 
+  | 'CONNECTED' 
+  | 'DISCONNECTED' 
+  | 'ERROR';
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  tenantId: string;
+  createdAt: string;
+}
+
 export interface TenantInfo {
   id: string;
   name: string;
@@ -12,6 +29,11 @@ export interface TenantInfo {
   state: string;
   currency: string;
   logoText: string;
+  address?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  pan?: string;
+  isConfigured?: boolean;
 }
 
 export interface Lead {
@@ -337,12 +359,26 @@ export interface AutomationWorkflow {
 export interface IntegrationConnector {
   id: string;
   name: string;
-  category: 'Identity & SSO' | 'MDM & RMM' | 'Cloud Infrastructure' | 'Messaging' | 'Finance & ERP';
+  category: 'Identity & SSO' | 'MDM & RMM' | 'Cloud Infrastructure' | 'Messaging' | 'Finance & ERP' | 'AI & LLM';
   icon: string;
-  status: 'CONNECTED' | 'DISCONNECTED' | 'SYNCING';
+  status: IntegrationStatus;
   recordsSynced: string;
   lastSyncTime: string;
   description: string;
+  requiredEnvKeys?: string[];
+}
+
+export interface InvoiceRecord {
+  id?: string;
+  tenantId?: string;
+  customer: string;
+  invoiceNo: string;
+  amount: number;
+  dueInDays: number;
+  status: 'ACTIVE' | 'DUE_SOON' | 'OVERDUE' | 'SETTLED' | 'CANCELLED';
+  createdAt: string;
+  gstin?: string;
+  settledAt?: string;
 }
 
 export type OperatingMode = 

@@ -41,22 +41,25 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
   tenant, 
   quotes = [], 
   isCleanSlate = false,
-  invoices,
+  invoices = [],
   onAddInvoice,
   onSettleInvoice
 }) => {
   const [selectedState, setSelectedState] = useState<'INTRA_STATE' | 'INTER_STATE'>('INTRA_STATE');
-  const [invoiceAmount, setInvoiceAmount] = useState('4814400');
+  const [invoiceAmount, setInvoiceAmount] = useState('100000');
   const [localInvoices, setLocalInvoices] = useState<InvoiceItem[]>([]);
   const [showAddInvoiceModal, setShowAddInvoiceModal] = useState(false);
   const [newCustName, setNewCustName] = useState('');
-  const [newCustGstin, setNewCustGstin] = useState('27AABCN8192K1Z4');
-  const [newInvAmount, setNewInvAmount] = useState('150000');
+  const [newCustGstin, setNewCustGstin] = useState('');
+  const [newInvAmount, setNewInvAmount] = useState('');
   const [settleToast, setSettleToast] = useState<string | null>(null);
 
-  const customInvoices = invoices || localInvoices;
+  const allInvoices = invoices.length > 0 ? invoices : localInvoices;
+  const activeReceivables = allInvoices.filter(i => i.status !== 'SETTLED');
+  const settledInvoices = allInvoices.filter(i => i.status === 'SETTLED');
+  const activePayables: { vendor: string; poNo: string; amount: number; terms: string }[] = [];
 
-  const parsedAmount = parseInt(invoiceAmount, 10) || 100000;
+  const parsedAmount = parseInt(invoiceAmount, 10) || 0;
   const taxableBase = Math.round(parsedAmount / 1.18);
   const isIntra = selectedState === 'INTRA_STATE';
   const cgst = isIntra ? Math.round(taxableBase * 0.09) : 0;
@@ -64,38 +67,11 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
   const igst = !isIntra ? Math.round(taxableBase * 0.18) : 0;
   const totalTax = cgst + sgst + igst;
 
-  const mockReceivables = [
-    { customer: 'Nexus FinTech Labs', invoiceNo: 'INV-2026-0812', amount: 2407200, dueInDays: 4, status: 'DUE_SOON' },
-    { customer: 'Zenith Logistics', invoiceNo: 'INV-2026-0799', amount: 748828, dueInDays: -8, status: 'OVERDUE' },
-    { customer: 'OmniHealth Hospitals', invoiceNo: 'INV-2026-0750', amount: 1850000, dueInDays: 14, status: 'ACTIVE' }
-  ];
-
-  const mockPayables = [
-    { vendor: 'Redington India Ltd', poNo: 'PO-2026-0902', amount: 385000, terms: '21 Days Net' },
-    { vendor: 'Ingram Micro India', poNo: 'PO-2026-0881', amount: 620000, terms: '30 Days Net' }
-  ];
-
-  const quoteReceivables = quotes
-    .filter(q => q.status === 'APPROVED' || q.status === 'ACCEPTED' || (q.status as any) === 'CLIENT_ACCEPTED')
-    .map(q => ({
-      customer: q.customerName || (q as any).leadCompanyName || 'Enterprise Client',
-      invoiceNo: `INV-${q.id.toUpperCase()}`,
-      amount: q.totalAmount || (q as any).totalSellingPrice || 0,
-      dueInDays: 15,
-      status: 'ACTIVE'
-    }));
-
-  const activeReceivables = isCleanSlate
-    ? [...customInvoices, ...quoteReceivables]
-    : [...mockReceivables, ...customInvoices];
-
-  const activePayables = isCleanSlate ? [] : mockPayables;
-
   const handleAddInvoiceSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCustName.trim()) return;
 
-    const amt = parseInt(newInvAmount, 10) || 50000;
+    const amt = parseInt(newInvAmount, 10) || 0;
     const newInv: InvoiceItem = {
       customer: newCustName.trim(),
       invoiceNo: `INV-${Date.now().toString().slice(-6)}`,
@@ -112,7 +88,9 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
     }
     setShowAddInvoiceModal(false);
     setNewCustName('');
-    setSettleToast(`GST Tax Invoice ${newInv.invoiceNo} generated & IRN cryptographically signed.`);
+    setNewCustGstin('');
+    setNewInvAmount('');
+    setSettleToast(`Invoice ${newInv.invoiceNo} saved in ledger (GST e-invoicing API not configured).`);
     setTimeout(() => setSettleToast(null), 4000);
   };
 
@@ -120,9 +98,9 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
     if (onSettleInvoice) {
       onSettleInvoice(invNo);
     } else {
-      setLocalInvoices(prev => prev.filter(i => i.invoiceNo !== invNo));
+      setLocalInvoices(prev => prev.map(i => i.invoiceNo === invNo ? { ...i, status: 'SETTLED' } : i));
     }
-    setSettleToast(`Payment of ₹${amount.toLocaleString('en-IN')} from ${customer} marked SETTLED via UPI/NEFT.`);
+    setSettleToast(`Invoice #${invNo} (${customer} - ₹${amount.toLocaleString('en-IN')}) marked SETTLED in ledger.`);
     setTimeout(() => setSettleToast(null), 4000);
   };
 
@@ -132,11 +110,11 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
   const netProjectedCash = totalReceivables - totalPayables;
   const mtdGst = Math.round(totalReceivables * 0.18 / 1.18);
 
-  const formattedReceivables = isCleanSlate && activeReceivables.length === 0
+  const formattedReceivables = activeReceivables.length === 0
     ? '₹0.00'
     : `₹${(totalReceivables / 100000).toFixed(2)} Lakhs`;
 
-  const formattedPayables = isCleanSlate && activePayables.length === 0
+  const formattedPayables = activePayables.length === 0
     ? '₹0.00'
     : `₹${(totalPayables / 100000).toFixed(2)} Lakhs`;
 
@@ -164,7 +142,11 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
         </div>
 
         <div className="text-xs bg-slate-900 border border-slate-800 px-3 py-2 rounded-xl text-slate-300 font-mono">
-          E-Invoice Portal Status: <span className="text-emerald-400 font-bold">NIC Connected ✓</span>
+          E-Invoice Portal: {tenant.isConfigured && tenant.gstin ? (
+            <span className="text-emerald-400 font-bold">NIC Configured ({tenant.gstin.slice(0, 5)}...) ✓</span>
+          ) : (
+            <span className="text-amber-400 font-bold">NIC Gateway Unconfigured</span>
+          )}
         </div>
       </div>
 

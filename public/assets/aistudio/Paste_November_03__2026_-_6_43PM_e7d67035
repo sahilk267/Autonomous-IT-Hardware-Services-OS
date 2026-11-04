@@ -1,0 +1,1808 @@
+# MASTER ENGINEERING PROMPT
+## Autonomous IT Hardware & Services OS
+### Complete Mock Data Elimination, Real Backend Integration, Production Architecture & Enterprise Readiness
+
+You are acting as a **Principal Software Architect, Senior Full-Stack Engineer, Database Architect, Cybersecurity Engineer, Enterprise ITSM Architect, AI Systems Engineer, and Production QA Lead**.
+
+Your task is to thoroughly inspect, understand, refactor, repair, and upgrade my existing application.
+
+**GitHub Repository:**
+
+https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS.git
+
+**Application Name:**
+
+Apex Autonomous IT Hardware & Services Operating System
+
+**Technology Stack:**
+
+- React 19
+- TypeScript
+- Vite
+- Tailwind CSS
+- Node.js
+- Express
+- Google Gemini AI
+- Existing JSON-based persistence
+- Hostinger deployment environment
+
+---
+
+# 1. PRIMARY OBJECTIVE — ZERO MOCK DATA
+
+**THIS IS THE HIGHEST PRIORITY REQUIREMENT.**
+
+I DO NOT WANT ANY MOCK DATA, DEMONSTRATION DATA, FAKE RECORDS, HARDCODED BUSINESS METRICS, SIMULATED TRANSACTIONS, OR FABRICATED OPERATIONAL RESULTS IN MY APPLICATION.
+
+I want an actual enterprise operating system that starts with zero business records and uses only genuine records entered by authenticated users or received from properly configured external integrations.
+
+The application must NOT automatically populate itself with fictional customers, quotations, invoices, products, suppliers, employees, engineers, projects, assets, service tickets, inventory, financial metrics, Telegram messages, workflows, or integration statuses.
+
+**MANDATORY RULE:**
+
+No real data = No records.
+
+No configured integration = Integration unavailable.
+
+No verified API response = No successful operation.
+
+No actual transaction = No transaction recorded.
+
+No real telemetry = No device health measurement.
+
+No real AI response = No fabricated AI answer.
+
+No historical data = No invented analytics.
+
+No actual authorization = No approval.
+
+No completed external action = No success confirmation.
+
+This principle must be enforced throughout the entire application.
+
+---
+
+# 2. FIRST UNDERSTAND THE COMPLETE REPOSITORY
+
+Before making changes:
+
+1. Inspect the complete repository structure.
+2. Read every tracked source file.
+3. Understand all frontend components.
+4. Understand all backend API routes.
+5. Understand current database persistence.
+6. Understand all TypeScript interfaces.
+7. Understand component-to-component communication.
+8. Identify all hardcoded data.
+9. Identify all fake or simulated workflows.
+10. Identify missing backend endpoints.
+11. Identify all frontend actions without persistence.
+12. Identify dead code, unused interfaces, and broken references.
+13. Identify all security weaknesses.
+14. Identify integration configuration requirements.
+15. Understand the complete Hostinger deployment architecture.
+
+Do not limit your investigation to files explicitly mentioned in this prompt.
+
+Inspect the full repository recursively.
+
+Do not skip any module, route, component, or relevant configuration file.
+
+**IMPORTANT:**
+
+Do not rebuild the application from scratch unless technically unavoidable.
+
+Preserve the existing design system, navigation structure, business domains, and useful UI functionality.
+
+Refactor and repair the existing codebase systematically.
+
+Do not replace a complex working interface with a minimal dashboard.
+
+---
+
+# 3. COMPLETE MOCK DATA REMOVAL
+
+Inspect and remove production dependencies on:
+
+```text
+src/data/mockData.ts
+data/app-store.json
+src/App.tsx
+server/db.ts
+server.ts
+```
+
+Also inspect every file under:
+
+```text
+src/components/
+```
+
+Find and eliminate:
+
+- initialMockData
+- initialProducts
+- initialLeads
+- initialQuotes
+- initialSuppliers
+- initialRFQs
+- initialITSMTickets
+- initialEndpoints
+- initialFieldJobs
+- initialCMDBNodes
+- initialEvents
+- initialProjects
+- initialProposals
+- initialProviders
+- initialAssets
+- initialLicenses
+- initialAMCs
+- initialWorkflows
+- initialIntegrations
+- initialRMAClaims
+- initialKnowledgeArticles
+- initialCRMOpportunities
+- initialMarketplaceDisputes
+- initialDistributorVendors
+- initialTelegramMessages
+- initialSampleSolution
+- mockReceivables
+- mockPayables
+- hardcoded executive metrics
+- hardcoded financial values
+- fictional supplier quotations
+- fictional technicians
+- fictional service histories
+- fabricated audit events
+- fake remote-device telemetry
+- hardcoded AI responses
+- simulated payment confirmations
+- simulated GST registration results
+
+These identifiers are known examples, not an exhaustive search list.
+
+Search the entire repository for additional hardcoded or simulated operational data.
+
+## Strict data deletion requirements
+
+Remove all mock records from application initialization.
+
+Remove demo seeding from backend startup.
+
+Remove automatic demo restoration.
+
+Remove Demo Suite mode.
+
+Remove Demo Mode buttons.
+
+Remove fake demonstration workflows.
+
+Remove demo-specific localStorage handling.
+
+Remove hardcoded fallback records.
+
+Remove fabricated business events generated during initialization.
+
+Remove hardcoded organization names, addresses, contact details, and GSTIN values presented as real tenant information.
+
+Remove fictional transactions and metrics from the executive dashboard.
+
+Remove demo records from any production database initialization or migration.
+
+**Never delete genuine production records automatically.**
+
+Before modifying an existing persistent store:
+
+- Identify whether it contains actual user data.
+- Preserve existing real business data.
+- Create a backup before any potentially destructive migration.
+- Separate known demonstration records from genuine records.
+- Do not assume that every pre-existing record is disposable.
+- If a destructive change cannot be performed safely, leave the records untouched and report the required administrator action.
+
+Synthetic fixtures may exist only inside isolated automated tests. They must never enter production databases, production API responses, or production frontend bundles.
+
+---
+
+# 4. DEFAULT CLEAN WORKSPACE
+
+When the application starts for the first time, all business collections must be empty.
+
+Example initial state:
+
+```typescript
+const initialState = {
+  products: [],
+  leads: [],
+  quotes: [],
+  suppliers: [],
+  rfqs: [],
+  tickets: [],
+  endpoints: [],
+  jobs: [],
+  assets: [],
+  licenses: [],
+  amcs: [],
+  projects: [],
+  proposals: [],
+  providers: [],
+  events: [],
+  invoices: [],
+  telegramMessages: [],
+  workflows: [],
+  integrations: [],
+  rmaClaims: [],
+  knowledgeArticles: [],
+  crmOpportunities: [],
+  marketplaceDisputes: []
+};
+```
+
+This is a conceptual state contract. Adapt it to the actual domain architecture and persistence model.
+
+Do not generate fake records to populate any collection.
+
+System configuration records, authenticated identities, database metadata, and permission definitions are not business demonstration records.
+
+## Empty-state user experience
+
+Every module must support a completely empty database.
+
+For example:
+
+**Inventory**
+
+"No products added yet."
+
+Button: "Add First Product"
+
+**CRM**
+
+"No leads available."
+
+Button: "Create Lead"
+
+**ITSM**
+
+"No service tickets found."
+
+Button: "Create Ticket"
+
+**Projects**
+
+"No projects created yet."
+
+Button: "Create Project"
+
+**Assets**
+
+"No registered assets."
+
+Button: "Register Asset"
+
+**Finance**
+
+"No invoices available."
+
+Button: "Create Invoice"
+
+**Telegram**
+
+"Telegram integration is not configured."
+
+Button: "Configure Telegram"
+
+**Executive Dashboard**
+
+"No operational data available yet."
+
+Do not show fictional monthly revenue, profit, customer counts, compliance percentages, or inventory valuations.
+
+When a metric cannot be calculated, display:
+
+"N/A", "Not available", "Not configured", or an appropriate empty-state message.
+
+Do not display 100% SLA compliance simply because no incidents exist.
+
+Distinguish between a genuine measured zero and missing information.
+
+---
+
+# 5. REPLACE FRONTEND-ONLY DATA WITH REAL PERSISTENCE
+
+Currently, some application functionality updates React state without updating the backend.
+
+This must be corrected.
+
+Every business mutation must use a real backend API.
+
+Implement proper server-side persistence for:
+
+- Creating records
+- Updating records
+- Deleting records where authorized
+- Approving transactions
+- Rejecting transactions
+- Updating status
+- Assigning engineers
+- Booking services
+- Updating inventory
+- Closing tickets
+- Consuming spare parts
+- Managing customer assets
+- Managing software licenses
+- Managing AMC contracts
+- Updating project milestones
+- Managing quotations
+- Managing CRM opportunities
+- Managing RFQs
+- Recording payments
+- Managing workflow definitions
+- Recording integration synchronization results
+
+The frontend must not be treated as the authoritative database.
+
+## Required behavior
+
+When a user performs an action:
+
+1. Validate the input.
+2. Check authentication.
+3. Check authorization.
+4. Validate tenant ownership.
+5. Call the backend.
+6. Validate business rules.
+7. Execute the database transaction.
+8. Return the actual saved result.
+9. Update the frontend.
+10. Show accurate success or failure feedback.
+
+Do not show success before a critical backend transaction completes.
+
+If optimistic updates are used for low-risk interactions, implement proper rollback on failure.
+
+Check HTTP response status codes rather than treating all resolved fetch calls as successful.
+
+---
+
+# 6. IMPLEMENT A REAL DATABASE LAYER
+
+The existing JSON-file database is insufficient for a production multi-user enterprise operating system.
+
+Create a proper transactional persistence architecture.
+
+**Preferred database: PostgreSQL.**
+
+Use a maintainable ORM or query layer compatible with the deployment environment.
+
+Implement:
+
+- Database schema
+- Migrations
+- Relationships
+- Foreign keys
+- Unique constraints
+- Indexes
+- Transaction management
+- Connection pooling
+- Tenant isolation
+- Created/updated timestamps
+- Audit metadata
+- Consistent record identifiers
+- Database backups
+- Error handling
+
+Do not automatically populate tables with mock records.
+
+If PostgreSQL is not available in the target hosting environment, explain the limitation and implement the safest compatible alternative without pretending it provides equivalent scalability.
+
+Do not introduce an external database dependency without documenting the required configuration.
+
+Do not silently fall back to in-memory storage when the production database is unavailable.
+
+## Data model
+
+Design normalized entities for:
+
+Organizations
+
+Users
+
+Roles
+
+Permissions
+
+Customers
+
+Leads
+
+Products
+
+Suppliers
+
+Inventory Locations
+
+Inventory Transactions
+
+Stock Reservations
+
+RFQs
+
+Supplier Quotations
+
+Purchase Orders
+
+Goods Receipts
+
+Sales Quotations
+
+Sales Orders
+
+Invoices
+
+Invoice Items
+
+Payments
+
+ITSM Tickets
+
+Ticket Activities
+
+Assets
+
+Asset Relationships
+
+Endpoint Telemetry
+
+Field Service Jobs
+
+Technicians
+
+Software Licenses
+
+AMC Contracts
+
+Projects
+
+Project Milestones
+
+Proposals
+
+Provider Profiles
+
+CRM Opportunities
+
+RMA Claims
+
+Knowledge Articles
+
+Workflow Definitions
+
+Workflow Executions
+
+Integration Connections
+
+Webhook Deliveries
+
+Approval Requests
+
+Audit Events
+
+Only introduce tables that support implemented functionality.
+
+Do not create fake operational records to demonstrate relationships.
+
+---
+
+# 7. AUTHENTICATION, AUTHORIZATION & TENANT ISOLATION
+
+Implement genuine authentication.
+
+The current application must not allow unrestricted access to business APIs.
+
+Required capabilities:
+
+- Secure login
+- Secure logout
+- Password hashing or supported identity-provider authentication
+- Server-side session management
+- Session expiration
+- Role-based access control
+- Tenant-specific authorization
+- Protected API routes
+- Protected administrative operations
+- Secure secret management
+- Rate limiting
+- Input validation
+- Audit logging
+
+## User roles
+
+Preserve these roles:
+
+- Business Owner
+- Sales Manager
+- Enterprise IT Head
+- Field Engineer
+- Procurement Lead
+
+Add administration capabilities if needed.
+
+Do not allow users to gain elevated privileges by changing a frontend dropdown.
+
+Roles must be assigned through a secure backend mechanism.
+
+Every API request must verify the user's identity, tenant access, and required permissions.
+
+## Tenant isolation
+
+Every tenant-owned business record must belong to an authenticated organization.
+
+Users from one organization must never access another organization's data.
+
+Apply tenant scoping to reads, writes, updates, exports, approvals, and background jobs.
+
+---
+
+# 8. MODULE 1 — EXECUTIVE DASHBOARD
+
+Remove all hardcoded KPI values.
+
+All dashboard metrics must come from actual database records.
+
+Implement real calculations for:
+
+- Total revenue
+- Gross profit
+- Gross margin
+- Open quotations
+- Pending approvals
+- Active projects
+- Open tickets
+- Critical incidents
+- Inventory valuation
+- Reserved inventory
+- Pending receivables
+- Overdue invoices
+- Supplier payables
+- Active AMC contracts
+- Expiring warranties
+- Field engineer utilization
+- SLA compliance
+
+Financial calculations must use authoritative transaction data.
+
+Do not generate random metrics.
+
+Do not use fixed business performance numbers.
+
+Display calculation timestamps and explain unavailable metrics.
+
+If no data exists, show a clean empty dashboard.
+
+Executive AI insights must use actual authorized business data.
+
+---
+
+# 9. MODULE 2 — TELEGRAM COMMAND HUB
+
+Convert the current Telegram-like simulation into a genuine, secure integration.
+
+Required functionality:
+
+- Bot token configuration
+- Webhook configuration
+- Webhook secret verification
+- Authorized Telegram user identification
+- Secure account linking
+- Incoming message processing
+- Outgoing message delivery
+- Real notification delivery
+- Approval request creation
+- Approval/rejection callbacks
+- Persisted message history
+- Approval audit records
+- Failed-delivery handling
+
+Never approve a quotation simply because a message contains the word "approve".
+
+Approval commands must identify the exact transaction.
+
+Require proper authorization and transaction validation.
+
+Prevent duplicate execution and replayed callbacks.
+
+Do not generate fictional Telegram messages.
+
+If Telegram credentials are missing, show:
+
+"Telegram is not configured."
+
+Do not claim that Telegram messages were sent unless Telegram confirms the request was accepted.
+
+---
+
+# 10. MODULE 3 — AI BOM & HARDWARE SOLUTION BUILDER
+
+Preserve the existing AI BOM Builder interface.
+
+Remove preloaded fictional BOM solutions.
+
+Start with an empty BOM.
+
+Allow users to:
+
+- Enter hardware requirements
+- Select actual catalog products
+- Set quantities
+- Configure services
+- Calculate costs
+- Calculate selling prices
+- Calculate margins
+- Generate quotations
+- Save BOMs
+- Edit BOMs
+
+Use genuine catalog pricing and inventory records when available.
+
+AI suggestions must be clearly distinguished from verified product specifications and confirmed distributor prices.
+
+Do not claim that hardware compatibility is verified without performing actual validation.
+
+Do not invent stock reservations.
+
+Do not invent supplier availability.
+
+Do not automatically mark AI-generated BOMs as confirmed orders.
+
+## AI integration
+
+Use the configured Gemini API.
+
+Keep the API key on the server.
+
+Make the Gemini model configurable through environment variables.
+
+Validate AI-generated structured responses against a schema.
+
+Use proper error handling.
+
+If Gemini is unavailable, show an error or a clearly identified non-AI manual workflow.
+
+Never return fictional AI output as though it were a live response.
+
+Do not silently return a hardcoded enterprise BOM when an AI request fails.
+
+---
+
+# 11. MODULE 4 — INVENTORY & PROCUREMENT
+
+Remove fictional inventory and distributor quotations.
+
+Implement actual inventory management.
+
+Required features:
+
+- Product registration
+- SKU management
+- Product specifications
+- Cost price
+- Selling price
+- GST/HSN configuration
+- Warehouse management
+- Stock receipts
+- Stock issues
+- Stock transfers
+- Stock reservations
+- Reorder thresholds
+- Low-stock alerts
+- Supplier management
+- RFQ generation
+- Supplier quotation entry
+- Purchase orders
+- Goods receipt notes
+- Purchase order status tracking
+
+Stock must change only through validated transactions.
+
+Do not deduct inventory only in frontend state.
+
+Do not automatically generate quotations from Redington, Ingram Micro, Savex, or any other distributor.
+
+Supplier quotations must be:
+
+1. Entered by an authorized user, or
+2. Retrieved through a genuine authorized supplier integration.
+
+If no supplier response exists:
+
+"No supplier quotations received."
+
+Do not display fabricated prices or delivery commitments.
+
+---
+
+# 12. MODULE 5 — PROJECTS & SERVICE MARKETPLACE
+
+Remove fictional projects, proposals, providers, reviews, and escrow balances.
+
+Implement actual project management.
+
+Required functionality:
+
+- Create project
+- Save project
+- Update project
+- Track project status
+- Manage deliverables
+- Assign providers
+- Receive actual proposals
+- Accept/reject proposals
+- Track milestones
+- Track project completion
+- Maintain project history
+
+Fix the existing missing backend route:
+
+```http
+POST /api/projects
+```
+
+Ensure project creation persists correctly.
+
+## Escrow functionality
+
+Do not claim money is held, released, transferred, or refunded unless the action is confirmed through a genuine supported financial service.
+
+Never fabricate escrow transaction results.
+
+If escrow integration is unavailable, disable financial execution and clearly display:
+
+"Escrow payments are not configured."
+
+Preserve project management features independently of payment integration.
+
+---
+
+# 13. MODULE 6 — FIELD SERVICE MANAGEMENT
+
+Remove fictional technicians and service jobs.
+
+Implement real job lifecycle management.
+
+Required functionality:
+
+- Engineer registration
+- Engineer availability
+- Technician assignment
+- Create field job
+- Schedule service
+- Update status
+- Record check-in
+- Record check-out
+- Track consumed spare parts
+- Record service notes
+- Collect customer sign-off
+- Close job
+- Generate job completion report
+
+All job status changes must persist.
+
+Spare parts consumption must create inventory transactions.
+
+Do not claim a technician has been dispatched unless a genuine assignment has been saved and any required external notification has succeeded.
+
+Do not use a typed customer name as proof of a verified digital signature.
+
+Implement legally and operationally appropriate acceptance records.
+
+---
+
+# 14. MODULE 7 — ITSM, CMDB & RMM
+
+Remove fictional tickets, endpoint telemetry, device health records, and simulated terminal sessions.
+
+## ITSM
+
+Implement:
+
+- Incident creation
+- Ticket assignment
+- Ticket priority
+- Ticket category
+- Status changes
+- Activity history
+- SLA calculation
+- Escalation rules
+- Ticket resolution
+- Closure notes
+- Reopen workflow
+
+SLA calculations must use actual timestamps and configured business policies.
+
+## CMDB
+
+Implement actual configuration-item records and dependencies.
+
+Do not fabricate topology relationships.
+
+## RMM
+
+Do not show simulated hardware health data as real telemetry.
+
+Implement properly authenticated endpoint enrollment and telemetry ingestion if a genuine agent or supported RMM provider is available.
+
+Never execute remote commands without authenticated operator authorization and appropriate endpoint consent.
+
+If no RMM integration exists, show:
+
+"Remote monitoring is not configured."
+
+Remove fake remote-shell execution results.
+
+Do not generate random CPU usage, memory usage, SMART health, or battery values.
+
+---
+
+# 15. MODULE 8 — ASSETS, LICENSES, AMC & RMA
+
+Remove demonstration asset and software license records.
+
+Implement real asset lifecycle management.
+
+Required functionality:
+
+- Asset registration
+- Serial number tracking
+- Asset tagging
+- Assignment history
+- Location tracking
+- Warranty dates
+- Asset status changes
+- AMC creation
+- AMC renewal
+- Maintenance scheduling
+- Software license records
+- License allocation
+- RMA claim registration
+- RMA lifecycle tracking
+
+Warranty expiry must be calculated from actual dates.
+
+Do not invent OEM case numbers.
+
+Do not invent courier tracking numbers.
+
+Do not claim a pickup has been booked unless the courier confirms it.
+
+Do not claim Microsoft 365 licenses were revoked unless an authorized Microsoft integration confirms the action.
+
+If integration is not configured, provide a manual record-management workflow without claiming automatic external execution.
+
+---
+
+# 16. MODULE 9 — FINANCE, INVOICING & GST
+
+Remove all mock invoices, payables, receivables, and financial summaries.
+
+Implement genuine financial record management.
+
+Required functionality:
+
+- Customer invoices
+- Invoice line items
+- Invoice numbering
+- Taxable values
+- GST calculations
+- Payment status
+- Due dates
+- Receivables
+- Payables
+- Credit notes where required
+- Invoice settlement
+- Payment references
+- Audit history
+
+Fix duplicate receivable calculations.
+
+Settled invoices must not appear as outstanding receivables.
+
+Preserve settlement history instead of deleting accounting records.
+
+Validate all monetary inputs.
+
+Use decimal-safe financial calculations.
+
+Do not assume every product and service uses the same GST rate.
+
+Implement tax calculation based on the applicable transaction and configured tax rules.
+
+## GST e-invoicing
+
+Remove random IRN generation.
+
+Never present a simulated IRN as a government-registered invoice.
+
+Integrate an authorized e-invoicing service if credentials and applicable access are available.
+
+Otherwise show:
+
+"GST e-invoicing integration is not configured."
+
+The application may generate an internal invoice draft, but it must not label it as a registered e-invoice without genuine acknowledgement.
+
+---
+
+# 17. MODULE 10 — WORKFLOW AUTOMATION
+
+Remove fake workflow execution.
+
+Implement a genuine backend workflow system.
+
+Required components:
+
+- Workflow definitions
+- Trigger events
+- Conditions
+- Actions
+- Execution logs
+- Execution states
+- Failure handling
+- Retry policies
+- Approval gates
+- Idempotency
+- Execution history
+
+Actions must execute only when the workflow is valid and authorized.
+
+Do not display successful execution merely because a timer finished.
+
+If a workflow action depends on an unavailable integration, mark the execution as blocked or failed.
+
+Never create a fabricated success event.
+
+---
+
+# 18. MODULE 11 — INTEGRATIONS HUB
+
+Remove fake connection states.
+
+Do not mark integrations as CONNECTED without checking genuine configuration and connectivity.
+
+Support the following states:
+
+```typescript
+type IntegrationStatus =
+  | 'NOT_CONFIGURED'
+  | 'CONFIGURED'
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'ERROR';
+```
+
+Implement appropriate secure integration management.
+
+Potential integrations include:
+
+- Google Gemini
+- Telegram Bot API
+- Microsoft Graph
+- Google Workspace
+- WhatsApp Business API
+- Payment gateways
+- Authorized GST e-invoicing providers
+- Distributor APIs
+- Email services
+- RMM providers
+
+Integrations should be optional.
+
+The application must remain usable when integrations are not configured.
+
+Do not invent API responses.
+
+Do not fake synchronization counts.
+
+Do not fake webhook delivery.
+
+Do not display hardcoded secret values as though they are real credentials.
+
+Never expose API secrets in frontend source code.
+
+---
+
+# 19. MODULE 12 — EVENT BUS & AUDIT LOGGING
+
+Replace fabricated audit events with actual server-generated audit records.
+
+Audit records must include:
+
+- Event ID
+- Tenant ID
+- Actor identity
+- Action
+- Resource type
+- Resource ID
+- Timestamp
+- Previous state where appropriate
+- New state where appropriate
+- Execution result
+- Correlation ID
+- Error details where applicable
+
+Audit entries must correspond to actual operations.
+
+Do not claim:
+
+"Payment released"
+
+"Email dispatched"
+
+"Warehouse stock reserved"
+
+"Microsoft license revoked"
+
+"Remote device repaired"
+
+or similar outcomes unless the operation genuinely completed.
+
+Use an append-only or otherwise tamper-resistant audit design appropriate for the deployment.
+
+---
+
+# 20. REMOVE FAKE SUCCESS MESSAGES
+
+Search the entire application for misleading success notifications.
+
+Examples include:
+
+- Payment verified successfully
+- IRN cryptographically signed
+- Email sent
+- WhatsApp dispatched
+- Inventory reserved
+- Engineer dispatched
+- Remote command executed
+- System repaired
+- OEM ticket generated
+- Courier pickup scheduled
+- Escrow released
+- API token rotated
+- External directory synchronized
+- Report exported
+
+For every success message, verify that a corresponding real operation exists.
+
+If not:
+
+1. Implement the genuine operation where feasible.
+2. Otherwise disable the action.
+3. Display a clear explanation.
+4. Never generate false confirmation.
+
+This requirement applies to alerts, toast messages, dashboard labels, status badges, activity logs, and AI-generated summaries.
+
+---
+
+# 21. FIX EXISTING BUSINESS LOGIC
+
+Review and fix known issues.
+
+### Quotation approval
+
+Require exact record identification and secure authorization.
+
+Persist approval and rejection.
+
+### Quotation margins
+
+Recalculate gross profit and margin using actual costs, services, discounts, and taxable values.
+
+Prevent division by zero and invalid negative totals.
+
+### Financial ledger
+
+Remove duplicate invoices.
+
+Exclude settled invoices from outstanding balances.
+
+### Projects
+
+Implement missing project creation persistence.
+
+### Field jobs
+
+Persist all lifecycle changes and parts consumption.
+
+### Assets
+
+Persist assignment, status, and license changes.
+
+### Procurement
+
+Persist purchase-order status changes.
+
+### Workflows
+
+Persist definitions and actual execution results.
+
+### Events
+
+Generate authoritative server-side audit records.
+
+### Data integrity
+
+Implement referential integrity, unique business identifiers, input validation, and safe error handling.
+
+Do not generate business identifiers using fragile random-number patterns that may collide.
+
+---
+
+# 22. TYPESCRIPT & CODE QUALITY
+
+Fix all TypeScript inconsistencies.
+
+Known examples include:
+
+- AMC type values not matching the declared enum/union
+- RFQ urgency values not matching the declared type
+- Quotation status comparisons using undeclared values
+- Unsafe `as any` casts hiding incompatible contracts
+
+Enable appropriate strict TypeScript checking.
+
+Create shared API schemas or consistent domain validation contracts.
+
+Refactor excessively large components where useful.
+
+Separate:
+
+- UI components
+- Business logic
+- API clients
+- Database access
+- Validation
+- Authentication
+- Integration adapters
+- Workflow services
+- Financial calculations
+
+Avoid unnecessary duplication.
+
+Remove unused code only after verifying it is not required.
+
+---
+
+# 23. HOSTINGER DEPLOYMENT COMPATIBILITY
+
+The application must remain compatible with a supported Hostinger Node.js hosting environment.
+
+Review and repair:
+
+```text
+package.json
+server.js
+server.ts
+vite.config.ts
+tsconfig.json
+public/.htaccess
+HOSTINGER_DEPLOYMENT_GUIDE.md
+```
+
+Fix CommonJS/ESM compatibility.
+
+Use:
+
+```javascript
+const PORT = Number(process.env.PORT) || 3000;
+```
+
+Implement appropriate startup configuration.
+
+Do not hardcode secrets.
+
+Do not hardcode production domains.
+
+Update environment configuration documentation.
+
+Ensure production builds contain the actual frontend and backend implementation.
+
+Do not assume static-only hosting can execute backend APIs.
+
+Document database hosting requirements and persistent-storage limitations.
+
+Implement appropriate health checks without exposing sensitive information.
+
+Do not deploy until security and required integration checks pass.
+
+---
+
+# 24. ENVIRONMENT VARIABLES
+
+Create or update `.env.example`.
+
+Include only configuration keys and safe placeholder values.
+
+Examples:
+
+```env
+NODE_ENV=development
+PORT=3000
+
+DATABASE_URL=
+
+SESSION_SECRET=
+
+GEMINI_API_KEY=
+GEMINI_MODEL=
+
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_WEBHOOK_SECRET=
+
+APP_URL=
+```
+
+Add additional provider-specific variables only for integrations that are actually implemented.
+
+Never commit real credentials.
+
+Never send secrets to the frontend.
+
+If configuration is missing, fail safely or disable the affected integration.
+
+Do not silently switch to simulated responses.
+
+---
+
+# 25. UI/UX REQUIREMENTS
+
+Preserve the existing professional dark enterprise interface.
+
+Preserve:
+
+- Existing sidebar/navigation behavior
+- Main navigation tabs
+- Dashboard layout
+- Cards
+- Tables
+- Modals
+- Forms
+- Responsive design
+- Module structure
+- Icons
+- Business workflows
+
+Improve empty states.
+
+Ensure new users can begin using the platform without demonstration records.
+
+Add genuine onboarding where necessary:
+
+1. Create organization.
+2. Create administrator account.
+3. Configure organization details.
+4. Set business settings.
+5. Add products/customers/assets.
+6. Configure optional integrations.
+7. Begin actual operations.
+
+Do not prefill business forms with fictional customers, employees, GSTINs, invoice numbers, addresses, or financial amounts.
+
+Use neutral field labels and placeholders only as UI hints, never as stored data.
+
+---
+
+# 26. PRODUCTION SECURITY REQUIREMENTS
+
+Implement:
+
+- Authentication
+- Authorization
+- Tenant isolation
+- Secure API validation
+- Rate limiting
+- Secure headers
+- Safe error responses
+- Sensitive data protection
+- Audit logging
+- Secure configuration
+- Webhook verification
+- Replay protection
+- Transaction idempotency
+
+Protect destructive operations.
+
+Remove or securely restrict:
+
+```http
+POST /api/state/reset
+```
+
+Never allow an unauthenticated user to reset business data.
+
+Production systems must not have an unrestricted "Restore Demo Data" function.
+
+A clean database setup must be different from deleting an existing tenant's real business records.
+
+---
+
+# 27. REMOVE FAKE PAYMENT AND TAX ENDPOINTS
+
+Review:
+
+```http
+POST /api/payments/create-order
+POST /api/payments/verify
+POST /api/gst/generate-irn
+```
+
+Do not leave insecure endpoints that return fabricated success.
+
+If genuine providers are unavailable:
+
+- Disable real transaction execution.
+- Return appropriate configuration errors.
+- Document what is missing.
+- Preserve internal draft workflows where appropriate.
+
+Do not implement fake verification as a fallback.
+
+---
+
+# 28. REAL AI SYSTEM REQUIREMENTS
+
+All AI-enabled modules must follow the same rules.
+
+Use actual Gemini API calls.
+
+Validate AI responses.
+
+Handle timeouts.
+
+Handle API errors.
+
+Handle rate limits.
+
+Enforce authorization.
+
+Prevent sensitive cross-tenant data leakage.
+
+Use structured output where appropriate.
+
+Differentiate:
+
+- AI recommendation
+- Validated business rule
+- Verified external data
+- Actual executed action
+
+AI-generated suggestions must never automatically become confirmed real-world actions without the required backend controls.
+
+Do not invent financial information or supplier availability.
+
+Do not fabricate AI responses when Gemini is unavailable.
+
+---
+
+# 29. TESTING REQUIREMENTS
+
+Create meaningful automated tests.
+
+Tests must cover:
+
+### Initial state
+
+A new installation starts with zero business records.
+
+### Mock data
+
+No demonstration data appears in the production application.
+
+### Authentication
+
+Unauthenticated API requests are rejected.
+
+### Authorization
+
+Users cannot access unauthorized functionality.
+
+### Tenant isolation
+
+Organization A cannot access Organization B records.
+
+### Persistence
+
+Saved records survive application restart.
+
+### Quotations
+
+Margins calculate correctly and approvals require authorization.
+
+### Inventory
+
+Stock transactions produce consistent balances.
+
+### Finance
+
+Settled invoices are excluded from outstanding balances.
+
+### Projects
+
+Creating a project persists it.
+
+### Field service
+
+Job lifecycle updates persist.
+
+### Integrations
+
+Unconfigured integrations never report success.
+
+### AI
+
+Unavailable Gemini calls never produce fabricated answers.
+
+### Payments
+
+Invalid or unverified payments cannot be marked successful.
+
+### GST
+
+No fake IRN is returned as registered.
+
+### Audit
+
+Audit records correspond to actual backend operations.
+
+### UI
+
+All modules render correctly with zero records.
+
+Use test-only fixtures when necessary.
+
+Never deploy test fixtures as production records.
+
+---
+
+# 30. ACCEPTANCE CRITERIA — STRICT
+
+The task is complete only when all applicable criteria are satisfied.
+
+## Data
+
+- [ ] Zero mock records in a fresh installation.
+- [ ] No automatic demonstration seeding.
+- [ ] No fictional tenant initialization.
+- [ ] No fictional financial data.
+- [ ] No fabricated supplier responses.
+- [ ] No simulated operational records.
+- [ ] No fake integration connection states.
+- [ ] Existing real records preserved during migration.
+
+## Frontend
+
+- [ ] All 12 modules render with empty data.
+- [ ] Empty states are meaningful.
+- [ ] Real forms work correctly.
+- [ ] Existing navigation remains functional.
+- [ ] No broken buttons.
+- [ ] No misleading success notifications.
+
+## Backend
+
+- [ ] Authentication implemented.
+- [ ] Authorization implemented.
+- [ ] Tenant isolation implemented.
+- [ ] Required CRUD routes implemented.
+- [ ] Validation implemented.
+- [ ] Persistent database operational.
+- [ ] Business transactions are consistent.
+- [ ] Errors propagate correctly.
+
+## Integrations
+
+- [ ] Gemini uses actual API responses.
+- [ ] Telegram never accepts unauthorized approvals.
+- [ ] Payment verification cannot be fabricated.
+- [ ] GST registration cannot be fabricated.
+- [ ] RMM never presents fake telemetry.
+- [ ] Missing integrations are clearly disabled.
+
+## Quality
+
+- [ ] TypeScript checks pass.
+- [ ] Production build succeeds.
+- [ ] Automated tests pass.
+- [ ] Security checks pass.
+- [ ] Deployment documentation is updated.
+- [ ] No known critical vulnerability remains unaddressed.
+
+If a criterion cannot be satisfied, mark it as incomplete and explain why.
+
+Never mark untested functionality as verified.
+
+---
+
+# 31. REQUIRED EXECUTION STRATEGY
+
+Do not merely explain the solution.
+
+**Modify the actual source code.**
+
+Work systematically.
+
+### Phase 1 — Repository inspection
+
+Read the complete repository.
+
+Identify every mock-data source and simulated behavior.
+
+Prepare a file-by-file modification plan.
+
+### Phase 2 — Zero-mock transformation
+
+Remove production demo data dependencies.
+
+Remove demo initialization.
+
+Implement empty-state support.
+
+Ensure the application remains usable.
+
+### Phase 3 — Database and backend
+
+Implement reliable persistence.
+
+Add missing APIs.
+
+Implement validation and transactions.
+
+Preserve genuine business records.
+
+### Phase 4 — Security
+
+Implement authentication.
+
+Implement roles and permissions.
+
+Protect APIs.
+
+Implement tenant isolation.
+
+### Phase 5 — Business modules
+
+Repair the twelve business modules.
+
+Connect frontend operations to real backend services.
+
+### Phase 6 — External integrations
+
+Implement configured integrations where credentials and supported provider access are available.
+
+Disable unavailable functionality safely.
+
+### Phase 7 — QA
+
+Run:
+
+```bash
+npm install
+npm run lint
+npm run build
+```
+
+Run the implemented unit, integration, and end-to-end test commands.
+
+Fix failures.
+
+Do not claim tests passed unless they actually ran successfully.
+
+### Phase 8 — Documentation
+
+Update:
+
+```text
+README.md
+.env.example
+HOSTINGER_DEPLOYMENT_GUIDE.md
+```
+
+Create:
+
+```text
+docs/NO_MOCK_DATA_AUDIT.md
+docs/ARCHITECTURE.md
+docs/API_DOCUMENTATION.md
+docs/DATABASE_SCHEMA.md
+docs/PRODUCTION_READINESS.md
+```
+
+Document genuinely implemented functionality and remaining external dependencies.
+
+### Phase 9 — Final verification
+
+Perform another recursive repository inspection.
+
+Search again for:
+
+```text
+mock
+demo
+sample
+fake
+simulated
+fallback
+hardcoded
+initialMock
+initialSample
+Math.random
+setTimeout
+```
+
+Inspect each occurrence in context.
+
+Not every occurrence is necessarily wrong.
+
+Remove production mock-data behavior, fabricated execution, and misleading fake-success logic.
+
+Do not blindly delete legitimate retry timers, secure utility code, documentation, or test-only fixtures.
+
+---
+
+# 32. FINAL DELIVERABLES
+
+After implementing the changes, provide:
+
+## A. Repository audit summary
+
+Explain what was changed.
+
+## B. File-by-file modification report
+
+List every modified, added, and deleted file.
+
+## C. Mock data elimination report
+
+Identify every removed mock dataset.
+
+## D. Database implementation summary
+
+Explain schema, migrations, and persistence behavior.
+
+## E. API implementation summary
+
+List implemented and protected endpoints.
+
+## F. Integration readiness matrix
+
+For each external integration, specify:
+
+- Implemented
+- Configured
+- Not configured
+- Blocked
+- Requires credentials
+- Not yet implemented
+
+## G. Security verification
+
+Explain which controls are actually implemented and tested.
+
+## H. Test results
+
+Report exact executed commands and outcomes.
+
+## I. Deployment instructions
+
+Provide environment variables, database setup, build commands, and Hostinger deployment steps.
+
+## J. Remaining limitations
+
+Clearly identify anything that is not production-ready.
+
+Do not invent completion results.
+
+---
+
+# 33. ABSOLUTE RESTRICTIONS
+
+DO NOT:
+
+1. Reinsert mock data.
+2. Generate fictional customers.
+3. Generate fake invoices.
+4. Generate random payments.
+5. Fabricate supplier quotations.
+6. Display fake revenue.
+7. Pretend Telegram approvals were authenticated.
+8. Pretend GST invoices were registered.
+9. Pretend remote commands were executed.
+10. Pretend integrations are connected.
+11. Pretend AI responses are live when they are hardcoded.
+12. Pretend a database write succeeded when it failed.
+13. Break existing navigation.
+14. Remove entire business modules merely because their backend is incomplete.
+15. Replace existing complex UI with a simplistic prototype.
+16. Expose API credentials.
+17. Silently delete genuine production records.
+18. Claim production readiness without testing.
+19. Add demonstration data as an error fallback.
+20. Leave critical financial or authorization vulnerabilities exposed.
+
+---
+
+# 34. FINAL SYSTEM EXPECTATION
+
+I want the finished application to behave like a genuine enterprise business operating system.
+
+On the first launch:
+
+**Dashboard:** Empty.
+
+**Products:** Zero.
+
+**Inventory:** Zero.
+
+**Customers:** Zero.
+
+**Leads:** Zero.
+
+**Quotations:** Zero.
+
+**Invoices:** Zero.
+
+**Service Tickets:** Zero.
+
+**Endpoints:** Zero.
+
+**Field Jobs:** Zero.
+
+**Projects:** Zero.
+
+**Assets:** Zero.
+
+**AMC Contracts:** Zero.
+
+**RMA Claims:** Zero.
+
+**CRM Opportunities:** Zero.
+
+**Workflow Executions:** Zero.
+
+**Telegram Messages:** Zero.
+
+**Audit Events:** Zero business events until real operations occur.
+
+**External Integrations:** Not configured unless genuinely connected.
+
+**AI:** Available only when a working Gemini configuration exists.
+
+The application must allow me to enter real information and operate all supported workflows against a secure persistent backend.
+
+Every real action must create the appropriate database record.
+
+Every business operation must produce accurate feedback.
+
+Every displayed metric must be derived from genuine records.
+
+Every integration must accurately report its operational status.
+
+**My priority is not a demonstration application.**
+
+**My priority is a secure, reliable, scalable, real-data-only Autonomous IT Hardware & Services Operating System.**
+
+START BY INSPECTING THE COMPLETE EXISTING REPOSITORY.
+
+THEN IMPLEMENT THE REQUIRED CHANGES IN THE ACTUAL CODEBASE.
+
+PRIORITIZE ZERO-MOCK INITIALIZATION, SECURITY, AND DATA INTEGRITY.
+
+CONTINUE THROUGH THE EXECUTION PHASES, VERIFY YOUR CHANGES, AND PROVIDE A TRUTHFUL FINAL REPORT.
+
+Do not stop after producing an implementation plan.
+
+Do not claim unfinished functionality is complete.
+
+Do not replace real functionality with fake simulation.
+
+**SUCCESS CONDITION: A CLEAN, FUNCTIONAL, REAL-DATA-ONLY APPLICATION WITH NO DEMONSTRATION RECORDS OR FABRICATED OPERATIONAL SUCCESS.**

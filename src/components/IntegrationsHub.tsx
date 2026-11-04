@@ -9,46 +9,45 @@ import {
   Cloud, 
   MessageCircle, 
   Send, 
-  ExternalLink, 
   Sliders, 
   Lock,
   Key,
-  Radio
+  Radio,
+  FileCheck,
+  Sparkles,
+  Receipt,
+  AlertCircle,
+  X
 } from 'lucide-react';
-import { IntegrationConnector } from '../types';
+import { IntegrationConnector, IntegrationStatus } from '../types';
 
 interface IntegrationsHubProps {
   connectors: IntegrationConnector[];
-  onSyncConnector: (id: string) => void;
+  onSyncConnector?: (id: string) => void;
 }
 
 export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
   connectors,
   onSyncConnector
 }) => {
-  const [syncingId, setSyncingId] = useState<string | null>(null);
   const [selectedConnector, setSelectedConnector] = useState<IntegrationConnector | null>(null);
-  const [webhookUrl, setWebhookUrl] = useState('https://api.apex-it-os.internal/v1/webhooks/inbound');
-
-  const handleSyncClick = (id: string) => {
-    setSyncingId(id);
-    setTimeout(() => {
-      onSyncConnector(id);
-      setSyncingId(null);
-    }, 1200);
-  };
 
   const getIcon = (iconName: string) => {
     switch (iconName) {
+      case 'Sparkles': return <Sparkles className="w-5 h-5 text-indigo-400" />;
       case 'Shield': return <ShieldCheck className="w-5 h-5 text-indigo-400" />;
       case 'Laptop': return <Laptop className="w-5 h-5 text-emerald-400" />;
       case 'Mail': return <Mail className="w-5 h-5 text-blue-400" />;
       case 'Cloud': return <Cloud className="w-5 h-5 text-amber-400" />;
       case 'MessageCircle': return <MessageCircle className="w-5 h-5 text-emerald-400" />;
       case 'Send': return <Send className="w-5 h-5 text-cyan-400" />;
+      case 'Receipt': return <Receipt className="w-5 h-5 text-purple-400" />;
+      case 'FileCheck': return <FileCheck className="w-5 h-5 text-teal-400" />;
       default: return <Network className="w-5 h-5 text-indigo-400" />;
     }
   };
+
+  const configuredCount = connectors.filter(c => c.status === 'CONFIGURED' || c.status === 'CONNECTED').length;
 
   return (
     <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8 space-y-6">
@@ -58,23 +57,25 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Network className="w-6 h-6 text-cyan-400" />
-            Ecosystem Integrations & Cloud Connectors
+            Ecosystem Integrations & External Hubs
           </h1>
           <p className="text-sm text-slate-400">
-            Bidirectional synchronizers with Microsoft Entra ID, Intune MDM, AWS Infrastructure, WhatsApp Gateway, and Telegram.
+            Real provider connectivity status for Google Gemini AI, Telegram Bot, Microsoft Graph, Payment Gateways, and GST E-Invoicing.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl text-xs font-mono text-emerald-400">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>All 6 Critical Hubs Synced</span>
+        <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 px-3.5 py-1.5 rounded-xl text-xs font-mono">
+          <span className={`w-2 h-2 rounded-full ${configuredCount > 0 ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></span>
+          <span className="text-slate-300">
+            {configuredCount} of {connectors.length} Integrations Configured
+          </span>
         </div>
       </div>
 
       {/* Connectors Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         {connectors.map((conn) => {
-          const isSyncing = syncingId === conn.id;
+          const isConfigured = conn.status === 'CONFIGURED' || conn.status === 'CONNECTED';
           return (
             <div
               key={conn.id}
@@ -93,9 +94,9 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
                   </div>
 
                   <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold ${
-                    conn.status === 'CONNECTED'
+                    isConfigured
                       ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                      : 'bg-amber-950 text-amber-300 border border-amber-800'
+                      : 'bg-slate-950 text-slate-400 border border-slate-800'
                   }`}>
                     {conn.status}
                   </span>
@@ -105,14 +106,20 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
                   {conn.description}
                 </p>
 
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1 text-xs font-mono">
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5 text-xs font-mono">
                   <div className="flex justify-between text-slate-400">
-                    <span>Records Synced:</span>
-                    <strong className="text-slate-200">{conn.recordsSynced}</strong>
+                    <span>Connection Status:</span>
+                    <strong className={isConfigured ? 'text-emerald-400' : 'text-slate-500'}>
+                      {isConfigured ? 'Verified Active' : 'Not Configured'}
+                    </strong>
                   </div>
                   <div className="flex justify-between text-slate-400">
-                    <span>Last Heartbeat:</span>
-                    <span className="text-cyan-400">{conn.lastSyncTime}</span>
+                    <span>Required Keys:</span>
+                    <span className="text-slate-300 text-[10px]">
+                      {conn.requiredEnvKeys && conn.requiredEnvKeys.length > 0
+                        ? conn.requiredEnvKeys.join(', ')
+                        : 'None'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -123,108 +130,77 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
                   className="text-slate-400 hover:text-white cursor-pointer font-semibold flex items-center gap-1"
                 >
                   <Sliders className="w-3.5 h-3.5" />
-                  Configure
+                  View Setup Guide
                 </button>
 
-                <button
-                  onClick={() => handleSyncClick(conn.id)}
-                  disabled={isSyncing}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-semibold transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-cyan-400' : ''}`} />
-                  <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
-                </button>
+                <span className="text-[11px] font-mono text-slate-500">
+                  {isConfigured ? 'Live Environment' : 'Optional Service'}
+                </span>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* Webhook Gateway Diagnostics Card */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4 text-xs">
-        <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-          <div className="flex items-center gap-2">
-            <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
-            <h3 className="font-bold text-white text-sm">Autonomous Webhook Listener & Inbound Stream Gateway</h3>
-          </div>
-          <span className="text-emerald-400 font-mono text-[11px] font-bold">200 OK • 0 Drop Rate</span>
-        </div>
-
-        <div className="space-y-2">
-          <span className="text-slate-400 block font-mono">Public Inbound Webhook Endpoint (HMAC Verified):</span>
-          <div className="flex items-center gap-2 bg-slate-950 p-3 rounded-xl border border-slate-800 font-mono text-slate-300">
-            <Lock className="w-4 h-4 text-amber-400 shrink-0" />
-            <span className="truncate flex-1">{webhookUrl}</span>
-            <button
-              onClick={() => alert("Copied webhook URL to clipboard.")}
-              className="px-2.5 py-1 rounded bg-slate-800 text-slate-200 hover:text-white cursor-pointer"
-            >
-              Copy
-            </button>
-          </div>
-        </div>
-
-        <p className="text-slate-500 text-[11px]">
-          Receives live telemetric health pings from RMM agents, WhatsApp delivery confirmations, and signed Telegram inline keyboard callbacks.
-        </p>
-      </div>
-
-      {/* Configuration Modal */}
+      {/* Configuration Details Modal */}
       {selectedConnector && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4 text-xs">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <h3 className="font-bold text-white text-sm flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-cyan-400" />
-                Configure {selectedConnector.name}
-              </h3>
-              <button onClick={() => setSelectedConnector(null)} className="text-slate-400 hover:text-white cursor-pointer">✕</button>
-            </div>
-
-            <div className="space-y-3">
-              <div>
-                <label className="text-slate-400 block mb-1 font-semibold">Tenant / Organization ID</label>
-                <input
-                  type="text"
-                  defaultValue="tenant-prod-apex-mumbai-01"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono"
-                  readOnly
-                />
-              </div>
-
-              <div>
-                <label className="text-slate-400 block mb-1 font-semibold">API Secret / Bearer Token</label>
-                <div className="flex items-center gap-2 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 font-mono text-slate-400">
-                  <Key className="w-3.5 h-3.5 text-amber-400" />
-                  <span>••••••••••••••••••••••••••••••••••••</span>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800">
+                  {getIcon(selectedConnector.icon)}
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">{selectedConnector.name} Integration</h3>
+                  <span className="text-xs font-mono text-slate-400">{selectedConnector.category}</span>
                 </div>
               </div>
+              <button
+                onClick={() => setSelectedConnector(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
 
-              <div>
-                <label className="text-slate-400 block mb-1 font-semibold">Sync Frequency</label>
-                <select className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
-                  <option>Real-time Webhook Streaming (Sub-second)</option>
-                  <option>Every 5 Minutes</option>
-                  <option>Hourly Batch</option>
-                </select>
+            <div className="space-y-3 text-xs">
+              <p className="text-slate-300 leading-relaxed">
+                {selectedConnector.description}
+              </p>
+
+              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <span className="text-[11px] font-mono font-bold text-slate-400 uppercase block">
+                  Environment Configuration Keys (.env):
+                </span>
+                {selectedConnector.requiredEnvKeys && selectedConnector.requiredEnvKeys.length > 0 ? (
+                  <div className="space-y-1">
+                    {selectedConnector.requiredEnvKeys.map((key) => (
+                      <div key={key} className="flex items-center justify-between font-mono bg-slate-900 px-2.5 py-1.5 rounded border border-slate-800">
+                        <span className="text-amber-400 font-bold">{key}</span>
+                        <span className="text-slate-500 text-[10px]">Server-Side Secret</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-slate-500">No additional environment keys required.</span>
+                )}
+              </div>
+
+              <div className="p-3 rounded-xl bg-indigo-950/30 border border-indigo-800/40 text-indigo-300 text-[11px] flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                <span>
+                  All external credentials remain strictly on your server in <code>.env</code> and are never leaked to client web browsers.
+                </span>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+            <div className="pt-2 flex justify-end">
               <button
                 onClick={() => setSelectedConnector(null)}
-                className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 font-semibold cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs cursor-pointer transition"
               >
                 Close
-              </button>
-              <button
-                onClick={() => {
-                  alert("Settings saved and token rotated successfully.");
-                  setSelectedConnector(null);
-                }}
-                className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold cursor-pointer"
-              >
-                Save Changes
               </button>
             </div>
           </div>

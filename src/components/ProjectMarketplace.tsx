@@ -30,7 +30,6 @@ import {
   X
 } from 'lucide-react';
 import { Project, Proposal, ProviderProfile, ProjectMilestone, CRMOpportunity, MarketplaceDispute } from '../types';
-import { initialCRMOpportunities, initialMarketplaceDisputes } from '../data/mockData';
 
 interface ProjectMarketplaceProps {
   projects: Project[];
@@ -52,47 +51,25 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   onAcceptProposal,
   onCreateProject,
   onRequestDiagnosticBooking,
-  onAddProposal,
-  isCleanSlate = false
+  onAddProposal
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'PROJECTS' | 'PACKAGES' | 'PROVIDERS' | 'AI_DIAGNOSIS' | 'CRM_PIPELINE' | 'DISPUTES'>('PROJECTS');
   const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
 
-  // CRM Pipeline State
-  const [crmOpportunities, setCrmOpportunities] = useState<CRMOpportunity[]>(
-    isCleanSlate ? [] : initialCRMOpportunities
-  );
+  // CRM Pipeline State - starts empty
+  const [crmOpportunities, setCrmOpportunities] = useState<CRMOpportunity[]>([]);
   const [showNewOppModal, setShowNewOppModal] = useState(false);
   const [newOppClient, setNewOppClient] = useState('');
   const [newOppTitle, setNewOppTitle] = useState('');
-  const [newOppValue, setNewOppValue] = useState(250000);
-  const [newOppProvider, setNewOppProvider] = useState('Nexus Cloud Solutions');
+  const [newOppValue, setNewOppValue] = useState(0);
+  const [newOppProvider, setNewOppProvider] = useState('');
 
-  // Dispute State
-  const [marketplaceDisputes, setMarketplaceDisputes] = useState<MarketplaceDispute[]>(
-    isCleanSlate ? [] : initialMarketplaceDisputes
-  );
-  const [selectedDisputeId, setSelectedDisputeId] = useState<string>(
-    isCleanSlate ? '' : (initialMarketplaceDisputes[0]?.id || '')
-  );
+  // Dispute State - starts empty
+  const [marketplaceDisputes, setMarketplaceDisputes] = useState<MarketplaceDispute[]>([]);
+  const [selectedDisputeId, setSelectedDisputeId] = useState<string>('');
   const [arbitrationResolutionNote, setArbitrationResolutionNote] = useState('');
-
-  useEffect(() => {
-    if (isCleanSlate) {
-      setCrmOpportunities([]);
-      setMarketplaceDisputes([]);
-      setSelectedDisputeId('');
-      if (projects.length === 0) {
-        setSelectedProjectId('');
-      }
-    } else {
-      setCrmOpportunities(initialCRMOpportunities);
-      setMarketplaceDisputes(initialMarketplaceDisputes);
-      setSelectedDisputeId(initialMarketplaceDisputes[0]?.id || '');
-      setSelectedProjectId(projects[0]?.id || '');
-    }
-  }, [isCleanSlate]);
+  const [mpNotice, setMpNotice] = useState<string | null>(null);
 
   const [selectedTierByPackage, setSelectedTierByPackage] = useState<Record<string, 'Basic' | 'Standard' | 'Enterprise'>>({
     'pkg-1': 'Standard',
@@ -386,6 +363,13 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
           </button>
         </div>
       </div>
+
+      {mpNotice && (
+        <div className="p-3 bg-indigo-950/80 border border-indigo-700 rounded-xl text-indigo-200 text-xs flex items-center justify-between shadow">
+          <span>{mpNotice}</span>
+          <button onClick={() => setMpNotice(null)} className="text-indigo-400 hover:text-white font-bold ml-3 cursor-pointer">✕</button>
+        </div>
+      )}
 
       {/* VIEW 1: PROJECTS & PROPOSALS */}
       {activeSubTab === 'PROJECTS' && (
@@ -962,7 +946,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                       {prov.city}
                     </span>
                     <button
-                      onClick={() => alert(`Direct dispatch request initiated for ${prov.name}.`)}
+                      onClick={() => setMpNotice(`Direct dispatch request initiated for ${prov.name}.`)}
                       className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold border border-slate-700 cursor-pointer"
                     >
                       Book Engineer
@@ -1238,7 +1222,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                   <button
                     onClick={() => {
                       if (!newOppTitle || !newOppClient) {
-                        alert("Please fill in the deal title and client name.");
+                        setMpNotice("Please fill in the deal title and client name.");
                         return;
                       }
                       const newOpp: CRMOpportunity = {
@@ -1249,14 +1233,16 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                         stage: 'LEAD',
                         value: newOppValue,
                         winProbability: 30,
-                        expectedCloseDate: '2026-04-15',
-                        assignedEngineer: 'Deepak Rao (Pre-Sales)',
+                        expectedCloseDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                        assignedEngineer: 'Pre-Sales Solutions Specialist',
                         category: 'Enterprise Infrastructure'
                       };
                       setCrmOpportunities([newOpp, ...crmOpportunities]);
                       setShowNewOppModal(false);
                       setNewOppTitle('');
                       setNewOppClient('');
+                      setNewOppValue(0);
+                      setMpNotice(`CRM Opportunity "${newOpp.title}" created.`);
                     }}
                     className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold cursor-pointer shadow"
                   >
@@ -1441,7 +1427,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                                 ...d,
                                 status: 'RESOLVED_RELEASED'
                               } : d));
-                              alert(`Arbitration Ruling executed: Full escrow released to ${activeDispute.providerName}.`);
+                              setMpNotice(`Arbitration Ruling executed: Full escrow released to ${activeDispute.providerName}.`);
                             }}
                             className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition cursor-pointer text-center"
                           >
@@ -1454,7 +1440,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                                 ...d,
                                 status: 'RESOLVED_REFUND'
                               } : d));
-                              alert(`Arbitration Ruling executed: Full refund returned to ${activeDispute.customerName}.`);
+                              setMpNotice(`Arbitration Ruling executed: Full refund returned to ${activeDispute.customerName}.`);
                             }}
                             className="p-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition cursor-pointer text-center"
                           >
@@ -1467,7 +1453,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                                 ...d,
                                 status: 'RESOLVED_REWORK'
                               } : d));
-                              alert(`Mandatory rework order issued to provider with escrow extension.`);
+                              setMpNotice(`Mandatory rework order issued to provider with escrow extension.`);
                             }}
                             className="p-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition cursor-pointer text-center"
                           >

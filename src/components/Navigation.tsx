@@ -44,8 +44,7 @@ export const Navigation: React.FC<NavigationProps> = ({
     {
       key: 'executive',
       label: 'Executive CIO Hub',
-      icon: <BarChart3 className="w-4 h-4 text-emerald-400" />,
-      badge: '91%'
+      icon: <BarChart3 className="w-4 h-4 text-emerald-400" />
     },
     {
       key: 'telegram',

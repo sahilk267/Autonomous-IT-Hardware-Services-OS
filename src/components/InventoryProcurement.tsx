@@ -47,20 +47,28 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [newProdName, setNewProdName] = useState('');
   const [newProdSku, setNewProdSku] = useState('');
-  const [newProdBrand, setNewProdBrand] = useState('Dell');
+  const [newProdBrand, setNewProdBrand] = useState('');
   const [newProdCat, setNewProdCat] = useState<ProductItem['category']>('Desktop');
   const [newProdSpecs, setNewProdSpecs] = useState('');
-  const [newProdCost, setNewProdCost] = useState('45000');
-  const [newProdPrice, setNewProdPrice] = useState('52000');
-  const [newProdQty, setNewProdQty] = useState('10');
-  const [newProdLocation, setNewProdLocation] = useState('Mumbai Hub (Rack A-12)');
+  const [newProdCost, setNewProdCost] = useState('');
+  const [newProdPrice, setNewProdPrice] = useState('');
+  const [newProdQty, setNewProdQty] = useState('');
+  const [newProdLocation, setNewProdLocation] = useState('');
 
   // Create RFQ Modal State
   const [showNewRfqModal, setShowNewRfqModal] = useState(false);
   const [newRfqName, setNewRfqName] = useState('');
   const [newRfqSku, setNewRfqSku] = useState('');
-  const [newRfqQty, setNewRfqQty] = useState('5');
-  const [newRfqUrgency, setNewRfqUrgency] = useState<'CRITICAL' | 'STANDARD'>('CRITICAL');
+  const [newRfqQty, setNewRfqQty] = useState('');
+  const [newRfqUrgency, setNewRfqUrgency] = useState<'HIGH' | 'MEDIUM' | 'LOW'>('HIGH');
+
+  // Supplier quote input state
+  const [actionBanner, setActionBanner] = useState<string | null>(null);
+  const [activeRfqForQuote, setActiveRfqForQuote] = useState<string | null>(null);
+  const [newSqSupplier, setNewSqSupplier] = useState('');
+  const [newSqCost, setNewSqCost] = useState('');
+  const [newSqLeadDays, setNewSqLeadDays] = useState('2');
+  const [newSqInStock, setNewSqInStock] = useState(true);
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -81,23 +89,23 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
 
     const cost = parseInt(newProdCost, 10) || 0;
     const price = parseInt(newProdPrice, 10) || 0;
-    const qty = parseInt(newProdQty, 10) || 1;
+    const qty = parseInt(newProdQty, 10) || 0;
 
     const newProd: ProductItem = {
       id: `prod-${Date.now()}`,
       sku: newProdSku.trim().toUpperCase(),
       name: newProdName.trim(),
-      brand: newProdBrand,
+      brand: newProdBrand.trim() || 'Generic',
       category: newProdCat,
-      specs: newProdSpecs.trim() || 'Standard enterprise hardware specification',
+      specs: newProdSpecs.trim(),
       purchaseCost: cost,
-      marketPrice: price + 2000,
-      sellingPrice: price,
-      minPrice: cost + 1000,
-      targetMarginPercent: 15,
+      marketPrice: price > 0 ? price + 1000 : cost,
+      sellingPrice: price > 0 ? price : cost,
+      minPrice: cost,
+      targetMarginPercent: cost > 0 && price > cost ? Math.round(((price - cost) / price) * 100) : 15,
       stockAvailable: qty,
       stockReserved: 0,
-      warehouseLocation: newProdLocation,
+      warehouseLocation: newProdLocation.trim() || 'Central Warehouse',
       hsn: '84713010',
       gstPercent: 18,
       warrantyYears: 3,
@@ -110,7 +118,12 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
     setShowAddProductModal(false);
     setNewProdName('');
     setNewProdSku('');
+    setNewProdBrand('');
     setNewProdSpecs('');
+    setNewProdCost('');
+    setNewProdPrice('');
+    setNewProdQty('');
+    setNewProdLocation('');
   };
 
   const handleCreateRfqSubmit = (e: React.FormEvent) => {
@@ -118,7 +131,6 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
     if (!newRfqName.trim()) return;
 
     const qty = parseInt(newRfqQty, 10) || 1;
-    const estimatedCost = 35000;
 
     const newRfq: RFQItem = {
       id: `rfq-${Date.now().toString().slice(-4)}`,
@@ -126,24 +138,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
       requiredQty: qty,
       urgency: newRfqUrgency,
       status: 'OPEN',
-      supplierQuotes: [
-        {
-          supplierId: 'sup-1',
-          supplierName: 'Redington India Ltd',
-          unitCost: estimatedCost,
-          leadTimeDays: 2,
-          inStock: true,
-          recommended: true
-        },
-        {
-          supplierId: 'sup-2',
-          supplierName: 'Ingram Micro India',
-          unitCost: estimatedCost + 1200,
-          leadTimeDays: 1,
-          inStock: true,
-          recommended: false
-        }
-      ]
+      supplierQuotes: []
     };
 
     if (onCreateRFQ) {
@@ -152,6 +147,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
     setShowNewRfqModal(false);
     setNewRfqName('');
     setNewRfqSku('');
+    setNewRfqQty('');
   };
 
   // Dynamic KPI calculation
@@ -213,6 +209,13 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
           </button>
         </div>
       </div>
+
+      {actionBanner && (
+        <div className="p-3 bg-emerald-950/80 border border-emerald-700 rounded-xl text-emerald-200 text-xs flex items-center justify-between shadow">
+          <span>{actionBanner}</span>
+          <button onClick={() => setActionBanner(null)} className="text-emerald-400 hover:text-white font-bold ml-3 cursor-pointer">✕</button>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -438,6 +441,12 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
                     </div>
 
                     {/* Distributor Quotes Grid */}
+                    {rfq.supplierQuotes.length === 0 ? (
+                      <div className="p-4 my-3 rounded-xl bg-slate-900 border border-slate-800 text-center space-y-1">
+                        <p className="text-xs text-slate-400">No supplier quotations received yet.</p>
+                        <p className="text-[11px] text-slate-500">Awaiting quotation submission from authorized suppliers.</p>
+                      </div>
+                    ) : (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 my-4">
                       {rfq.supplierQuotes.map((sq) => {
                         const isRecommended = sq.recommended;
@@ -453,7 +462,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
                           >
                             {isRecommended && (
                               <span className="absolute -top-2.5 right-3 px-2 py-0.2 rounded-full bg-emerald-500 text-slate-950 font-bold text-[9px] uppercase tracking-wider">
-                                AI Best Total Value
+                                Best Value
                               </span>
                             )}
 
@@ -480,7 +489,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
                               {isChosen ? (
                                 <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-emerald-950 border border-emerald-700 text-emerald-300 font-bold text-xs">
                                   <CheckCircle2 className="w-3.5 h-3.5" />
-                                  PO #PO-902 Dispatched
+                                  PO #{rfq.id.toUpperCase()} Dispatched
                                 </div>
                               ) : (
                                 <button
@@ -499,6 +508,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
                         );
                       })}
                     </div>
+                    )}
 
                     <div className="text-[11px] text-slate-400 flex items-center gap-2 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
                       <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -531,45 +541,38 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
             AI detects slow-moving enterprise inventory to recommend automated liquidation strategies: bundling with high-margin laptops, reseller clearance discount, or OEM return credit.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h4 className="font-bold text-sm text-white">Seagate IronWolf Pro 8TB Enterprise NAS HDD</h4>
-                  <span className="text-xs text-slate-400 font-mono">Stock Age: 112 Days • 6 Units in Stock</span>
-                </div>
-                <span className="px-2 py-0.5 rounded bg-rose-950 text-rose-300 font-mono text-xs">Low Velocity</span>
-              </div>
-              <div className="text-xs text-slate-300 bg-slate-900 p-3 rounded-lg border border-slate-800">
-                <strong className="text-sky-400">AI Recommendation:</strong> Bundle 2 units with every Dell PowerEdge R760 Server deal at 8% concession to clear capital and prevent depreciation.
-              </div>
-              <button 
-                onClick={() => alert("Autonomous Bundle Promotion Created: 8TB HDD now auto-suggested in Server BOMs.")}
-                className="w-full py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs cursor-pointer transition"
-              >
-                Apply Bundle Rule to Server Deals
-              </button>
+          {products.filter(p => p.stockAvailable > 0).length === 0 ? (
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-10 text-center text-slate-500 space-y-2">
+              <TrendingDown className="w-8 h-8 mx-auto text-slate-600" />
+              <p className="font-semibold text-slate-300 text-xs">No Slow-Moving or Aging Inventory</p>
+              <p className="text-[11px] text-slate-500 max-w-sm mx-auto">
+                All catalog stock turnover rates are healthy. Inward warehouse inventory to begin tracking inventory velocity.
+              </p>
             </div>
-
-            <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h4 className="font-bold text-sm text-white">Kingston 32GB DDR4 3200MHz ECC Server RAM</h4>
-                  <span className="text-xs text-slate-400 font-mono">Stock Age: 98 Days • 10 Units in Stock</span>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              {products.filter(p => p.stockAvailable > 0).slice(0, 4).map((prod) => (
+                <div key={prod.id} className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-bold text-sm text-white">{prod.name}</h4>
+                      <span className="text-xs text-slate-400 font-mono">SKU: {prod.sku} • {prod.stockAvailable} Units Available</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 font-mono text-xs">Active Stock</span>
+                  </div>
+                  <div className="text-xs text-slate-300 bg-slate-900 p-3 rounded-lg border border-slate-800">
+                    <strong className="text-sky-400">Recommendation:</strong> Bundle with related {prod.category} orders at targeted margin of {prod.targetMarginPercent}% to optimize inventory turns.
+                  </div>
+                  <button 
+                    onClick={() => setActionBanner(`Promotional bundling rule configured for ${prod.name} (${prod.sku}).`)}
+                    className="w-full py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs cursor-pointer transition"
+                  >
+                    Apply Promotional Bundle Rule
+                  </button>
                 </div>
-                <span className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 font-mono text-xs">Tech Transition</span>
-              </div>
-              <div className="text-xs text-slate-300 bg-slate-900 p-3 rounded-lg border border-slate-800">
-                <strong className="text-sky-400">AI Recommendation:</strong> Flash offer to 4 existing AMC clients running older Gen14 servers before Q3 closing.
-              </div>
-              <button 
-                onClick={() => alert("Campaign Dispatched: WhatsApp flash offer sent to 4 eligible server AMC clients.")}
-                className="w-full py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs cursor-pointer transition"
-              >
-                Trigger Targeted AMC Customer Outreach
-              </button>
+              ))}
             </div>
-          </div>
+          )}
         </div>
       )}
 

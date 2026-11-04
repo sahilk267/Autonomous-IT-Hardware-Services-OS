@@ -1,915 +1,132 @@
 {
-  "isCleanSlate": false,
-  "products": [
+  "tenant": {
+    "id": "tenant-1",
+    "name": "Apex Autonomous IT Operating System",
+    "gstin": "",
+    "state": "Maharashtra (27)",
+    "currency": "₹",
+    "logoText": "APEX",
+    "isConfigured": false
+  },
+  "users": [
     {
-      "id": "prod-1",
-      "sku": "DELL-OPT-7010-I5",
-      "name": "Dell OptiPlex 7010 Small Form Factor",
-      "brand": "Dell",
-      "category": "Desktop",
-      "specs": "Intel Core i5-13500 (14 Cores), 16GB DDR5 4800MHz, 512GB PCIe Gen4 NVMe, Win 11 Pro",
-      "purchaseCost": 44200,
-      "marketPrice": 54000,
-      "sellingPrice": 51800,
-      "minPrice": 48500,
-      "targetMarginPercent": 17.2,
-      "stockAvailable": 28,
-      "stockReserved": 12,
-      "warehouseLocation": "Mumbai Hub - Bin A-14",
-      "hsn": "84713010",
-      "gstPercent": 18,
-      "warrantyYears": 3,
-      "serialTrackingRequired": true
-    },
-    {
-      "id": "prod-2",
-      "sku": "LEN-T14-GEN4-I7",
-      "name": "Lenovo ThinkPad T14 Gen 4 Ultrabook",
-      "brand": "Lenovo",
-      "category": "Laptop",
-      "specs": "Intel Core i7-1365U vPro, 32GB LPDDR5x, 1TB SSD, 14\" WUXGA Low Power IPS 400 nits, Win 11 Pro",
-      "purchaseCost": 82000,
-      "marketPrice": 98000,
-      "sellingPrice": 95500,
-      "minPrice": 89000,
-      "targetMarginPercent": 16.5,
-      "stockAvailable": 14,
-      "stockReserved": 4,
-      "warehouseLocation": "Pune Hub - Bin B-03",
-      "hsn": "84713010",
-      "gstPercent": 18,
-      "warrantyYears": 3,
-      "serialTrackingRequired": true
-    },
-    {
-      "id": "prod-3",
-      "sku": "CISCO-CBS350-48P",
-      "name": "Cisco CBS350-48P-4G 48-Port PoE+ Gigabit Switch",
-      "brand": "Cisco",
-      "category": "Networking",
-      "specs": "48x 10/100/1000 PoE+ Ports (370W Power Budget), 4x 1G SFP Uplinks, Layer 3 Routing, Cloud Managed",
-      "purchaseCost": 78500,
-      "marketPrice": 96000,
-      "sellingPrice": 92000,
-      "minPrice": 86000,
-      "targetMarginPercent": 17.2,
-      "stockAvailable": 3,
-      "stockReserved": 3,
-      "warehouseLocation": "Mumbai Hub - Bin C-01",
-      "hsn": "85176290",
-      "gstPercent": 18,
-      "warrantyYears": 5,
-      "serialTrackingRequired": true
-    },
-    {
-      "id": "prod-4",
-      "sku": "FORTI-FG-60F",
-      "name": "Fortinet FortiGate 60F Next-Gen Firewall",
-      "brand": "Fortinet",
-      "category": "Networking",
-      "specs": "10x GE RJ45, 1Gbps Threat Protection Throughput, 1.4Gbps SSL Inspection, 1-Yr Unified Threat Bundle",
-      "purchaseCost": 56000,
-      "marketPrice": 69000,
-      "sellingPrice": 65500,
-      "minPrice": 61000,
-      "targetMarginPercent": 17,
-      "stockAvailable": 8,
-      "stockReserved": 2,
-      "warehouseLocation": "Mumbai Hub - Bin C-05",
-      "hsn": "85176290",
-      "gstPercent": 18,
-      "warrantyYears": 1,
-      "serialTrackingRequired": true
-    },
-    {
-      "id": "prod-5",
-      "sku": "APC-SRT-6KXLI",
-      "name": "APC Smart-UPS On-Line 6kVA 230V Double-Conversion",
-      "brand": "APC Schneider",
-      "category": "Power",
-      "specs": "6000VA/6000W Pure Sine Wave, Extended Runtime Rack/Tower, Hardwire 3-wire Input, SmartSlot Card",
-      "purchaseCost": 168000,
-      "marketPrice": 205000,
-      "sellingPrice": 195000,
-      "minPrice": 182000,
-      "targetMarginPercent": 16.1,
-      "stockAvailable": 2,
-      "stockReserved": 2,
-      "warehouseLocation": "Heavy Equipment Bay - Rack 2",
-      "hsn": "85044090",
-      "gstPercent": 18,
-      "warrantyYears": 2,
-      "serialTrackingRequired": true
-    },
-    {
-      "id": "prod-6",
-      "sku": "DELL-P2422H",
-      "name": "Dell Professional P2422H 24\" Borderless IPS Monitor",
-      "brand": "Dell",
-      "category": "Peripheral",
-      "specs": "1920 x 1080 at 60Hz, IPS 99% sRGB, ComfortView Plus, Height/Pivot/Tilt adjustable stand, DP/HDMI/VGA/USB 3.2",
-      "purchaseCost": 11200,
-      "marketPrice": 14500,
-      "sellingPrice": 13500,
-      "minPrice": 12400,
-      "targetMarginPercent": 20.5,
-      "stockAvailable": 45,
-      "stockReserved": 25,
-      "warehouseLocation": "Mumbai Hub - Pallet 09",
-      "hsn": "85285200",
-      "gstPercent": 18,
-      "warrantyYears": 3,
-      "serialTrackingRequired": false
-    },
-    {
-      "id": "prod-7",
-      "sku": "DELL-R760-2U",
-      "name": "Dell PowerEdge R760 2U Rack Server",
-      "brand": "Dell",
-      "category": "Server",
-      "specs": "2x Intel Xeon Gold 5416S (32 Cores total), 128GB DDR5 ECC RDIMM, 8x 1.92TB NVMe Mixed Use RAID 10, iDRAC9 Enterprise",
-      "purchaseCost": 615000,
-      "marketPrice": 760000,
-      "sellingPrice": 720000,
-      "minPrice": 680000,
-      "targetMarginPercent": 17.1,
-      "stockAvailable": 2,
-      "stockReserved": 1,
-      "warehouseLocation": "Secure Server Vault - Bay 1",
-      "hsn": "84715000",
-      "gstPercent": 18,
-      "warrantyYears": 5,
-      "serialTrackingRequired": true
+      "id": "usr-1",
+      "username": "admin",
+      "name": "Enterprise IT Administrator",
+      "email": "admin@apex-it.internal",
+      "role": "BUSINESS_OWNER",
+      "tenantId": "tenant-1",
+      "createdAt": "2026-11-04T17:03:16.216Z"
     }
   ],
-  "leads": [
+  "products": [],
+  "leads": [],
+  "quotes": [],
+  "telegramMessages": [],
+  "suppliers": [],
+  "rfqs": [],
+  "tickets": [],
+  "endpoints": [],
+  "jobs": [],
+  "assets": [],
+  "licenses": [],
+  "amcs": [],
+  "projects": [],
+  "proposals": [],
+  "providers": [],
+  "events": [],
+  "invoices": [],
+  "workflows": [],
+  "connectors": [
     {
-      "id": "lead-101",
-      "companyName": "Nexus FinTech Labs",
-      "contactPerson": "Aditya Mehta (VP Infrastructure)",
-      "email": "aditya.m@nexusfintech.in",
-      "phone": "+91 98201 44520",
-      "source": "Website",
-      "score": "HOT",
-      "scoreValue": 94,
-      "stage": "Quotation Sent",
-      "estimatedValue": 2480000,
-      "requirementSummary": "45 Dev Laptops (Core i7 / 32GB) + 10G Cisco Core Switching + 3-Yr Onsite AMC for BKC office expansion.",
-      "createdAt": "2026-09-02",
-      "assignedTo": "Rahul Sen (Sales Lead)"
-    },
-    {
-      "id": "lead-102",
-      "companyName": "OmniHealth Hospitals Group",
-      "contactPerson": "Dr. Sneha Pillai (IT Director)",
-      "email": "sneha.p@omnihealth.org",
-      "phone": "+91 97690 12884",
-      "source": "Referral",
-      "score": "HOT",
-      "scoreValue": 88,
-      "stage": "BOM Created",
-      "estimatedValue": 1850000,
-      "requirementSummary": "PACS Imaging Server with 48TB High-Endurance Storage + 30 Diagnostic grade IPS Displays.",
-      "createdAt": "2026-09-03",
-      "assignedTo": "Anita Deshmukh (Enterprise Solutions)"
-    },
-    {
-      "id": "lead-103",
-      "companyName": "Zenith Logistics & Supply",
-      "contactPerson": "Karan Grover (Operations Head)",
-      "email": "karan@zenithlogistics.com",
-      "phone": "+91 99304 55190",
-      "source": "IndiaMART",
-      "score": "WARM",
-      "scoreValue": 72,
-      "stage": "Negotiation",
-      "estimatedValue": 680000,
-      "requirementSummary": "Warehouse barcode scanners, 15 rugged desktops, Wi-Fi 6 AP deployment with thermal testing.",
-      "createdAt": "2026-08-28",
-      "assignedTo": "Rahul Sen (Sales Lead)"
-    }
-  ],
-  "quotes": [
-    {
-      "id": "quote-1048",
-      "quoteNumber": "APX-QT-2026-1048",
-      "customerName": "Nexus FinTech Labs",
-      "customerGstin": "27AABCN8192K1Z4",
-      "customerState": "Maharashtra (27)",
-      "solutionName": "45-Seat Enterprise Engineering Compute Stack",
-      "items": [
-        {
-          "id": "b-1",
-          "category": "Laptop",
-          "sku": "LEN-T14-GEN4-I7",
-          "name": "Lenovo ThinkPad T14 Gen 4 Ultrabook (i7/32GB)",
-          "brand": "Lenovo",
-          "specs": "Intel Core i7-1365U, 32GB RAM, 1TB SSD, 3-Yr Premier Onsite",
-          "qty": 45,
-          "purchaseCost": 82000,
-          "sellingPrice": 90000,
-          "warrantyYears": 3,
-          "hsn": "84713010",
-          "gstPercent": 18
-        }
-      ],
-      "services": [
-        {
-          "id": "s-1",
-          "name": "Zero-Touch Autopilot Imaging & Asset Tagging",
-          "price": 45000,
-          "sla": "24 Hours"
-        },
-        {
-          "id": "s-2",
-          "name": "1-Year Enterprise VIP 4-Hour Response AMC",
-          "price": 95000,
-          "sla": "4-Hour Onsite"
-        }
-      ],
-      "subtotal": 4190000,
-      "discountAmount": 110000,
-      "marginPercent": 9.8,
-      "gstAmount": 734400,
-      "totalAmount": 4814400,
-      "status": "PENDING_OWNER_APPROVAL",
-      "approvalReason": "Customer requested ₹2,000/unit bulk concession; Margin dropped to 9.8% (< 12.0% auto-threshold). Requires Business Owner Telegram Authorization.",
-      "createdDate": "2026-09-04",
-      "validUntil": "2026-09-18",
-      "paymentTerms": "50% Advance with PO, 50% on Delivery"
-    },
-    {
-      "id": "quote-1042",
-      "quoteNumber": "APX-QT-2026-1042",
-      "customerName": "Zenith Logistics & Supply",
-      "customerGstin": "27AAACZ3320M1ZO",
-      "customerState": "Maharashtra (27)",
-      "solutionName": "Warehouse Wi-Fi 6 & Rugged Workstation Bundle",
-      "items": [
-        {
-          "id": "b-2",
-          "category": "Desktop",
-          "sku": "DELL-OPT-7010-I5",
-          "name": "Dell OptiPlex 7010 SFF (Core i5/16GB/512GB)",
-          "brand": "Dell",
-          "specs": "Core i5 13th Gen, 16GB RAM, 512GB SSD",
-          "qty": 12,
-          "purchaseCost": 44200,
-          "sellingPrice": 51800,
-          "warrantyYears": 3,
-          "hsn": "84713010",
-          "gstPercent": 18
-        }
-      ],
-      "services": [
-        {
-          "id": "s-3",
-          "name": "Factory Floor Wi-Fi Heatmap Survey & Installation",
-          "price": 28000,
-          "sla": "48 Hours"
-        }
-      ],
-      "subtotal": 649600,
-      "discountAmount": 15000,
-      "marginPercent": 15.6,
-      "gstAmount": 114228,
-      "totalAmount": 748828,
-      "status": "SENT_TO_CUSTOMER",
-      "createdDate": "2026-09-03",
-      "validUntil": "2026-09-17",
-      "paymentTerms": "100% on delivery"
-    }
-  ],
-  "telegramMessages": [
-    {
-      "id": "msg-1",
-      "sender": "bot",
-      "text": "🌅 *Autonomous Daily Business Briefing — 04 Sep 2026*\n\n• *MTD Sales:* ₹48.60 Lakhs (81% of Target)\n• *Gross Margin:* 17.2% average across all deals\n• *Stock Warnings:* 1 Critical (Cisco 48P Switch 0 units)\n• *Pending Approvals:* 1 Quote margin exception awaiting decision",
-      "timestamp": "09:00 AM",
-      "suggestedActions": [
-        "/dashboard",
-        "/pending",
-        "/stock"
+      "id": "conn-gemini",
+      "name": "Google Gemini AI",
+      "category": "AI & LLM",
+      "icon": "Sparkles",
+      "status": "NOT_CONFIGURED",
+      "recordsSynced": "0",
+      "lastSyncTime": "Never",
+      "description": "Powers autonomous BOM generation, IT triage, and natural-language executive copilot.",
+      "requiredEnvKeys": [
+        "GEMINI_API_KEY"
       ]
     },
     {
-      "id": "msg-2",
-      "sender": "bot",
-      "text": "🚨 *APPROVAL REQUIRED: Quote #APX-QT-2026-1048*\n\n• *Customer:* Nexus FinTech Labs (Aditya Mehta)\n• *Order Value:* ₹48,14,400 (Incl. GST)\n• *Gross Margin:* *9.8%* (₹4,10,000 profit)\n• *Rule Triggered:* Margin < 12.0% threshold\n• *AI Risk Assessment:* LOW RISK. High-reputation client, 50% advance confirmed, guaranteed repeat AMC. Recommended: *APPROVE*.",
-      "timestamp": "11:42 AM",
-      "approvalData": {
-        "type": "QUOTE_MARGIN",
-        "referenceId": "quote-1048",
-        "amount": 4814400,
-        "margin": 9.8,
-        "details": "Concession requested for 45 ThinkPad T14 laptops",
-        "status": "PENDING"
-      },
-      "suggestedActions": [
-        "APPROVE QUOTE",
-        "REJECT QUOTE",
-        "ASK AI RECOMMENDATION"
-      ]
-    }
-  ],
-  "rfqs": [
-    {
-      "id": "rfq-201",
-      "productName": "Cisco CBS350-48P-4G 48-Port PoE+ Switch",
-      "requiredQty": 5,
-      "urgency": "HIGH",
-      "status": "COMPARED",
-      "supplierQuotes": [
-        {
-          "supplierId": "supp-2",
-          "supplierName": "Redington India Ltd",
-          "unitCost": 77800,
-          "leadTimeDays": 2,
-          "inStock": true,
-          "recommended": true
-        },
-        {
-          "supplierId": "supp-1",
-          "supplierName": "Ingram Micro",
-          "unitCost": 78500,
-          "leadTimeDays": 4,
-          "inStock": true,
-          "recommended": false
-        },
-        {
-          "supplierId": "supp-3",
-          "supplierName": "Savex Tech",
-          "unitCost": 79200,
-          "leadTimeDays": 7,
-          "inStock": false,
-          "recommended": false
-        }
+      "id": "conn-telegram",
+      "name": "Telegram Bot API",
+      "category": "Messaging",
+      "icon": "Send",
+      "status": "NOT_CONFIGURED",
+      "recordsSynced": "0",
+      "lastSyncTime": "Never",
+      "description": "Enables mobile owner approvals, margin breach escalations, and command notifications.",
+      "requiredEnvKeys": [
+        "TELEGRAM_BOT_TOKEN",
+        "TELEGRAM_WEBHOOK_SECRET"
       ]
     },
     {
-      "id": "rfq-202",
-      "productName": "APC Smart-UPS On-Line 6kVA 230V",
-      "requiredQty": 2,
-      "urgency": "MEDIUM",
-      "status": "OPEN",
-      "supplierQuotes": [
-        {
-          "supplierId": "supp-2",
-          "supplierName": "Redington India Ltd",
-          "unitCost": 167500,
-          "leadTimeDays": 3,
-          "inStock": true,
-          "recommended": true
-        }
-      ]
-    }
-  ],
-  "tickets": [
-    {
-      "id": "t-401",
-      "ticketNumber": "INC-8890",
-      "title": "Core Branch Switch Dropping Packets (Port 24 Flapping)",
-      "category": "Network Outage",
-      "priority": "CRITICAL",
-      "requesterName": "Aditya Mehta",
-      "requesterDept": "Nexus BKC Floor 4",
-      "assignedAgent": "Sameer Sheikh (L3 Network Engg)",
-      "status": "IN_PROGRESS",
-      "slaExpiresAt": "2h 15m remaining",
-      "slaPercentUsed": 62,
-      "deviceAffected": "Cisco CBS350-48P-BKC-01",
-      "rootCause": "SFP+ 10G transceiver optical degradation (Rx power -19dBm)",
-      "createdAt": "11:15 AM"
-    },
-    {
-      "id": "t-402",
-      "ticketNumber": "SR-1142",
-      "title": "New Joiner Onboarding Compute Kit Request (Design Lead)",
-      "category": "Asset Procurement",
-      "priority": "MEDIUM",
-      "requesterName": "Meera Rajput",
-      "requesterDept": "UI/UX Design Studio",
-      "assignedAgent": "Pooja Iyer (IT Admin)",
-      "status": "WAITING_ON_PARTS",
-      "slaExpiresAt": "18h remaining",
-      "slaPercentUsed": 25,
-      "deviceAffected": "MacBook Pro M3 / Dell UltraSharp 27",
-      "createdAt": "Yesterday"
-    },
-    {
-      "id": "t-403",
-      "ticketNumber": "INC-8884",
-      "title": "Dell PowerEdge R760 DIMM Slot B4 ECC Memory Error Alert",
-      "category": "Hardware Fault",
-      "priority": "HIGH",
-      "requesterName": "Sanjay Rawat (DBA)",
-      "requesterDept": "FinTech Core Cluster",
-      "assignedAgent": "Sameer Sheikh (L3 Network Engg)",
-      "status": "OPEN",
-      "slaExpiresAt": "3h 40m remaining",
-      "slaPercentUsed": 40,
-      "deviceAffected": "DELL-R760-DB-NODE-01",
-      "rootCause": "Single-bit error rate threshold reached on 32GB DDR5 RDIMM",
-      "createdAt": "08:30 AM"
-    }
-  ],
-  "endpoints": [
-    {
-      "id": "ep-1",
-      "deviceName": "NB-NX-DEV-008 (ThinkPad T14)",
-      "assignedUser": "Kavita Joshi (Senior Dev)",
-      "os": "Ubuntu 24.04 LTS / Win 11 Dual",
-      "cpuLoad": 24,
-      "ramUsagePercent": 68,
-      "diskFreePercent": 42,
-      "smartStatus": "HEALTHY",
-      "batteryHealthPercent": 91,
-      "antivirusStatus": "UP_TO_DATE",
-      "lastSeen": "12 seconds ago"
-    },
-    {
-      "id": "ep-2",
-      "deviceName": "NB-NX-FIN-014 (ThinkPad T14)",
-      "assignedUser": "Rohan Deshmukh (Accounts)",
-      "os": "Windows 11 Pro 23H2",
-      "cpuLoad": 89,
-      "ramUsagePercent": 94,
-      "diskFreePercent": 8,
-      "smartStatus": "WARNING",
-      "batteryHealthPercent": 38,
-      "antivirusStatus": "UP_TO_DATE",
-      "lastSeen": "1 minute ago"
-    },
-    {
-      "id": "ep-3",
-      "deviceName": "SRV-PROD-DB-01 (Dell R760)",
-      "assignedUser": "System DBA Root",
-      "os": "Red Hat Enterprise Linux 9.3",
-      "cpuLoad": 42,
-      "ramUsagePercent": 78,
-      "diskFreePercent": 65,
-      "smartStatus": "HEALTHY",
-      "batteryHealthPercent": 100,
-      "antivirusStatus": "UP_TO_DATE",
-      "lastSeen": "Realtime"
-    }
-  ],
-  "jobs": [
-    {
-      "id": "job-901",
-      "jobCode": "FSD-MUM-449",
-      "title": "48-Port Switch Replacement & Cable Dressing",
-      "customerName": "Nexus FinTech Labs",
-      "address": "Unit 402, Trade Tower, Bandra Kurla Complex (BKC), Mumbai",
-      "technicianName": "Farhan Ali (Senior Field Engg)",
-      "technicianPhone": "+91 98200 77123",
-      "status": "EN_ROUTE",
-      "scheduledTime": "Today, 02:00 PM",
-      "partsConsumed": [
-        {
-          "partName": "Cisco SFP-10G-SR Optical Module",
-          "qty": 2,
-          "cost": 8400
-        }
-      ],
-      "customerSignatureObtained": false
-    },
-    {
-      "id": "job-902",
-      "jobCode": "FSD-PUN-221",
-      "title": "APC 6kVA Battery Health Audit & Terminals Cleanse",
-      "customerName": "Zenith Logistics Hub",
-      "address": "Chakan Industrial Phase II, Pune",
-      "technicianName": "Suresh Patil",
-      "technicianPhone": "+91 97650 33490",
-      "status": "CHECKED_IN",
-      "scheduledTime": "Today, 11:30 AM",
-      "partsConsumed": [],
-      "customerSignatureObtained": false
-    }
-  ],
-  "assets": [
-    {
-      "id": "ast-101",
-      "assetTag": "APX-AST-0081",
-      "serialNumber": "DL-OPT-881920-IN",
-      "name": "Dell OptiPlex 7010 Micro Workstation",
-      "category": "Workstation",
-      "brand": "Dell",
-      "model": "OptiPlex 7010 (Core i5 13th Gen, 16GB, 512GB)",
-      "assignedUser": "Aditya Mehta (VP Engineering)",
-      "department": "Engineering",
-      "location": "Mumbai HQ - Floor 4",
-      "purchaseDate": "2025-04-12",
-      "purchaseCost": 51800,
-      "warrantyExpiresAt": "2028-04-11",
-      "status": "IN_USE"
-    },
-    {
-      "id": "ast-102",
-      "assetTag": "APX-AST-0082",
-      "serialNumber": "LN-TP-99210-IN",
-      "name": "Lenovo ThinkPad T14 Gen 4",
-      "category": "Laptop",
-      "brand": "Lenovo",
-      "model": "ThinkPad T14 (Core i7, 32GB RAM, 1TB SSD)",
-      "assignedUser": "Priya Sharma (Finance Director)",
-      "department": "Finance",
-      "location": "Mumbai HQ - Floor 5",
-      "purchaseDate": "2025-08-19",
-      "purchaseCost": 95500,
-      "warrantyExpiresAt": "2028-08-18",
-      "status": "IN_USE"
-    },
-    {
-      "id": "ast-103",
-      "assetTag": "APX-AST-0083",
-      "serialNumber": "CSC-350-9812-IN",
-      "name": "Cisco CBS350-48P Managed PoE Switch",
-      "category": "Switch",
-      "brand": "Cisco",
-      "model": "CBS350 48-Port PoE+ 370W Layer-3",
-      "assignedUser": "Unassigned (Core Infra)",
-      "department": "IT Infrastructure",
-      "location": "Server Room Rack 2 - U24",
-      "purchaseDate": "2024-02-10",
-      "purchaseCost": 92000,
-      "warrantyExpiresAt": "2029-02-09",
-      "status": "IN_USE"
-    },
-    {
-      "id": "ast-104",
-      "assetTag": "APX-AST-0084",
-      "serialNumber": "APC-SRT-6K-4410",
-      "name": "APC Smart-UPS On-Line 6kVA",
-      "category": "UPS",
-      "brand": "APC Schneider",
-      "model": "SRT6KXLI 6000VA Double Conversion",
-      "assignedUser": "Unassigned (Core Infra)",
-      "department": "Facilities & IT",
-      "location": "Server Room Rack 1 - Bottom",
-      "purchaseDate": "2024-05-15",
-      "purchaseCost": 195000,
-      "warrantyExpiresAt": "2026-10-15",
-      "status": "IN_USE"
-    },
-    {
-      "id": "ast-105",
-      "assetTag": "APX-AST-0085",
-      "serialNumber": "DL-LAT-5420-OLD",
-      "name": "Dell Latitude 5420 Laptop",
-      "category": "Laptop",
-      "brand": "Dell",
-      "model": "Latitude 5420 (Core i5 11th Gen)",
-      "assignedUser": "Unassigned",
-      "department": "IT Spare Pool",
-      "location": "IT Store Locker 3",
-      "purchaseDate": "2022-01-10",
-      "purchaseCost": 68000,
-      "warrantyExpiresAt": "2025-01-09",
-      "status": "AVAILABLE_IN_STOCK"
-    }
-  ],
-  "licenses": [
-    {
-      "id": "lic-1",
-      "softwareName": "Microsoft 365 E5 Enterprise",
-      "publisher": "Microsoft",
-      "tier": "Enterprise E5 Full Suite",
-      "purchasedSeats": 250,
-      "assignedSeats": 228,
-      "activeLast30Days": 206,
-      "unusedSeats": 44,
-      "costPerSeatPerYear": 38400,
-      "annualWastedSpend": 1689600,
-      "renewalDate": "2027-03-31"
-    },
-    {
-      "id": "lic-2",
-      "softwareName": "Adobe Creative Cloud All Apps",
-      "publisher": "Adobe Systems",
-      "tier": "Team Enterprise",
-      "purchasedSeats": 25,
-      "assignedSeats": 22,
-      "activeLast30Days": 14,
-      "unusedSeats": 11,
-      "costPerSeatPerYear": 62000,
-      "annualWastedSpend": 682000,
-      "renewalDate": "2026-11-15"
-    },
-    {
-      "id": "lic-3",
-      "softwareName": "FortiClient ZTNA & Endpoint Security",
-      "publisher": "Fortinet",
-      "tier": "Enterprise Security Fabric",
-      "purchasedSeats": 300,
-      "assignedSeats": 285,
-      "activeLast30Days": 280,
-      "unusedSeats": 15,
-      "costPerSeatPerYear": 4200,
-      "annualWastedSpend": 63000,
-      "renewalDate": "2027-01-20"
-    }
-  ],
-  "amcs": [
-    {
-      "id": "amc-1",
-      "contractNumber": "AMC-2026-081",
-      "clientName": "Nexus FinTech Corporate Towers",
-      "type": "COMPREHENSIVE",
-      "deviceCount": 145,
-      "annualValue": 840000,
-      "startDate": "2026-01-01",
-      "endDate": "2026-12-31",
-      "status": "ACTIVE",
-      "nextPMDate": "2026-09-18",
-      "slaResponseHours": 2
-    },
-    {
-      "id": "amc-2",
-      "contractNumber": "AMC-2026-049",
-      "clientName": "Zenith Global Logistics Hub",
-      "type": "NON_COMPREHENSIVE",
-      "deviceCount": 65,
-      "annualValue": 280000,
-      "startDate": "2025-10-15",
-      "endDate": "2026-10-14",
-      "status": "EXPIRING_SOON",
-      "nextPMDate": "2026-09-25",
-      "slaResponseHours": 4
-    }
-  ],
-  "projects": [
-    {
-      "id": "proj-1",
-      "projectCode": "PRJ-2026-042",
-      "title": "Hybrid Cloud Migration & AWS DirectConnect Setup",
-      "clientName": "Tata Consultancy Labs",
-      "clientLocation": "Navi Mumbai, MH",
-      "budget": 850000,
-      "category": "Cloud Migration",
-      "scopeDescription": "Migrate 18 VMware ESXi VMs to AWS EC2/RDS, configure 1Gbps DirectConnect dedicated circuit, BGP routing, and FortiGate IPsec failover tunnels.",
-      "deliverables": [
-        "AWS Landing Zone Architecture Document",
-        "DirectConnect Fiber Cross-Connect & BGP Configuration",
-        "Zero-Downtime Database Replication Cutover",
-        "Post-migration 30-Day Hypercare & Disaster Recovery Drill"
-      ],
-      "skillsRequired": [
-        "AWS Advanced Networking",
-        "VMware vSphere 8",
-        "Fortinet FortiGate",
-        "BGP Peering"
-      ],
-      "status": "PROPOSALS_OPEN",
-      "proposalsCount": 3,
-      "createdAt": "2026-09-02",
-      "milestones": [
-        {
-          "id": "m-1",
-          "title": "Phase 1: Architecture Sign-off & VPC Setup",
-          "amount": 200000,
-          "status": "ESCROW_HELD",
-          "dueDate": "2026-09-15"
-        },
-        {
-          "id": "m-2",
-          "title": "Phase 2: DirectConnect & BGP Peering",
-          "amount": 350000,
-          "status": "IN_PROGRESS",
-          "dueDate": "2026-09-28"
-        },
-        {
-          "id": "m-3",
-          "title": "Phase 3: Workload Migration & DR Drill",
-          "amount": 300000,
-          "status": "PENDING_FUNDING",
-          "dueDate": "2026-10-15"
-        }
+      "id": "conn-m365",
+      "name": "Microsoft 365 & Entra ID",
+      "category": "Identity & SSO",
+      "icon": "Shield",
+      "status": "NOT_CONFIGURED",
+      "recordsSynced": "0",
+      "lastSyncTime": "Never",
+      "description": "Syncs directory identities, user provisioning, and SaaS license utilization telemetry.",
+      "requiredEnvKeys": [
+        "M365_TENANT_ID",
+        "M365_CLIENT_ID",
+        "M365_CLIENT_SECRET"
       ]
     },
     {
-      "id": "proj-2",
-      "projectCode": "PRJ-2026-039",
-      "title": "140-Node Cat6A 10G Structured Cabling & Server Rack Dress",
-      "clientName": "Fintech Nexus Tower",
-      "clientLocation": "Bandra Kurla Complex, Mumbai",
-      "budget": 420000,
-      "category": "Enterprise Cabling",
-      "scopeDescription": "Complete structured cabling overhaul across 2 office floors. 140 drops with Schneider Actassi Cat6A LSZH, Fluke DSX-8000 certified reports, and 42U server rack wire dressing.",
-      "deliverables": [
-        "Fluke Calibration & Decibel Return-Loss PDF Certifications",
-        "Patch Panel Port Mapping Schedule",
-        "Numbered Cable Tagging at Workstations & Rack"
-      ],
-      "skillsRequired": [
-        "Cat6A Termination",
-        "Fluke DSX-8000",
-        "Server Rack Architecture",
-        "OTDR Testing"
-      ],
-      "status": "IN_PROGRESS",
-      "proposalsCount": 5,
-      "createdAt": "2026-08-28",
-      "milestones": [
-        {
-          "id": "m-201",
-          "title": "Conduit & Cable Pulling (Floors 4 & 5)",
-          "amount": 150000,
-          "status": "RELEASED",
-          "dueDate": "2026-09-01"
-        },
-        {
-          "id": "m-202",
-          "title": "Termination & 42U Rack Dressing",
-          "amount": 170000,
-          "status": "ESCROW_HELD",
-          "dueDate": "2026-09-10"
-        },
-        {
-          "id": "m-203",
-          "title": "Fluke Testing & Final Sign-off",
-          "amount": 100000,
-          "status": "PENDING_FUNDING",
-          "dueDate": "2026-09-18"
-        }
+      "id": "conn-intune",
+      "name": "Microsoft Intune / RMM Gateway",
+      "category": "MDM & RMM",
+      "icon": "Laptop",
+      "status": "NOT_CONFIGURED",
+      "recordsSynced": "0",
+      "lastSyncTime": "Never",
+      "description": "Continuously monitors endpoint device hardware health, disk telemetry, and OS patch levels.",
+      "requiredEnvKeys": [
+        "RMM_API_KEY",
+        "RMM_ENDPOINT_URL"
       ]
     },
     {
-      "id": "proj-3",
-      "projectCode": "PRJ-2026-031",
-      "title": "Enterprise Multi-Site Fortinet SD-WAN Deployment",
-      "clientName": "OmniHealth Diagnostics Group",
-      "clientLocation": "Pune, Maharashtra (12 Diagnostic Centers)",
-      "budget": 680000,
-      "category": "Network Security",
-      "scopeDescription": "Deploy 12 FortiGate 40F firewalls across regional branches with centralized FortiManager cloud control, LTE cellular auto-failover, and HIPAA-compliant encryption.",
-      "deliverables": [
-        "Centralized FortiManager Policy Template",
-        "Dual-ISP WAN Link Health Monitoring Rules",
-        "Zero-Trust Network Access (ZTNA) Agent Rollout"
-      ],
-      "skillsRequired": [
-        "Fortinet NSE 4/7",
-        "SD-WAN SLA Orchestration",
-        "IPsec Mesh",
-        "ZTNA"
-      ],
-      "status": "PROPOSALS_OPEN",
-      "proposalsCount": 2,
-      "createdAt": "2026-09-03",
-      "milestones": [
-        {
-          "id": "m-301",
-          "title": "Hardware Staging & Golden Config Template",
-          "amount": 200000,
-          "status": "PENDING_FUNDING",
-          "dueDate": "2026-09-20"
-        },
-        {
-          "id": "m-302",
-          "title": "Branch On-site Rollout (12 Sites)",
-          "amount": 330000,
-          "status": "PENDING_FUNDING",
-          "dueDate": "2026-10-05"
-        },
-        {
-          "id": "m-303",
-          "title": "HA Failover Testing & Training",
-          "amount": 150000,
-          "status": "PENDING_FUNDING",
-          "dueDate": "2026-10-15"
-        }
+      "id": "conn-payment",
+      "name": "Razorpay / Cashfree Gateway",
+      "category": "Finance & ERP",
+      "icon": "Receipt",
+      "status": "NOT_CONFIGURED",
+      "recordsSynced": "0",
+      "lastSyncTime": "Never",
+      "description": "Handles online customer quotation advance settlements and verified milestone escrow payments.",
+      "requiredEnvKeys": [
+        "RAZORPAY_KEY_ID",
+        "RAZORPAY_KEY_SECRET"
+      ]
+    },
+    {
+      "id": "conn-gst",
+      "name": "NIC GST E-Invoice & E-Way Bill",
+      "category": "Finance & ERP",
+      "icon": "FileCheck",
+      "status": "NOT_CONFIGURED",
+      "recordsSynced": "0",
+      "lastSyncTime": "Never",
+      "description": "Cryptographically registers B2B invoices with government IRP portal for legal IRN generation.",
+      "requiredEnvKeys": [
+        "GST_API_KEY",
+        "GST_SELLER_GSTIN"
       ]
     }
   ],
-  "proposals": [
-    {
-      "id": "prop-1",
-      "projectId": "proj-1",
-      "providerName": "CloudMatrix Solutions Pvt Ltd",
-      "providerRating": 4.95,
-      "providerVerified": true,
-      "commercialBid": 790000,
-      "timelineDays": 24,
-      "matchScore": 96,
-      "matchExplanation": "AWS Advanced Consulting Partner with 14 in-house certified networking architects, Mumbai local NOC, and 100% SLA track record across 48 migrations.",
-      "technicalApproach": "Deploy AWS Transit Gateway hub-and-spoke with redundant 1G DirectConnect connections via Equinix Mumbai. Live database migration utilizing AWS DMS with CDC replication.",
-      "oemCertifications": [
-        "AWS Advanced Tier",
-        "Fortinet Certified Expert",
-        "VMware VCP-DCV"
-      ],
-      "status": "SHORTLISTED"
-    },
-    {
-      "id": "prop-2",
-      "projectId": "proj-1",
-      "providerName": "InfraScale Network Tech",
-      "providerRating": 4.8,
-      "providerVerified": true,
-      "commercialBid": 740000,
-      "timelineDays": 28,
-      "matchScore": 89,
-      "matchExplanation": "Cost-effective bid with deep VMware knowledge, though requires external partner for specialized FortiGate BGP configuration.",
-      "technicalApproach": "Phased weekend migration using VMware vMotion over private encrypted circuit. Cold backup sync on S3 before live cutover.",
-      "oemCertifications": [
-        "VMware Enterprise Partner",
-        "Cisco CCNP Enterprise"
-      ],
-      "status": "SUBMITTED"
-    },
-    {
-      "id": "prop-3",
-      "projectId": "proj-1",
-      "providerName": "Velox Systems Group",
-      "providerRating": 4.7,
-      "providerVerified": false,
-      "commercialBid": 860000,
-      "timelineDays": 32,
-      "matchScore": 78,
-      "matchExplanation": "Higher commercial quote and longer timeline, but includes 60 days post-cutover managed support.",
-      "technicalApproach": "Manual VM export to OVF format and import via AWS VM Import/Export tool. Simple site-to-site VPN primary tunnel.",
-      "oemCertifications": [
-        "AWS Select Tier"
-      ],
-      "status": "SUBMITTED"
-    }
-  ],
-  "events": [
-    {
-      "id": "evt-101",
-      "timestamp": "12:04:18",
-      "eventType": "MarginValidationException",
-      "agent": "Pricing Agent",
-      "summary": "Quote #APX-QT-2026-1048 computed at 9.8% margin (Breaches 12% floor rule).",
-      "autonomousActionTaken": "Escalated immediately to Telegram Command Center with executive recommendation.",
-      "humanApprovalRequired": true,
-      "approvalStatus": "PENDING_TELEGRAM",
-      "confidenceScore": 0.96
-    },
-    {
-      "id": "evt-102",
-      "timestamp": "11:45:02",
-      "eventType": "InventoryShortageDetected",
-      "agent": "Procurement Agent",
-      "summary": "Cisco CBS350-48P available stock reduced to 0 units with 2 backorders.",
-      "autonomousActionTaken": "Auto-dispatched RFQ to Redington and Ingram Micro with 48hr delivery SLA condition.",
-      "humanApprovalRequired": false,
-      "approvalStatus": "AUTO_APPROVED",
-      "confidenceScore": 0.99
-    },
-    {
-      "id": "evt-103",
-      "timestamp": "10:30:45",
-      "eventType": "PredictiveBatteryAlert",
-      "agent": "SLA Monitor",
-      "summary": "Endpoint NB-NX-FIN-014 battery health dropped below 40% (38%).",
-      "autonomousActionTaken": "Auto-created proactive Service Request #SR-1149 for battery swap before user faces downtime.",
-      "humanApprovalRequired": false,
-      "approvalStatus": "AUTO_APPROVED",
-      "confidenceScore": 0.94
-    },
-    {
-      "id": "evt-104",
-      "timestamp": "09:12:30",
-      "eventType": "GSTInvoiceGeneration",
-      "agent": "Telegram Orchestrator",
-      "summary": "Sales Order #SO-7749 cleared 100% advance via NEFT.",
-      "autonomousActionTaken": "Generated compliant GST Tax Invoice #INV-2026-0812 with HSN breakdown & dispatched WhatsApp notification.",
-      "humanApprovalRequired": false,
-      "approvalStatus": "AUTO_APPROVED",
-      "confidenceScore": 0.98
-    }
-  ],
-  "invoices": [
-    {
-      "customer": "Nexus FinTech Labs",
-      "invoiceNo": "INV-2026-0812",
-      "amount": 2407200,
-      "dueInDays": 4,
-      "status": "DUE_SOON",
-      "createdAt": "2026-08-25",
-      "gstin": "27AABCN8192K1Z4"
-    },
-    {
-      "customer": "Zenith Logistics",
-      "invoiceNo": "INV-2026-0799",
-      "amount": 748828,
-      "dueInDays": -8,
-      "status": "OVERDUE",
-      "createdAt": "2026-08-10",
-      "gstin": "27AABCT9921M1Z1"
-    },
-    {
-      "customer": "OmniHealth Hospitals",
-      "invoiceNo": "INV-2026-0750",
-      "amount": 1850000,
-      "dueInDays": 14,
-      "status": "ACTIVE",
-      "createdAt": "2026-09-01",
-      "gstin": "27AABCO4142L1Z9"
-    }
-  ],
-  "lastUpdated": "2026-09-12T00:40:14.265Z"
+  "rmaClaims": [],
+  "knowledgeArticles": [],
+  "crmOpportunities": [],
+  "marketplaceDisputes": [],
+  "inventoryTransactions": [],
+  "lastUpdated": "2026-11-04T17:03:16.216Z"
 }
