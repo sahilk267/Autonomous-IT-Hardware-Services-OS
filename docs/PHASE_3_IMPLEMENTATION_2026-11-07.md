@@ -36,7 +36,7 @@
 
 Run `npm run lint`, `npm run build`, `npm test`, `npm run smoke` and `npm run smoke:roles` in GitHub Actions. HTTP tests use throwaway database files.
 
-**CI evidence:** [GitHub Actions #42289634761](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42289634761) completed with typecheck and build PASS, 15/15 isolated regression, 47/47 production HTTP smoke, and 21/21 multi-role/replay tests. All tests used isolated stores; no live provider calls were made.
+**Latest CI evidence:** [GitHub Actions #42291102641](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42291102641) completed with typecheck and production build PASS, **16/16** isolated regression, **49/49** production HTTP smoke, and **21/21** multi-role/replay tests. All tests used isolated stores; no live provider calls were made.
 
 **No production sign-off yet:** real supplier PO transmission, legally verified HSN/SAC/GST rates, NIC filing, actual Telegram credentials/webhook setup, real payment services, browser UX testing and Hostinger deployment remain pending.
 
