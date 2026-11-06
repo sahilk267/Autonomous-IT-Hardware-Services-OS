@@ -24,7 +24,7 @@ interface HeaderProps {
   onOperatingModeChange?: (mode: OperatingMode) => void;
   isCleanSlate?: boolean;
   onOpenResetModal?: () => void;
-  currentUser?: { id: string; username: string; role: string; fullName: string } | null;
+  currentUser?: { id: string; username: string; role: string; name?: string; fullName?: string } | null;
   onLogout?: () => void;
   eventsCount?: number;
   autoExecutedCount?: number;

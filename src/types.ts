@@ -94,6 +94,8 @@ export interface ServiceIncluded {
   name: string;
   price: number;
   sla: string;
+  sac?: string;
+  gstPercent?: number;
 }
 
 export interface BOMSolution {
@@ -124,6 +126,8 @@ export interface Quotation {
   gstAmount: number;
   totalAmount: number;
   grandTotal?: number;
+  taxStatus?: 'PENDING_CLASSIFICATION' | 'ESTIMATED_UNVERIFIED';
+  taxBreakdown?: { lineId: string; taxableAmount: number; taxRatePercent: number; taxAmount: number }[];
   status: 'DRAFT' | 'PENDING_OWNER_APPROVAL' | 'APPROVED' | 'SENT_TO_CUSTOMER' | 'ACCEPTED' | 'REJECTED' | 'PENDING_APPROVAL';
   approvalReason?: string;
   approvedBy?: string;
@@ -147,6 +151,8 @@ export interface TelegramMessage {
     status: 'PENDING' | 'APPROVED' | 'REJECTED';
   };
   suggestedActions?: string[];
+  deliveryStatus?: 'LOCAL_ONLY' | 'ACCEPTED_BY_TELEGRAM_API';
+  telegramMessageId?: number;
 }
 
 export interface SupplierInfo {
@@ -174,7 +180,18 @@ export interface RFQItem {
     inStock: boolean;
     recommended?: boolean;
   }[];
-  status: 'OPEN' | 'COMPARED' | 'PO_DISPATCHED';
+  status: 'OPEN' | 'COMPARED' | 'PO_PREPARED' | 'PO_DISPATCHED';
+  preparedPO?: {
+    poReference: string;
+    supplierId: string;
+    supplierName: string;
+    qty: number;
+    unitCost: number;
+    amount: number;
+    preparedAt: string;
+    preparedBy: string;
+    deliveryStatus: 'NOT_SENT';
+  };
 }
 
 export interface ITSMTicket {
@@ -403,7 +420,7 @@ export interface RMAClaim {
   oemBrand: string;
   oemCaseNumber: string;
   faultSymptom: string;
-  warrantyStatus: 'ACTIVE_WARRANTY' | 'OUT_OF_WARRANTY' | 'EXTENDED_CARE';
+  warrantyStatus: 'ACTIVE_WARRANTY' | 'OUT_OF_WARRANTY' | 'EXTENDED_CARE' | 'UNVERIFIED';
   courierTracking: string;
   courierPartner: string;
   stage: 'FAULT_LOGGED' | 'OEM_APPROVED' | 'IN_TRANSIT' | 'SERVICE_CENTER' | 'REPLACED_RETURN' | 'TESTED_CLOSED';
@@ -451,6 +468,8 @@ export interface MarketplaceDispute {
   providerRebuttal: string;
   aiMediationVerdict: string;
   status: 'UNDER_REVIEW' | 'AWAITING_EVIDENCE' | 'RESOLVED_REFUND' | 'RESOLVED_RELEASED' | 'RESOLVED_REWORK' | 'UNDER_ARBITRATION' | string;
+  resolutionDecision?: 'RELEASE_RECOMMENDED' | 'REFUND_RECOMMENDED' | 'REWORK_RECOMMENDED';
+  decisionRecordedAt?: string;
   createdAt: string;
 }
 

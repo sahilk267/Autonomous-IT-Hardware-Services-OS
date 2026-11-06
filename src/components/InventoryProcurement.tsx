@@ -41,7 +41,6 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [activeTab, setActiveTab] = useState<'inventory' | 'rfqs' | 'deadstock'>('inventory');
-  const [dispatchedPOs, setDispatchedPOs] = useState<Record<string, string>>({});
 
   // Add Product Modal State
   const [showAddProductModal, setShowAddProductModal] = useState(false);
@@ -78,10 +77,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
     return matchesSearch && matchesCat;
   });
 
-  const handlePOAction = (rfqId: string, supplierId: string) => {
-    setDispatchedPOs({ ...dispatchedPOs, [rfqId]: supplierId });
-    onDispatchPO(rfqId, supplierId);
-  };
+  const handlePOAction = (rfqId: string, supplierId: string) => onDispatchPO(rfqId, supplierId);
 
   const handleAddProductSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -106,8 +102,8 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
       stockAvailable: qty,
       stockReserved: 0,
       warehouseLocation: newProdLocation.trim() || 'Central Warehouse',
-      hsn: '84713010',
-      gstPercent: 18,
+      hsn: '',
+      gstPercent: -1, // Tax classification pending; never assume HSN or GST rate.
       warrantyYears: 3,
       serialTrackingRequired: true
     };
@@ -153,7 +149,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
   // Dynamic KPI calculation
   const totalPhysicalStockValue = products.reduce((acc, p) => acc + (p.purchaseCost * p.stockAvailable), 0);
   const totalReservedStockValue = products.reduce((acc, p) => acc + (p.purchaseCost * p.stockReserved), 0);
-  const activeShortagesCount = rfqs.length;
+  const activeShortagesCount = rfqs.filter(r => r.status === 'OPEN').length;
 
   const formattedStockValue = isCleanSlate && products.length === 0
     ? '₹0.00'
@@ -237,15 +233,15 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
           <div className="text-xs text-slate-400 mt-1">{activeShortagesCount === 0 ? 'No Critical Shortages' : 'Awaiting PO dispatch'}</div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400 uppercase font-mono">Top Distributor Rating</span>
+          <span className="text-xs text-slate-400 uppercase font-mono">Registered Distributor</span>
           <div className="text-xl font-bold text-sky-400 mt-1">
             {suppliers && suppliers.length > 0
-              ? `${suppliers[0].name} (${suppliers[0].fulfillmentScore}%)`
+              ? `${suppliers[0].name} (${suppliers[0].deliveryScore}%)`
               : 'N/A (No Suppliers)'}
           </div>
           <div className="text-xs text-slate-400 mt-1">
             {suppliers && suppliers.length > 0
-              ? `Delivery SLA: ${suppliers[0].deliverySlaDays} Days • Category: ${suppliers[0].category}`
+              ? `Delivery score: ${suppliers[0].deliveryScore}% • Payment terms: ${suppliers[0].paymentTerms}`
               : 'Awaiting supplier registration in procurement desk'}
           </div>
         </div>
@@ -409,7 +405,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
               </button>
             </div>
             <p className="text-xs text-slate-400 leading-relaxed mb-4">
-              When safety stock thresholds breach, the platform automatically requests commercial quotes from authorized national distributors (Redington, Ingram Micro, Savex) and scores them based on Price, Lead Time, and RMA reliability.
+              Create RFQs and enter actual supplier quotations. External RFQ delivery and supplier scoring are not implemented.
             </p>
 
             {rfqs.length === 0 ? (
@@ -417,7 +413,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
                 <RefreshCw className="w-10 h-10 text-slate-600 mx-auto" />
                 <h4 className="font-bold text-white text-sm">No Active RFQs in Queue</h4>
                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                  All inventory items are currently above their safety stock minimums, or you are in Clean Slate mode.
+                  No supplier RFQs recorded; this does not prove safety-stock sufficiency.
                 </p>
                 <button
                   onClick={() => setShowNewRfqModal(true)}
@@ -430,7 +426,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
 
             <div className="space-y-6">
               {rfqs.map((rfq) => {
-                const poStatus = dispatchedPOs[rfq.id];
+                const poStatus = rfq.preparedPO?.supplierId;
                 return (
                   <div key={rfq.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
@@ -497,7 +493,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
                               {isChosen ? (
                                 <div className="flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-emerald-950 border border-emerald-700 text-emerald-300 font-bold text-xs">
                                   <CheckCircle2 className="w-3.5 h-3.5" />
-                                  PO #{rfq.id.toUpperCase()} Dispatched
+                                  {rfq.preparedPO?.poReference || 'PO Draft'} — NOT SENT
                                 </div>
                               ) : (
                                 <button
@@ -508,7 +504,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
                                       : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
                                   }`}
                                 >
-                                  {isRecommended ? '1-Click Approve PO' : 'Select Distributor'}
+                                  {isRecommended ? 'Prepare Internal PO' : 'Prepare With Supplier'}
                                 </button>
                               )}
                             </div>
@@ -521,7 +517,7 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
                     <div className="text-[11px] text-slate-400 flex items-center gap-2 bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
                       <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                       <span>
-                        <strong>3-Way Match Guarantee:</strong> Once delivered, platform automatically reconciles Purchase Order vs Goods Received Note (GRN) vs Vendor Tax Invoice before initiating settlement.
+                        <strong>Pending integration:</strong> Supplier delivery, GRN and tax-invoice matching are not automated or verified.
                       </span>
                     </div>
                   </div>

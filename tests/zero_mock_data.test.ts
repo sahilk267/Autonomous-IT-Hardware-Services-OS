@@ -330,6 +330,45 @@ async function runTestSuite() {
       assert.strictEqual(reloaded.getState().marketplaceDisputes.length, 1);
     });
 
+    // Security regression: committed starter data must never block first-time enrollment.
+    await test('Checked-in initial state contains no legacy passwordless administrator', async () => {
+      const starter = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'data', 'app-store.json'), 'utf-8'));
+      assert.deepStrictEqual(starter.users, [], 'No default admin without a password hash may ship');
+      assert.strictEqual(starter.products.length, 0);
+      assert.strictEqual(starter.invoices.length, 0);
+    });
+
+    // Evidence must be present before a ledger invoice may be marked SETTLED.
+    await test('Invoice settlement requires payment reference and is idempotent', async () => {
+      const invoice: InvoiceRecord = {
+        customer: 'Example Customer',
+        invoiceNo: 'INV-TEST-REF-001',
+        amount: 1190,
+        dueInDays: 30,
+        status: 'ACTIVE',
+        createdAt: '2026-11-06'
+      };
+      testStore.addInvoice(invoice);
+      assert.throws(() => testStore.settleInvoice(invoice.invoiceNo, { paymentReference: '' }), /payment reference/);
+      assert.strictEqual(testStore.getState().invoices.find(i => i.invoiceNo === invoice.invoiceNo)?.status, 'ACTIVE');
+      const settled = testStore.settleInvoice(invoice.invoiceNo, { paymentReference: 'BANK-REFERENCE-001' });
+      assert.strictEqual(settled?.status, 'SETTLED');
+      assert.strictEqual(settled?.paymentReference, 'BANK-REFERENCE-001');
+      assert.throws(() => testStore.settleInvoice(invoice.invoiceNo, { paymentReference: 'BANK-REFERENCE-002' }), /cannot be settled again/);
+    });
+
+    // Name collisions are not reliable warehouse identity; only stable IDs work.
+    await test('Part consumption rejects name instead of exact product ID', async () => {
+      assert.throws(
+        () => testStore.consumeJobPart('job-stock-test', 'NVMe 2TB Enterprise SSD', 1),
+        /Product not found/
+      );
+      assert.throws(
+        () => testStore.consumeJobPart('job-stock-test', 'prod-scarce-1', 1.5),
+        /positive integer/
+      );
+    });
+
     // 10. Codebase audit: zero mockData files
     await test('src/data/mockData.ts is permanently absent from filesystem', async () => {
       const mockFilePath = path.join(process.cwd(), 'src', 'data', 'mockData.ts');
@@ -353,6 +392,17 @@ async function runTestSuite() {
           }
         }
       }
+    });
+
+    // Phase 3: guard against invented tax registrations and banking details on printable drafts.
+    await test('BOM quotation draft contains no fabricated GST, bank or 18% tax assumptions', async () => {
+      const p = path.join(process.cwd(), 'src', 'components', 'BOMBuilder.tsx');
+      const content = fs.readFileSync(p, 'utf8');
+      assert.strictEqual(content.includes('27AAACA9823P1Z9'), false);
+      assert.strictEqual(content.includes('HDFC0000060'), false);
+      assert.strictEqual(content.includes('Math.round(netSubtotal * 0.18)'), false);
+      assert.strictEqual(content.includes('Math.round(netSubtotal * 1.18)'), false);
+      assert.ok(content.includes('NOT A TAX INVOICE'));
     });
 
     // 12. Codebase audit: zero window.alert calls

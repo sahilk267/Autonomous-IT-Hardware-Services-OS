@@ -16,25 +16,17 @@ import {
   X,
   Printer
 } from 'lucide-react';
-import { TenantInfo, Quotation } from '../types';
+import { TenantInfo, Quotation, InvoiceRecord } from '../types';
 
-interface InvoiceItem {
-  customer: string;
-  invoiceNo: string;
-  amount: number;
-  dueInDays: number;
-  status: string;
-  createdAt?: string;
-  gstin?: string;
-}
+type InvoiceItem = InvoiceRecord;
 
 interface FinanceGSTProps {
   tenant: TenantInfo;
   quotes?: Quotation[];
   isCleanSlate?: boolean;
   invoices?: InvoiceItem[];
-  onAddInvoice?: (inv: InvoiceItem) => void;
-  onSettleInvoice?: (invoiceNo: string) => void;
+  onAddInvoice?: (inv: InvoiceItem) => Promise<boolean>;
+  onSettleInvoice?: (invoiceNo: string, paymentReference: string) => Promise<boolean>;
 }
 
 export const FinanceGST: React.FC<FinanceGSTProps> = ({ 
@@ -47,60 +39,72 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
 }) => {
   const [selectedState, setSelectedState] = useState<'INTRA_STATE' | 'INTER_STATE'>('INTRA_STATE');
   const [invoiceAmount, setInvoiceAmount] = useState('');
-  const [localInvoices, setLocalInvoices] = useState<InvoiceItem[]>([]);
+  const [manualGstRate, setManualGstRate] = useState('');
   const [showAddInvoiceModal, setShowAddInvoiceModal] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustGstin, setNewCustGstin] = useState('');
   const [newInvAmount, setNewInvAmount] = useState('');
   const [settleToast, setSettleToast] = useState<string | null>(null);
 
-  const allInvoices = invoices.length > 0 ? invoices : localInvoices;
+  const allInvoices = invoices;
   const activeReceivables = allInvoices.filter(i => i.status !== 'SETTLED');
   const settledInvoices = allInvoices.filter(i => i.status === 'SETTLED');
   const activePayables: { vendor: string; poNo: string; amount: number; terms: string }[] = [];
 
-  const parsedAmount = parseInt(invoiceAmount, 10) || 0;
-  const taxableBase = Math.round(parsedAmount / 1.18);
+  const parsedAmount = Number(invoiceAmount);
+  const rate = manualGstRate.trim() === '' ? null : Number(manualGstRate);
+  const validTaxPreview = Number.isFinite(parsedAmount) && parsedAmount > 0 &&
+    rate !== null && Number.isFinite(rate) && rate >= 0 && rate <= 100;
+  const taxRate = validTaxPreview ? (rate as number) : 0;
+  const taxableBase = validTaxPreview ? Math.round(parsedAmount / (1 + taxRate / 100) * 100) / 100 : 0;
   const isIntra = selectedState === 'INTRA_STATE';
-  const cgst = isIntra ? Math.round(taxableBase * 0.09) : 0;
-  const sgst = isIntra ? Math.round(taxableBase * 0.09) : 0;
-  const igst = !isIntra ? Math.round(taxableBase * 0.18) : 0;
-  const totalTax = cgst + sgst + igst;
+  const totalTax = validTaxPreview ? Math.round((parsedAmount - taxableBase) * 100) / 100 : 0;
+  const cgst = isIntra ? Math.round(totalTax / 2 * 100) / 100 : 0;
+  const sgst = isIntra ? Math.round((totalTax - cgst) * 100) / 100 : 0;
+  const igst = !isIntra ? totalTax : 0;
+  const showMoney = (amount: number) => validTaxPreview ? `₹${amount.toLocaleString('en-IN')}` : 'Not calculated';
 
-  const handleAddInvoiceSubmit = (e: React.FormEvent) => {
+  const handleAddInvoiceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCustName.trim()) return;
-
-    const amt = parseInt(newInvAmount, 10) || 0;
-    const newInv: InvoiceItem = {
+    const amt = Number(newInvAmount);
+    if (!newCustName.trim() || !Number.isFinite(amt) || amt <= 0) {
+      setSettleToast('Enter a real customer and valid positive receivable amount.');
+      return;
+    }
+    if (!onAddInvoice) {
+      setSettleToast('Server-backed receivable storage unavailable; no record was created.');
+      return;
+    }
+    const draft: InvoiceRecord = {
       customer: newCustName.trim(),
-      invoiceNo: `INV-${Date.now().toString().slice(-6)}`,
+      invoiceNo: '',
       amount: amt,
       dueInDays: 30,
       status: 'ACTIVE',
       gstin: newCustGstin.trim(),
-      createdAt: new Date().toISOString().split('T')[0]
+      createdAt: new Date().toISOString().slice(0, 10)
     };
-    if (onAddInvoice) {
-      onAddInvoice(newInv);
-    } else {
-      setLocalInvoices(prev => [newInv, ...prev]);
+    const saved = await onAddInvoice(draft);
+    if (!saved) {
+      setSettleToast('Draft could not be saved; no invoice or IRN was issued.');
+      return;
     }
     setShowAddInvoiceModal(false);
-    setNewCustName('');
-    setNewCustGstin('');
-    setNewInvAmount('');
-    setSettleToast(`Invoice ${newInv.invoiceNo} saved in ledger (GST e-invoicing API not configured).`);
-    setTimeout(() => setSettleToast(null), 4000);
+    setNewCustName(''); setNewCustGstin(''); setNewInvAmount('');
+    setSettleToast('Receivable draft saved to the backend ledger. GST IRN NOT issued.');
   };
 
-  const handleSettleReceivable = (invNo: string, customer: string, amount: number) => {
-    if (onSettleInvoice) {
-      onSettleInvoice(invNo);
-    } else {
-      setLocalInvoices(prev => prev.map(i => i.invoiceNo === invNo ? { ...i, status: 'SETTLED' } : i));
+  const handleSettleReceivable = async (invNo: string, customer: string, amount: number) => {
+    if (!onSettleInvoice) {
+      setSettleToast('Settlement requires a verified, saved backend record.');
+      return;
     }
-    setSettleToast(`Invoice #${invNo} (${customer} - ₹${amount.toLocaleString('en-IN')}) marked SETTLED in ledger.`);
+    const paymentReference = window.prompt('Enter the verified bank/UPI payment reference for this invoice:')?.trim();
+    if (!paymentReference) return;
+    const saved = await onSettleInvoice(invNo, paymentReference);
+    setSettleToast(saved
+      ? `Invoice #${invNo} (${customer} - ₹${amount.toLocaleString('en-IN')}) marked SETTLED with a recorded payment reference; gateway confirmation not implied.`
+      : `Could not settle invoice #${invNo}; please check the actual payment evidence.`);
     setTimeout(() => setSettleToast(null), 4000);
   };
 
@@ -108,7 +112,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
   const overdueReceivables = activeReceivables.filter(r => r.status === 'OVERDUE').reduce((acc, r) => acc + r.amount, 0);
   const totalPayables = activePayables.reduce((acc, p) => acc + p.amount, 0);
   const netProjectedCash = totalReceivables - totalPayables;
-  const mtdGst = Math.round(totalReceivables * 0.18 / 1.18);
+  // GST liability requires actual outward tax invoices, credits and input-tax records.
 
   const formattedReceivables = activeReceivables.length === 0
     ? '₹0.00'
@@ -135,16 +139,12 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
             Finance, Indian GST Compliance & Cash Flow Engine
           </h1>
           <p className="text-sm text-slate-400">
-            GSTIN-validated e-invoicing, CGST/SGST/IGST tax reconciliation, credit risk assessment, and 30-day cash forecasting.
+            Internal receivables ledger and manual tax estimate only. No GST filing, e-invoice certification or verified cash forecast.
           </p>
         </div>
 
         <div className="text-xs bg-slate-900 border border-slate-800 px-3 py-2 rounded-xl text-slate-300 font-mono">
-          E-Invoice Portal: {tenant.isConfigured && tenant.gstin ? (
-            <span className="text-emerald-400 font-bold">NIC Configured ({tenant.gstin.slice(0, 5)}...) ✓</span>
-          ) : (
-            <span className="text-amber-400 font-bold">NIC Gateway Unconfigured</span>
-          )}
+          NIC / IRP E-Invoice Adapter: <span className="text-amber-400 font-bold">NOT IMPLEMENTED</span>
         </div>
       </div>
 
@@ -168,7 +168,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400 uppercase font-mono">MTD GST Liability (Net Output)</span>
           <div className="text-xl font-bold text-purple-400 mt-1">{formattedGst}</div>
-          <div className="text-xs text-slate-400 mt-1">GSTR-1 & GSTR-3B Auto-Reconciled</div>
+          <div className="text-xs text-slate-400 mt-1">Tax reconciliation requires verified filing data</div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400 uppercase font-mono">Projected 30-Day Net Cash Flow</span>
@@ -188,10 +188,10 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <FileCheck className="w-4 h-4 text-purple-400" />
-                GST Compliant B2B Tax Invoice & E-Invoice Simulator
+                GST Estimation Preview (Not a Tax Invoice)
               </h2>
               <p className="text-xs text-slate-400">
-                Determines Place of Supply (POS) and calculates CGST/SGST (same state) or IGST (interstate).
+                Uses a manually entered, unverified GST rate. Confirm HSN/SAC and place of supply with your tax advisor.
               </p>
             </div>
             
@@ -202,7 +202,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             <div>
-              <label className="text-slate-400 block mb-1 font-semibold">Total Gross Invoice Amount (₹)</label>
+              <label className="text-slate-400 block mb-1 font-semibold">Gross amount including assumed GST (₹)</label>
               <input
                 type="number"
                 value={invoiceAmount}
@@ -222,7 +222,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
                       : 'bg-slate-950 text-slate-400 border-slate-800'
                   }`}
                 >
-                  Intra-State (Maharashtra)
+                  Intra-State (same state)
                 </button>
                 <button
                   onClick={() => setSelectedState('INTER_STATE')}
@@ -238,39 +238,49 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
             </div>
           </div>
 
+          <div className="text-xs">
+            <label className="block font-semibold text-slate-300 mb-1">Manually verified rate (%) — required for preview</label>
+            <input type="number" min="0" max="100" step="0.01"
+              value={manualGstRate}
+              onChange={e => setManualGstRate(e.target.value)}
+              placeholder="Enter rate based on actual HSN/SAC"
+              className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2.5"
+            />
+            <p className="text-amber-400 mt-2">This calculator does not determine legal tax rates or issue tax invoices. Leave blank if classification is unknown.</p>
+          </div>
           {/* Tax Breakdown Matrix */}
           <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
             <div className="flex justify-between text-slate-400">
               <span>Taxable Value (Excl. Tax):</span>
-              <span className="font-mono font-bold text-white">₹{taxableBase.toLocaleString('en-IN')}</span>
+              <span className="font-mono font-bold text-white">{showMoney(taxableBase)}</span>
             </div>
 
             {isIntra ? (
               <>
                 <div className="flex justify-between text-slate-400">
-                  <span>Central GST (CGST @ 9%):</span>
-                  <span className="font-mono text-purple-300">₹{cgst.toLocaleString('en-IN')}</span>
+                  <span>Central GST (CGST @ {taxRate / 2}%):</span>
+                  <span className="font-mono text-purple-300">{showMoney(cgst)}</span>
                 </div>
                 <div className="flex justify-between text-slate-400">
-                  <span>State GST (SGST @ 9%):</span>
-                  <span className="font-mono text-purple-300">₹{sgst.toLocaleString('en-IN')}</span>
+                  <span>State GST (SGST @ {taxRate / 2}%):</span>
+                  <span className="font-mono text-purple-300">{showMoney(sgst)}</span>
                 </div>
               </>
             ) : (
               <div className="flex justify-between text-slate-400">
-                <span>Integrated GST (IGST @ 18%):</span>
-                <span className="font-mono text-purple-300 font-bold">₹{igst.toLocaleString('en-IN')}</span>
+                <span>Integrated GST (IGST @ {taxRate}%):</span>
+                <span className="font-mono text-purple-300 font-bold">{showMoney(igst)}</span>
               </div>
             )}
 
             <div className="flex justify-between text-slate-400 pt-2 border-t border-slate-800">
               <span>Total Goods & Service Tax:</span>
-              <span className="font-mono font-bold text-white">₹{totalTax.toLocaleString('en-IN')}</span>
+              <span className="font-mono font-bold text-white">{showMoney(totalTax)}</span>
             </div>
 
             <div className="flex justify-between text-base font-bold text-white pt-2 border-t border-slate-800">
-              <span>Final Invoice Total:</span>
-              <span className="font-mono text-emerald-400">₹{(taxableBase + totalTax).toLocaleString('en-IN')}</span>
+              <span>Gross Amount (Preview Only):</span>
+              <span className="font-mono text-emerald-400">{showMoney(taxableBase + totalTax)}</span>
             </div>
           </div>
 
@@ -290,15 +300,15 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div>
-                <h3 className="font-bold text-sm text-white">Customer Receivables Tracker</h3>
-                <span className="text-xs text-slate-400 font-mono">Real-time Aging & E-Invoice</span>
+                <h3 className="font-bold text-sm text-white">Internal Receivables Draft Ledger</h3>
+                <span className="text-xs text-slate-400 font-mono">Receivables ledger • no government IRN</span>
               </div>
               <button
                 onClick={() => setShowAddInvoiceModal(true)}
                 className="px-2.5 py-1 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs cursor-pointer transition flex items-center gap-1 shadow"
               >
                 <Plus className="w-3.5 h-3.5" />
-                <span>+ Generate Invoice</span>
+                <span>+ Record Draft</span>
               </button>
             </div>
 
@@ -375,7 +385,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <Receipt className="w-5 h-5 text-purple-400" />
-                <h3 className="font-bold text-base text-white">Generate GST Tax Invoice</h3>
+                <h3 className="font-bold text-base text-white">Record Receivable Draft</h3>
               </div>
               <button
                 onClick={() => setShowAddInvoiceModal(false)}
@@ -421,9 +431,9 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
               </div>
 
               <div className="p-3 bg-purple-950/20 border border-purple-800/40 rounded-xl text-purple-300 text-[11px] space-y-1">
-                <span className="font-bold block">Automated Compliance Pipeline:</span>
-                <span>• Digital signature using NIC e-invoice sandbox token</span>
-                <span className="block">• Auto-calculation of 18% HSN/SAC GST liability (GSTR-1 schedule)</span>
+                <span className="font-bold block">Not a tax invoice or automated GST filing:</span>
+                <span>• Government IRN signing unavailable until a real provider adapter is connected</span>
+                <span className="block">• No GST rate is assumed; HSN/SAC classification and statutory filing remain pending</span>
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">

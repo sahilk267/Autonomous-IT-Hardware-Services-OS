@@ -1,5 +1,7 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
+> **Current status (2026-11-06): in active implementation, NOT production-certified.** The deployed environment, tenant isolation, payment/GST adapters, external RMM/Microsoft automation, supplier PO transmission and workflow execution are not yet fully verified. The current JSON store is **single-instance**, not a hardened multi-tenant service. See [implementation tracker](docs/IMPLEMENTATION_TRACKER.md), [progress report](docs/IMPLEMENTATION_REPORT_2026-11-06.md), and [data safety instructions](docs/DEPLOYMENT_DATA_SAFETY.md). CI exercises typecheck, build, isolated tests and production-mode HTTP smoke checks; passing CI does not prove third-party integrations.
+
 Apex is a production-grade, multi-tenant enterprise operating system built for IT hardware distributors, system integrators, managed service providers (MSPs), and IT field service organizations.
 
 ---

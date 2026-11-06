@@ -68,6 +68,7 @@ export interface AppStoreState {
   leads: Lead[];
   quotes: Quotation[];
   telegramMessages: TelegramMessage[];
+  processedTelegramUpdateIds: number[];
   suppliers: SupplierInfo[];
   rfqs: RFQItem[];
   tickets: ITSMTicket[];
@@ -92,7 +93,10 @@ export interface AppStoreState {
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'app-store.json');
+// Explicitly isolated database path is required for API smoke tests and deployments.
+const DB_FILE = process.env.APEX_DATA_FILE
+  ? path.resolve(process.env.APEX_DATA_FILE)
+  : path.join(DATA_DIR, 'app-store.json');
 
 export const defaultConnectors: IntegrationConnector[] = [
   {
@@ -196,6 +200,7 @@ export function getInitialCleanState(): AppStoreState {
     leads: [],
     quotes: [],
     telegramMessages: [],
+    processedTelegramUpdateIds: [],
     suppliers: [],
     rfqs: [],
     tickets: [],
@@ -353,7 +358,10 @@ export class PersistentStore {
     if (new Date(session.expiresAt) <= new Date()) {
       return null;
     }
-    return session;
+    // Reject legacy passwordless users and apply the user's current role.
+    const user = this.state.users.find(u => u.id === session.userId);
+    if (!user || !user.passwordHash || !user.salt) return null;
+    return { ...session, role: user.role, username: user.username };
   }
 
   public deleteSession(token: string): boolean {
@@ -452,15 +460,20 @@ export class PersistentStore {
     });
   }
 
-  public settleInvoice(invoiceNo: string, settlementInfo?: { paymentReference?: string; method?: string }): InvoiceRecord | null {
+  public settleInvoice(invoiceNo: string, settlementInfo: { paymentReference: string; method?: string }): InvoiceRecord | null {
+    const reference = settlementInfo?.paymentReference?.trim();
+    if (!reference || reference.length < 4 || reference.length > 200) {
+      throw new Error('A verified bank/UPI payment reference (4-200 characters) is required.');
+    }
     return this.commit((draft) => {
       const inv = draft.invoices.find(i => i.invoiceNo === invoiceNo);
       if (!inv) return null;
+      if (inv.status === 'SETTLED' || inv.status === 'CANCELLED') {
+        throw new Error('This invoice cannot be settled again or is cancelled.');
+      }
       inv.status = 'SETTLED';
       inv.settledAt = new Date().toISOString();
-      if (settlementInfo?.paymentReference) {
-        inv.paymentReference = settlementInfo.paymentReference;
-      }
+      inv.paymentReference = reference;
       return inv;
     });
   }
@@ -515,6 +528,19 @@ export class PersistentStore {
     });
   }
 
+  // Keep a bounded durable replay ledger for Telegram update IDs.
+  public markTelegramUpdateProcessed(updateId: number): boolean {
+    if (!Number.isSafeInteger(updateId) || updateId < 0) {
+      throw new Error('Telegram update_id must be a positive safe integer.');
+    }
+    if (this.state.processedTelegramUpdateIds.includes(updateId)) return false;
+    return this.commit((draft) => {
+      if (draft.processedTelegramUpdateIds.includes(updateId)) return false;
+      draft.processedTelegramUpdateIds = [...draft.processedTelegramUpdateIds, updateId].slice(-2048);
+      return true;
+    });
+  }
+
   // RFQs
   public addRFQ(rfq: RFQItem): RFQItem {
     return this.commit((draft) => {
@@ -535,11 +561,38 @@ export class PersistentStore {
     });
   }
 
-  public dispatchPO(rfqId: string, supplierId: string): RFQItem | null {
+  // Prepare an internal purchase order; no vendor email or portal submission occurs.
+  // All supplier amounts come from the actual recorded quote, never caller input.
+  public preparePO(rfqId: string, supplierId: string, preparedBy: string): RFQItem | null {
     return this.commit((draft) => {
       const rfq = draft.rfqs.find(r => r.id === rfqId);
       if (!rfq) return null;
-      rfq.status = 'PO_DISPATCHED';
+      if (rfq.status === 'PO_PREPARED' || rfq.status === 'PO_DISPATCHED') {
+        throw new Error('Purchase order is already prepared or previously recorded dispatched.');
+      }
+      if (!Number.isSafeInteger(rfq.requiredQty) || rfq.requiredQty <= 0) {
+        throw new Error('RFQ quantity must be a positive integer.');
+      }
+      const supplierQuote = rfq.supplierQuotes.find(q => q.supplierId === supplierId);
+      if (!supplierQuote) throw new Error('Supplier must have an actual quotation recorded for this RFQ.');
+      if (!Number.isFinite(supplierQuote.unitCost) || supplierQuote.unitCost < 0) {
+        throw new Error('Supplier quote must have a valid non-negative unit cost.');
+      }
+      const amount = Math.round(rfq.requiredQty * supplierQuote.unitCost * 100) / 100;
+      if (!Number.isSafeInteger(Math.round(amount * 100))) throw new Error('Purchase order value exceeds safe numeric limits.');
+      const id = crypto.randomUUID();
+      rfq.preparedPO = {
+        poReference: 'PO-DRAFT-' + id.slice(0, 12).toUpperCase(),
+        supplierId,
+        supplierName: supplierQuote.supplierName,
+        qty: rfq.requiredQty,
+        unitCost: supplierQuote.unitCost,
+        amount,
+        preparedAt: new Date().toISOString(),
+        preparedBy,
+        deliveryStatus: 'NOT_SENT'
+      };
+      rfq.status = 'PO_PREPARED';
       return rfq;
     });
   }
@@ -564,8 +617,7 @@ export class PersistentStore {
   public consumeJobPart(
     jobId: string,
     productIdOrName: string,
-    quantity: number = 1,
-    explicitCost?: number
+    quantity: number = 1
   ): FieldJob | null {
     return this.commit((draft) => {
       // 1. Find actual job
@@ -575,15 +627,13 @@ export class PersistentStore {
       }
 
       // 2. Validate quantity (positive integer)
-      const qty = Math.floor(quantity);
-      if (!qty || qty <= 0) {
+      const qty = quantity;
+      if (!Number.isSafeInteger(qty) || qty <= 0) {
         throw new Error(`Invalid consumption quantity: must be positive integer`);
       }
 
-      // 3. Find exact product by ID first, then fallback to exact name/SKU
-      const product = draft.products.find(
-        p => p.id === productIdOrName || p.name === productIdOrName || p.sku === productIdOrName
-      );
+      // 3. Use only an exact, stable inventory product ID.
+      const product = draft.products.find(p => p.id === productIdOrName);
       if (!product) {
         throw new Error(`Product not found in warehouse inventory: ${productIdOrName}`);
       }
@@ -601,7 +651,7 @@ export class PersistentStore {
       product.stockAvailable -= qty;
 
       // 6. Append matching job part with authoritative purchaseCost
-      const authoritativeCost = explicitCost !== undefined ? explicitCost : (product.purchaseCost || 0);
+      const authoritativeCost = product.purchaseCost || 0;
       job.partsConsumed.push({
         partName: product.name,
         qty,
@@ -764,6 +814,15 @@ export class PersistentStore {
       if (idx === -1) return null;
       draft.knowledgeArticles[idx] = { ...draft.knowledgeArticles[idx], ...updates };
       return draft.knowledgeArticles[idx];
+    });
+  }
+
+  public markKnowledgeArticleSolved(id: string): KnowledgeArticle | null {
+    return this.commit((draft) => {
+      const item = draft.knowledgeArticles.find(a => a.id === id);
+      if (!item) return null;
+      item.solvedCount = Math.max(0, item.solvedCount || 0) + 1;
+      return item;
     });
   }
 

@@ -30,6 +30,9 @@ interface AssetAMCManagerProps {
   assets: AssetItem[];
   licenses: SoftwareLicense[];
   amcs: AMCContract[];
+  rmaClaims: RMAClaim[];
+  onCreateRMA: (claim: Pick<RMAClaim, 'assetTag' | 'faultSymptom'>) => Promise<RMAClaim | null>;
+  onUpdateRMA: (id: string, updates: Partial<RMAClaim>) => Promise<RMAClaim | null>;
   onReclaimLicenses: (licenseId: string) => void;
   onUpdateAssetStatus: (assetId: string, status: AssetItem['status']) => void;
   onExecuteJML: (type: 'JOINER' | 'LEAVER', employeeName: string) => void;
@@ -42,6 +45,9 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
   assets,
   licenses,
   amcs,
+  rmaClaims,
+  onCreateRMA,
+  onUpdateRMA,
   onReclaimLicenses,
   onUpdateAssetStatus,
   onExecuteJML,
@@ -53,7 +59,6 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
   // RMA State - starts empty
-  const [rmaClaims, setRmaClaims] = useState<RMAClaim[]>([]);
   const [showNewRmaModal, setShowNewRmaModal] = useState(false);
   const [newRmaAssetTag, setNewRmaAssetTag] = useState(assets[0]?.assetTag || '');
   const [newRmaSymptom, setNewRmaSymptom] = useState('');
@@ -788,7 +793,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                     </div>
 
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 flex-shrink-0">
-                      {claim.warrantyStatus === 'ACTIVE_WARRANTY' ? 'Free OEM Care' : 'Extended AMC'}
+                      {claim.warrantyStatus === 'ACTIVE_WARRANTY' ? 'Warranty recorded active' : claim.warrantyStatus === 'UNVERIFIED' ? 'Warranty unverified' : claim.warrantyStatus === 'EXTENDED_CARE' ? 'Extended care' : 'Out of warranty'}
                     </span>
                   </div>
 
@@ -832,20 +837,29 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
                     {claim.stage !== 'TESTED_CLOSED' ? (
                       <button
-                        onClick={() => {
-                          setRmaClaims(prev => prev.map(c => {
-                            if (c.id !== claim.id) return c;
-                            const nextStageMap: Record<RMAClaim['stage'], RMAClaim['stage']> = {
-                              FAULT_LOGGED: 'OEM_APPROVED',
-                              OEM_APPROVED: 'IN_TRANSIT',
-                              IN_TRANSIT: 'SERVICE_CENTER',
-                              SERVICE_CENTER: 'REPLACED_RETURN',
-                              REPLACED_RETURN: 'TESTED_CLOSED',
-                              TESTED_CLOSED: 'TESTED_CLOSED'
-                            };
-                            return { ...c, stage: nextStageMap[c.stage] };
-                          }));
-                          setNoticeBanner(`RMA #${claim.rmaNumber} advanced to next lifecycle stage.`);
+                        onClick={async () => {
+                          const nextStageMap: Record<RMAClaim['stage'], RMAClaim['stage']> = {
+                            FAULT_LOGGED: 'OEM_APPROVED', OEM_APPROVED: 'IN_TRANSIT',
+                            IN_TRANSIT: 'SERVICE_CENTER', SERVICE_CENTER: 'REPLACED_RETURN',
+                            REPLACED_RETURN: 'TESTED_CLOSED', TESTED_CLOSED: 'TESTED_CLOSED'
+                          };
+                          const nextStage = nextStageMap[claim.stage];
+                          const changes: Partial<RMAClaim> = { stage: nextStage };
+                          if (nextStage === 'OEM_APPROVED') {
+                            const caseNumber = window.prompt('Enter the verified OEM case number:')?.trim();
+                            if (!caseNumber) return;
+                            changes.oemCaseNumber = caseNumber;
+                          }
+                          if (nextStage === 'IN_TRANSIT') {
+                            const courier = window.prompt('Enter the actual courier company:')?.trim();
+                            if (!courier) return;
+                            const awb = window.prompt('Enter actual tracking/AWB:')?.trim();
+                            if (!awb) return;
+                            changes.courierPartner = courier;
+                            changes.courierTracking = awb;
+                          }
+                          const saved = await onUpdateRMA(claim.id, changes);
+                          if (saved) setNoticeBanner(`RMA #${saved.rmaNumber} saved as ${saved.stage}; external dispatch is not implied.`);
                         }}
                         className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition cursor-pointer flex items-center gap-1"
                       >
@@ -932,38 +946,23 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
-                      if (!newRmaSymptom.trim()) {
-                        setNoticeBanner("Please specify the diagnosed hardware symptom.");
+                    onClick={async () => {
+                      if (!newRmaSymptom.trim() || !assets.some(a => a.assetTag === newRmaAssetTag)) {
+                        setNoticeBanner('Choose a registered asset and enter its actual fault.');
                         return;
                       }
-                      const selectedAsset = assets.find(a => a.assetTag === newRmaAssetTag);
-                      const newClaim: RMAClaim = {
-                        id: `rma-${Date.now()}`,
-                        rmaNumber: `RMA-${Date.now().toString().slice(-6)}`,
-                        assetTag: newRmaAssetTag || (selectedAsset?.assetTag || 'AST-N/A'),
-                        assetName: selectedAsset?.name || 'Enterprise Hardware Asset',
-                        serialNumber: selectedAsset?.serialNumber || 'N/A',
-                        oemBrand: selectedAsset?.brand || 'OEM Partner',
-                        oemCaseNumber: '',
-                        faultSymptom: newRmaSymptom,
-                        warrantyStatus: 'ACTIVE_WARRANTY',
-                        courierTracking: '',
-                        courierPartner: newRmaCourier || 'Express Logistics',
-                        stage: 'FAULT_LOGGED',
-                        createdAt: new Date().toISOString().split('T')[0]
-                      };
-                      setRmaClaims([newClaim, ...rmaClaims]);
-                      if (selectedAsset) {
-                        onUpdateAssetStatus(selectedAsset.id, 'UNDER_REPAIR');
+                      const saved = await onCreateRMA({ assetTag: newRmaAssetTag, faultSymptom: newRmaSymptom.trim() });
+                      if (!saved) {
+                        setNoticeBanner('RMA was not saved. No external dispatch occurred.');
+                        return;
                       }
                       setShowNewRmaModal(false);
                       setNewRmaSymptom('');
-                      setNoticeBanner(`RMA Claim ${newClaim.rmaNumber} logged at FAULT_LOGGED. OEM case ID and courier tracking await provider assignment.`);
+                      setNoticeBanner(`RMA ${saved.rmaNumber} recorded; OEM, warranty and courier confirmation are pending.`);
                     }}
                     className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs cursor-pointer shadow"
                   >
-                    Dispatch RMA Claim
+                    Record RMA Claim
                   </button>
                 </div>
               </div>

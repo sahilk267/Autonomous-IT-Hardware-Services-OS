@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/zero_mock_data.test.ts"
+    "test": "tsx tests/zero_mock_data.test.ts",
+    "smoke": "node tests/api_smoke.mjs",
+    "smoke:roles": "node tests/role_access_smoke.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
