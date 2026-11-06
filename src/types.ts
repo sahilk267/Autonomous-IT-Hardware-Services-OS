@@ -101,7 +101,7 @@ export interface BOMSolution {
   solutionName: string;
   category: string;
   summary: string;
-  compatibilityStatus: 'VERIFIED_COMPATIBLE' | 'CONDITIONAL' | 'INCOMPATIBLE';
+  compatibilityStatus: 'UNVERIFIED' | 'VERIFIED_COMPATIBLE' | 'CONDITIONAL' | 'INCOMPATIBLE';
   compatibilityNotes: string;
   recommendedMargin: number;
   items: BOMItem[];
@@ -123,8 +123,11 @@ export interface Quotation {
   marginPercent: number;
   gstAmount: number;
   totalAmount: number;
-  status: 'DRAFT' | 'PENDING_OWNER_APPROVAL' | 'APPROVED' | 'SENT_TO_CUSTOMER' | 'ACCEPTED' | 'REJECTED';
+  grandTotal?: number;
+  status: 'DRAFT' | 'PENDING_OWNER_APPROVAL' | 'APPROVED' | 'SENT_TO_CUSTOMER' | 'ACCEPTED' | 'REJECTED' | 'PENDING_APPROVAL';
   approvalReason?: string;
+  approvedBy?: string;
+  approvedAt?: string;
   createdDate: string;
   validUntil: string;
   paymentTerms: string;
@@ -199,9 +202,11 @@ export interface EndpointHealth {
   cpuLoad: number;
   ramUsagePercent: number;
   diskFreePercent: number;
-  smartStatus: 'HEALTHY' | 'WARNING' | 'CRITICAL';
+  smartStatus: 'HEALTHY' | 'WARNING' | 'CRITICAL' | 'UNAVAILABLE';
   batteryHealthPercent: number;
-  antivirusStatus: 'UP_TO_DATE' | 'EXPIRED';
+  antivirusStatus: 'UP_TO_DATE' | 'EXPIRED' | 'UNAVAILABLE';
+  status?: 'HEALTHY' | 'WARNING' | 'CRITICAL' | 'OFFLINE' | 'UNENROLLED';
+  telemetryAvailable?: boolean;
   lastSeen: string;
 }
 
@@ -233,7 +238,7 @@ export interface AutonomousEvent {
   id: string;
   timestamp: string;
   eventType: string;
-  agent: 'Sales Agent' | 'Pricing Agent' | 'Procurement Agent' | 'SLA Monitor' | 'Telegram Orchestrator';
+  agent: 'Sales Agent' | 'Pricing Agent' | 'Procurement Agent' | 'SLA Monitor' | 'Telegram Orchestrator' | string;
   summary: string;
   autonomousActionTaken: string;
   humanApprovalRequired: boolean;
@@ -379,6 +384,7 @@ export interface InvoiceRecord {
   createdAt: string;
   gstin?: string;
   settledAt?: string;
+  paymentReference?: string;
 }
 
 export type OperatingMode = 
@@ -391,6 +397,7 @@ export interface RMAClaim {
   id: string;
   rmaNumber: string;
   assetTag: string;
+  assetId?: string;
   assetName: string;
   serialNumber: string;
   oemBrand: string;
@@ -407,7 +414,7 @@ export interface RMAClaim {
 export interface KnowledgeArticle {
   id: string;
   title: string;
-  category: 'Network & VPN' | 'Windows & OS' | 'Security & Auth' | 'Hardware & Peripherals' | 'SaaS & M365';
+  category: 'Network & VPN' | 'Windows & OS' | 'Security & Auth' | 'Hardware & Peripherals' | 'SaaS & M365' | 'Firewall' | string;
   readTime: string;
   views: number;
   solvedCount: number;
@@ -423,7 +430,7 @@ export interface CRMOpportunity {
   clientName: string;
   contactPerson: string;
   value: number;
-  stage: 'LEAD' | 'QUALIFIED' | 'TECHNICAL_SCOPING' | 'PROPOSAL_SENT' | 'NEGOTIATION' | 'WON';
+  stage: 'LEAD' | 'QUALIFIED' | 'TECHNICAL_SCOPING' | 'PROPOSAL_SENT' | 'PROPOSAL_SUBMITTED' | 'NEGOTIATION' | 'WON' | string;
   winProbability: number;
   expectedCloseDate: string;
   assignedEngineer: string;
@@ -443,7 +450,7 @@ export interface MarketplaceDispute {
   customerClaim: string;
   providerRebuttal: string;
   aiMediationVerdict: string;
-  status: 'UNDER_REVIEW' | 'AWAITING_EVIDENCE' | 'RESOLVED_REFUND' | 'RESOLVED_RELEASED' | 'RESOLVED_REWORK';
+  status: 'UNDER_REVIEW' | 'AWAITING_EVIDENCE' | 'RESOLVED_REFUND' | 'RESOLVED_RELEASED' | 'RESOLVED_REWORK' | 'UNDER_ARBITRATION' | string;
   createdAt: string;
 }
 

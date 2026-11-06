@@ -33,10 +33,10 @@ export const EventBusAudit: React.FC<EventBusAuditProps> = ({
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Activity className="w-6 h-6 text-rose-400" />
-            Autonomous Event Bus & Immutable Audit Trail
+            Operational Event Bus & Server Audit Trail
           </h1>
           <p className="text-sm text-slate-400">
-            Authoritative append-only log of real server-executed operations, policy decisions, and owner authorization events.
+            Authoritative append-only log of server-recorded business operations, policy evaluations, and owner decisions.
           </p>
         </div>
 

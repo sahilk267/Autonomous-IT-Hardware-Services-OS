@@ -24,6 +24,10 @@ interface HeaderProps {
   onOperatingModeChange?: (mode: OperatingMode) => void;
   isCleanSlate?: boolean;
   onOpenResetModal?: () => void;
+  currentUser?: { id: string; username: string; role: string; fullName: string } | null;
+  onLogout?: () => void;
+  eventsCount?: number;
+  autoExecutedCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -34,16 +38,14 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenTelegram,
   operatingMode = 'HYBRID',
   onOperatingModeChange,
-  isCleanSlate = false,
-  onOpenResetModal
+  onOpenResetModal,
+  currentUser,
+  onLogout,
+  eventsCount = 0,
+  autoExecutedCount = 0
 }) => {
-  const roleLabels: Record<UserRole, { title: string; badge: string; desc: string }> = {
-    BUSINESS_OWNER: { title: 'Business Owner & MD', badge: 'Apex Command', desc: 'Full autonomous approval & financial governance' },
-    SALES_MANAGER: { title: 'Sales & Presales Lead', badge: 'Sales Engine', desc: 'BOM generation, pricing & customer quotes' },
-    ENTERPRISE_IT_HEAD: { title: 'Enterprise IT CIO', badge: 'ITSM & CMDB', desc: 'Service desk, SLA, assets & procurement' },
-    FIELD_ENGINEER: { title: 'Field Technician', badge: 'Field Service', desc: 'On-site jobs, check-ins, parts & sign-offs' },
-    PROCUREMENT_LEAD: { title: 'Procurement Lead', badge: 'Supply Chain', desc: 'RFQs, supplier scores & stock replenishment' }
-  };
+  const autoPercent = eventsCount > 0 ? Math.round((autoExecutedCount / eventsCount) * 100) : null;
+  const exceptionPercent = autoPercent !== null ? 100 - autoPercent : null;
 
   return (
     <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-40 shadow-md">
@@ -64,7 +66,7 @@ export const Header: React.FC<HeaderProps> = ({
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 font-mono flex items-center gap-2">
-                  <span>GSTIN: {tenant.gstin}</span>
+                  <span>GSTIN: {tenant.gstin || 'Unconfigured'}</span>
                   <span className="text-slate-600">•</span>
                   <span>{tenant.state}</span>
                 </p>
@@ -94,12 +96,12 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
               <span className="text-slate-300 font-medium">Auto-Executed:</span>
-              <span className="text-emerald-400 font-semibold">90%</span>
+              <span className="text-emerald-400 font-semibold">{autoPercent !== null ? `${autoPercent}%` : 'N/A'}</span>
               <span className="text-slate-500">|</span>
-              <span className="text-amber-300 font-semibold">10% Exception</span>
+              <span className="text-amber-300 font-semibold">{exceptionPercent !== null ? `${exceptionPercent}% Exception` : 'N/A'}</span>
             </div>
 
-            {/* Operating Mode Selector (Blueprint Section 2 & 157) */}
+            {/* Operating Mode Selector */}
             <div className="flex items-center gap-1.5 bg-slate-800/90 border border-indigo-700/60 rounded-full px-3 py-1 text-xs text-slate-300 shadow-sm">
               <span className="text-[10px] uppercase font-bold text-indigo-400 tracking-wider">Mode:</span>
               <select
@@ -116,16 +118,16 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Right Side: Persona Switcher & Telegram Action */}
+          {/* Right Side: Persona Switcher, Organization, User & Telegram */}
           <div className="flex items-center gap-2.5 w-full md:w-auto justify-end">
-            {/* Persona Switcher */}
-            <div className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 rounded-lg p-1 text-xs">
+            {/* Persona Switcher (Harmless Preview Filter Only) */}
+            <div className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 rounded-lg p-1 text-xs" title="Preview role perspective (permissions enforced server-side)">
               <Users className="w-3.5 h-3.5 text-slate-400 ml-1" />
               <select
                 value={currentRole}
                 onChange={(e) => onRoleChange(e.target.value as UserRole)}
                 className="bg-transparent text-slate-200 text-xs font-medium focus:outline-none cursor-pointer pr-2"
-                title="Switch Operating Persona"
+                title="Preview Role Filter (Server-side RBAC Authoritative)"
               >
                 <option value="BUSINESS_OWNER" className="bg-slate-900 text-white">👑 Business Owner & MD</option>
                 <option value="SALES_MANAGER" className="bg-slate-900 text-white">💼 Sales & Presales Lead</option>
@@ -163,6 +165,20 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="w-2 h-2 rounded-full bg-emerald-300"></span>
               )}
             </button>
+
+            {/* Authenticated User & Logout */}
+            {currentUser && onLogout && (
+              <div className="flex items-center gap-2 pl-2 border-l border-slate-800">
+                <span className="text-[11px] text-slate-400 font-mono hidden md:inline">{currentUser.username}</span>
+                <button
+                  onClick={onLogout}
+                  className="px-2 py-1 rounded bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/80 text-[11px] font-semibold transition"
+                  title="Sign out of Apex OS"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
           </div>
 
         </div>

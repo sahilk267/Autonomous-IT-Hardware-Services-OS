@@ -14,6 +14,7 @@ import { WorkflowAutomation } from './components/WorkflowAutomation';
 import { IntegrationsHub } from './components/IntegrationsHub';
 import { ExecutiveDashboard } from './components/ExecutiveDashboard';
 import { ResetModal } from './components/ResetModal';
+import { AuthModal } from './components/AuthModal';
 
 import {
   UserRole,
@@ -84,44 +85,81 @@ export default function App() {
   const [isThinking, setIsThinking] = useState(false);
   const [isTelegramConfigured, setIsTelegramConfigured] = useState(false);
 
+  // Authentication State (Authoritative Server Session)
+  const [currentUser, setCurrentUser] = useState<{ id: string; username: string; role: UserRole; name?: string } | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSetupRequired, setIsSetupRequired] = useState(false);
+
   // Helper for user notifications
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  // Load persistent state from backend on mount
+  // Load persistent state from backend
+  const loadState = async () => {
+    try {
+      const res = await fetch('/api/state');
+      if (res.status === 401) {
+        setIsAuthModalOpen(true);
+        return;
+      }
+      const data = await res.json();
+      if (data.success && data.data) {
+        const s = data.data;
+        if (s.tenant) setTenant(s.tenant);
+        if (s.products) setProducts(s.products);
+        if (s.leads) setLeads(s.leads);
+        if (s.quotes) setQuotes(s.quotes);
+        if (s.telegramMessages) setTelegramMessages(s.telegramMessages);
+        if (s.suppliers) setSuppliers(s.suppliers);
+        if (s.rfqs) setRfqs(s.rfqs);
+        if (s.tickets) setTickets(s.tickets);
+        if (s.endpoints) setEndpoints(s.endpoints);
+        if (s.jobs) setJobs(s.jobs);
+        if (s.assets) setAssets(s.assets);
+        if (s.licenses) setLicenses(s.licenses);
+        if (s.amcs) setAMCs(s.amcs);
+        if (s.projects) setProjects(s.projects);
+        if (s.proposals) setProposals(s.proposals);
+        if (s.providers) setProviders(s.providers);
+        if (s.events) setEvents(s.events);
+        if (s.invoices) setInvoices(s.invoices);
+        if (s.workflows) setWorkflows(s.workflows);
+        if (s.connectors) setConnectors(s.connectors);
+      }
+    } catch (err) {
+      console.warn('Could not sync persistent state from server:', err);
+    }
+  };
+
+  // Startup: verify auth session and integration status
   useEffect(() => {
-    fetch('/api/state')
+    fetch('/api/auth/status')
       .then(res => res.json())
-      .then(data => {
-        if (data.success && data.data) {
-          const s = data.data;
-          if (s.tenant) setTenant(s.tenant);
-          if (s.products) setProducts(s.products);
-          if (s.leads) setLeads(s.leads);
-          if (s.quotes) setQuotes(s.quotes);
-          if (s.telegramMessages) setTelegramMessages(s.telegramMessages);
-          if (s.suppliers) setSuppliers(s.suppliers);
-          if (s.rfqs) setRfqs(s.rfqs);
-          if (s.tickets) setTickets(s.tickets);
-          if (s.endpoints) setEndpoints(s.endpoints);
-          if (s.jobs) setJobs(s.jobs);
-          if (s.assets) setAssets(s.assets);
-          if (s.licenses) setLicenses(s.licenses);
-          if (s.amcs) setAMCs(s.amcs);
-          if (s.projects) setProjects(s.projects);
-          if (s.proposals) setProposals(s.proposals);
-          if (s.providers) setProviders(s.providers);
-          if (s.events) setEvents(s.events);
-          if (s.invoices) setInvoices(s.invoices);
-          if (s.workflows) setWorkflows(s.workflows);
-          if (s.connectors) setConnectors(s.connectors);
+      .then(status => {
+        if (status.setupRequired || status.needsSetup) {
+          setIsSetupRequired(true);
+          setIsAuthModalOpen(true);
+        } else if (status.authenticated && status.user) {
+          fetch('/api/auth/me')
+            .then(res => res.json())
+            .then(meData => {
+              if (meData.success && meData.user) {
+                setCurrentUser(meData.user);
+                setCurrentRole(meData.user.role);
+                loadState();
+              } else {
+                setIsAuthModalOpen(true);
+              }
+            })
+            .catch(() => setIsAuthModalOpen(true));
+        } else {
+          setIsAuthModalOpen(true);
         }
       })
-      .catch(err => console.warn('Could not sync persistent state from server:', err));
+      .catch(() => setIsAuthModalOpen(true));
 
-    // Check integration connection statuses
     fetch('/api/integrations/status')
       .then(res => res.json())
       .then(status => {
@@ -129,6 +167,25 @@ export default function App() {
       })
       .catch(() => setIsTelegramConfigured(false));
   }, []);
+
+  const handleLoginSuccess = (user: any) => {
+    setCurrentUser(user);
+    if (user.role) setCurrentRole(user.role);
+    setIsAuthModalOpen(false);
+    showToast(`Authenticated as ${user.username} (${user.role}).`);
+    loadState();
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+    setCurrentUser(null);
+    setIsAuthModalOpen(true);
+    showToast('Logged out of Apex OS.');
+  };
 
   // Update Tenant Profile
   const handleUpdateTenant = async (updates: Partial<TenantInfo>) => {
@@ -812,6 +869,10 @@ export default function App() {
         onOpenTelegram={() => setActiveTab('telegram')}
         activeTab={activeTab}
         onOpenResetModal={() => setShowSettingsModal(true)}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+        eventsCount={events.length}
+        autoExecutedCount={events.filter(e => e.approvalStatus === 'AUTO_APPROVED').length}
       />
 
       {/* Main Module Tabs */}
@@ -972,6 +1033,13 @@ export default function App() {
         onUpdateTenant={handleUpdateTenant}
         onResetCleanSlate={handleResetCleanSlate}
         stats={workspaceStats}
+      />
+
+      {/* Authoritative Security & Login Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        isSetupRequired={isSetupRequired}
+        onLoginSuccess={handleLoginSuccess}
       />
 
       {/* Toast Notification Banner */}

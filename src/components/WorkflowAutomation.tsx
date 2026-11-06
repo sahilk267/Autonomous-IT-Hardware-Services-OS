@@ -39,7 +39,7 @@ export const WorkflowAutomation: React.FC<WorkflowAutomationProps> = ({
   const [isExecutingTest, setIsExecutingTest] = useState(false);
   const [executionLog, setExecutionLog] = useState<{
     step: string;
-    status: 'SUCCESS' | 'WAITING_APPROVAL' | 'EVALUATING';
+    status: 'DRY_RUN' | 'WAITING_APPROVAL' | 'BLOCKED_NO_ADAPTER' | 'EVALUATING';
     detail: string;
   }[] | null>(null);
 
@@ -64,29 +64,32 @@ export const WorkflowAutomation: React.FC<WorkflowAutomationProps> = ({
   const handleTestRun = (wfId: string) => {
     if (!selectedWf) return;
     setIsExecutingTest(true);
-    setExecutionLog([
-      { step: '1. Event Interception', status: 'EVALUATING', detail: `Evaluating domain event: ${selectedWf.triggerEvent}` }
-    ]);
 
-    setTimeout(() => {
-      setExecutionLog(prev => [
-        ...(prev || []),
-        { step: '2. Rule Condition Validation', status: 'SUCCESS', detail: `Condition passed: ${selectedWf.condition}` }
-      ]);
-    }, 600);
+    const isExternalAdapterConfigured = false; // Telegram / external automation adapters not connected to live worker daemon
+    const logSteps = [
+      {
+        step: '1. Event Interception',
+        status: 'EVALUATING' as const,
+        detail: `Verified domain trigger syntax: ${selectedWf.triggerEvent}`
+      },
+      {
+        step: '2. Rule Condition Validation',
+        status: 'DRY_RUN' as const,
+        detail: `Dry-run evaluation passed against state schema: ${selectedWf.condition}`
+      },
+      {
+        step: '3. Autonomous Action Dispatch',
+        status: (selectedWf.humanApprovalRequired
+          ? 'WAITING_APPROVAL'
+          : (isExternalAdapterConfigured ? 'DRY_RUN' : 'BLOCKED_NO_ADAPTER')) as 'WAITING_APPROVAL' | 'DRY_RUN' | 'BLOCKED_NO_ADAPTER',
+        detail: isExternalAdapterConfigured
+          ? selectedWf.autonomousAction
+          : `Dry-run completed. Live external dispatch halted: provider worker adapter is not configured. No business data modified.`
+      }
+    ];
 
-    setTimeout(() => {
-      setExecutionLog(prev => [
-        ...(prev || []),
-        { 
-          step: '3. Autonomous Execution & Dispatch', 
-          status: selectedWf.humanApprovalRequired ? 'WAITING_APPROVAL' : 'SUCCESS', 
-          detail: selectedWf.autonomousAction 
-        }
-      ]);
-      setIsExecutingTest(false);
-      onExecuteWorkflowTest(wfId);
-    }, 1200);
+    setExecutionLog(logSteps);
+    setIsExecutingTest(false);
   };
 
   const handleCreateSubmit = (e: React.FormEvent) => {
@@ -290,10 +293,12 @@ export const WorkflowAutomation: React.FC<WorkflowAutomationProps> = ({
                   <div className="space-y-2">
                     {executionLog.map((log, idx) => (
                       <div key={idx} className="flex items-start gap-2">
-                        {log.status === 'SUCCESS' ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                        {log.status === 'DRY_RUN' ? (
+                          <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
                         ) : log.status === 'WAITING_APPROVAL' ? (
                           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        ) : log.status === 'BLOCKED_NO_ADAPTER' ? (
+                          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                         ) : (
                           <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin shrink-0 mt-0.5"></div>
                         )}

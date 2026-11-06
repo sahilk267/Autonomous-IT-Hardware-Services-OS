@@ -46,7 +46,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
   onSettleInvoice
 }) => {
   const [selectedState, setSelectedState] = useState<'INTRA_STATE' | 'INTER_STATE'>('INTRA_STATE');
-  const [invoiceAmount, setInvoiceAmount] = useState('100000');
+  const [invoiceAmount, setInvoiceAmount] = useState('');
   const [localInvoices, setLocalInvoices] = useState<InvoiceItem[]>([]);
   const [showAddInvoiceModal, setShowAddInvoiceModal] = useState(false);
   const [newCustName, setNewCustName] = useState('');
@@ -118,9 +118,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
     ? '₹0.00'
     : `₹${(totalPayables / 100000).toFixed(2)} Lakhs`;
 
-  const formattedGst = isCleanSlate && activeReceivables.length === 0
-    ? '₹0.00'
-    : `₹${(mtdGst / 100000).toFixed(2)} Lakhs`;
+  const formattedGst = 'Not calculated';
 
   const formattedNetCash = isCleanSlate && activeReceivables.length === 0 && activePayables.length === 0
     ? '₹0.00'
@@ -276,20 +274,14 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
             </div>
           </div>
 
-          {/* Simulated E-Invoice Meta */}
-          <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] font-mono text-slate-400 space-y-1">
-            <div className="flex justify-between">
-              <span>E-Invoice IRN Hash:</span>
-              <span className="text-slate-300">e924bf62a...88319f0a7</span>
+          {/* Government E-Invoicing Status */}
+          <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] font-mono text-slate-400 space-y-1.5">
+            <div className="text-amber-400 font-semibold leading-relaxed">
+              Government e-invoicing not configured. Internal invoice drafts are not registered IRNs.
             </div>
-            <div className="flex justify-between">
-              <span>QR Code Payload:</span>
-              <span className="text-emerald-400">NIC-EINV-VALIDATED-SIGNED</span>
-            </div>
-            <div className="flex justify-between">
-              <span>E-Way Bill Status:</span>
-              <span className="text-sky-400">Generated for Consignment &gt; ₹50,000</span>
-            </div>
+            <p className="text-[10px] text-slate-500">
+              Active NIC/IRP portal credentials required to generate cryptographically signed IRNs and legal QR payloads.
+            </p>
           </div>
         </div>
 

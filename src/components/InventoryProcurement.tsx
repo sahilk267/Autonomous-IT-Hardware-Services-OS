@@ -238,8 +238,16 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400 uppercase font-mono">Top Distributor Rating</span>
-          <div className="text-xl font-bold text-sky-400 mt-1">Redington India (96%)</div>
-          <div className="text-xs text-slate-400 mt-1">0.3% Defect • 2-Day Delivery SLA</div>
+          <div className="text-xl font-bold text-sky-400 mt-1">
+            {suppliers && suppliers.length > 0
+              ? `${suppliers[0].name} (${suppliers[0].fulfillmentScore}%)`
+              : 'N/A (No Suppliers)'}
+          </div>
+          <div className="text-xs text-slate-400 mt-1">
+            {suppliers && suppliers.length > 0
+              ? `Delivery SLA: ${suppliers[0].deliverySlaDays} Days • Category: ${suppliers[0].category}`
+              : 'Awaiting supplier registration in procurement desk'}
+          </div>
         </div>
       </div>
 

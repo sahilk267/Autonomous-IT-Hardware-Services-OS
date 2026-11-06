@@ -114,7 +114,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
     const newAsset: AssetItem = {
       id: `ast-${Date.now()}`,
       assetTag: newAssetTag.toUpperCase(),
-      serialNumber: newAssetSerial || `SN-${Math.floor(100000 + Math.random() * 900000)}`,
+      serialNumber: newAssetSerial.trim() || 'UNTRACKED',
       name: newAssetName,
       category: newAssetCategory,
       brand: newAssetBrand,
@@ -123,7 +123,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
       department: newAssetDept,
       location: newAssetLocation,
       purchaseDate: new Date().toISOString().split('T')[0],
-      purchaseCost: parseInt(newAssetCost, 10) || 50000,
+      purchaseCost: parseInt(newAssetCost, 10) || 0,
       warrantyExpiresAt: newAssetWarranty,
       status: newAssetUser.includes('Unassigned') ? 'AVAILABLE_IN_STOCK' : 'IN_USE'
     };
@@ -945,12 +945,12 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                         assetName: selectedAsset?.name || 'Enterprise Hardware Asset',
                         serialNumber: selectedAsset?.serialNumber || 'N/A',
                         oemBrand: selectedAsset?.brand || 'OEM Partner',
-                        oemCaseNumber: `OEM-CASE-${Date.now().toString().slice(-6)}`,
+                        oemCaseNumber: '',
                         faultSymptom: newRmaSymptom,
                         warrantyStatus: 'ACTIVE_WARRANTY',
-                        courierTracking: `AWB-${Date.now().toString().slice(-8)}`,
-                        courierPartner: newRmaCourier || 'Express Courier Logistics',
-                        stage: 'OEM_APPROVED',
+                        courierTracking: '',
+                        courierPartner: newRmaCourier || 'Express Logistics',
+                        stage: 'FAULT_LOGGED',
                         createdAt: new Date().toISOString().split('T')[0]
                       };
                       setRmaClaims([newClaim, ...rmaClaims]);
@@ -959,7 +959,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                       }
                       setShowNewRmaModal(false);
                       setNewRmaSymptom('');
-                      setNoticeBanner(`RMA Claim ${newClaim.rmaNumber} initiated! Pickup scheduled with ${newClaim.courierPartner}. Asset status set to UNDER_REPAIR in CMDB.`);
+                      setNoticeBanner(`RMA Claim ${newClaim.rmaNumber} logged at FAULT_LOGGED. OEM case ID and courier tracking await provider assignment.`);
                     }}
                     className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs cursor-pointer shadow"
                   >

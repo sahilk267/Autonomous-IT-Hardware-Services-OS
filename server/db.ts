@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import crypto from 'node:crypto';
 import {
   ProductItem,
   Lead,
@@ -25,8 +26,24 @@ import {
   MarketplaceDispute,
   TenantInfo,
   UserAccount,
-  InvoiceRecord
-} from '../src/types';
+  UserRole,
+  InvoiceRecord,
+  ProjectMilestone
+} from '../src/types.ts';
+
+export interface ServerUser extends UserAccount {
+  passwordHash?: string;
+  salt?: string;
+}
+
+export interface SessionRecord {
+  token: string;
+  userId: string;
+  username: string;
+  role: UserRole;
+  createdAt: string;
+  expiresAt: string;
+}
 
 export interface InventoryTransaction {
   id: string;
@@ -45,7 +62,8 @@ export interface InventoryTransaction {
 
 export interface AppStoreState {
   tenant: TenantInfo;
-  users: UserAccount[];
+  users: ServerUser[];
+  sessions: SessionRecord[];
   products: ProductItem[];
   leads: Lead[];
   quotes: Quotation[];
@@ -75,7 +93,6 @@ export interface AppStoreState {
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'app-store.json');
-const BACKUP_FILE = path.join(DATA_DIR, 'app-store.backup.json');
 
 export const defaultConnectors: IntegrationConnector[] = [
   {
@@ -146,7 +163,23 @@ export const defaultConnectors: IntegrationConnector[] = [
   }
 ];
 
-function getInitialCleanState(): AppStoreState {
+export function hashPassword(password: string): { salt: string; hash: string } {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
+  return { salt, hash };
+}
+
+export function verifyPassword(password: string, salt: string, storedHash: string): boolean {
+  try {
+    const key = crypto.scryptSync(password, salt, 64);
+    const storedKey = Buffer.from(storedHash, 'hex');
+    return crypto.timingSafeEqual(key, storedKey);
+  } catch {
+    return false;
+  }
+}
+
+export function getInitialCleanState(): AppStoreState {
   return {
     tenant: {
       id: 'tenant-1',
@@ -157,17 +190,8 @@ function getInitialCleanState(): AppStoreState {
       logoText: 'APEX',
       isConfigured: false
     },
-    users: [
-      {
-        id: 'usr-1',
-        username: 'admin',
-        name: 'Enterprise IT Administrator',
-        email: 'admin@apex-it.internal',
-        role: 'BUSINESS_OWNER',
-        tenantId: 'tenant-1',
-        createdAt: new Date().toISOString()
-      }
-    ],
+    users: [],
+    sessions: [],
     products: [],
     leads: [],
     quotes: [],
@@ -196,85 +220,69 @@ function getInitialCleanState(): AppStoreState {
   };
 }
 
-class PersistentStore {
+export class PersistentStore {
+  private readonly dbFile: string;
+  private readonly dataDir: string;
   private state: AppStoreState;
 
-  constructor() {
+  constructor(dbFile: string = DB_FILE) {
+    this.dbFile = dbFile;
+    this.dataDir = path.dirname(dbFile);
     this.state = this.loadFromDisk();
   }
 
   private loadFromDisk(): AppStoreState {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (!fs.existsSync(this.dbFile)) {
+      if (!fs.existsSync(this.dataDir)) {
+        fs.mkdirSync(this.dataDir, { recursive: true });
       }
-
-      if (fs.existsSync(DB_FILE)) {
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object') {
-          // Verify if this store contained old mock data (e.g. initial mock products or mock invoices)
-          const hasOldMockData = Array.isArray(parsed.products) && parsed.products.some(
-            (p: any) => p.sku === 'DELL-OPT-7010-I5' || p.sku === 'LEN-T14-GEN4-I7'
-          );
-          const hasOldMockInvoices = Array.isArray(parsed.invoices) && parsed.invoices.some(
-            (i: any) => i.invoiceNo === 'INV-2026-0812'
-          );
-
-          if (hasOldMockData || hasOldMockInvoices) {
-            // Backup before migration
-            try {
-              fs.writeFileSync(BACKUP_FILE, raw, 'utf-8');
-            } catch (backupErr) {
-              console.warn('Could not write backup file:', backupErr);
-            }
-            // Filter out old mock items while preserving genuine user items
-            const cleanedState = getInitialCleanState();
-            // Preserve user-created tenant settings if modified
-            if (parsed.tenant && parsed.tenant.isConfigured) {
-              cleanedState.tenant = parsed.tenant;
-            }
-            // Preserve products not matching old mock templates
-            if (Array.isArray(parsed.products)) {
-              cleanedState.products = parsed.products.filter(
-                (p: any) => !['DELL-OPT-7010-I5', 'LEN-T14-GEN4-I7', 'CISCO-CBS350-48P', 'FORTI-FG-60F', 'APC-SRT-6KXLI', 'DELL-P2422H'].includes(p.sku)
-              );
-            }
-            this.persistToDisk(cleanedState);
-            return cleanedState;
-          }
-
-          // Otherwise return existing persistent store with default connectors refreshed
-          const sanitizedState = {
-            ...getInitialCleanState(),
-            ...parsed,
-            connectors: defaultConnectors
-          };
-          return sanitizedState;
-        }
-      }
-    } catch (err) {
-      console.error('Error loading persistent store from disk:', err);
+      const cleanState = getInitialCleanState();
+      this.persistToDisk(cleanState);
+      return cleanState;
     }
 
-    // Default to clean state
-    const cleanState = getInitialCleanState();
-    this.persistToDisk(cleanState);
-    return cleanState;
+    const raw = fs.readFileSync(this.dbFile, 'utf-8');
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (parseErr) {
+      const corruptedBackup = `${this.dbFile}.corrupted.${Date.now()}`;
+      try {
+        fs.writeFileSync(corruptedBackup, raw, 'utf-8');
+      } catch (backupErr) {
+        console.error('Failed to create backup of corrupted database:', backupErr);
+      }
+      throw new Error(`CRITICAL: Database file ${this.dbFile} is corrupted and cannot be parsed as JSON. Preserved snapshot at ${corruptedBackup}. Refusing to overwrite data.`);
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      throw new Error(`CRITICAL: Database file ${this.dbFile} contains invalid JSON structure (not an object).`);
+    }
+
+    const base = getInitialCleanState();
+    return {
+      ...base,
+      ...parsed,
+      connectors: defaultConnectors
+    };
   }
 
-  private persistToDisk(stateToSave: AppStoreState) {
-    try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
-      stateToSave.lastUpdated = new Date().toISOString();
-      const tmpFile = `${DB_FILE}.tmp.${Date.now()}`;
-      fs.writeFileSync(tmpFile, JSON.stringify(stateToSave, null, 2), 'utf-8');
-      fs.renameSync(tmpFile, DB_FILE);
-    } catch (err) {
-      console.error('Failed to persist store to disk:', err);
+  private persistToDisk(stateToSave: AppStoreState): void {
+    if (!fs.existsSync(this.dataDir)) {
+      fs.mkdirSync(this.dataDir, { recursive: true });
     }
+    stateToSave.lastUpdated = new Date().toISOString();
+    const tmpFile = `${this.dbFile}.tmp.${Date.now()}.${crypto.randomBytes(4).toString('hex')}`;
+    fs.writeFileSync(tmpFile, JSON.stringify(stateToSave, null, 2), 'utf-8');
+    fs.renameSync(tmpFile, this.dbFile);
+  }
+
+  public commit<T>(operation: (draft: AppStoreState) => T): T {
+    const draft = structuredClone(this.state);
+    const result = operation(draft);
+    this.persistToDisk(draft);
+    this.state = draft;
+    return result;
   }
 
   public getState(): AppStoreState {
@@ -282,314 +290,513 @@ class PersistentStore {
   }
 
   public resetToCleanSlate(): AppStoreState {
-    this.state = getInitialCleanState();
-    this.persistToDisk(this.state);
-    return this.state;
+    return this.commit((draft) => {
+      const clean = getInitialCleanState();
+      Object.assign(draft, clean);
+      return draft;
+    });
   }
 
   // Tenant
   public updateTenant(updates: Partial<TenantInfo>): TenantInfo {
-    this.state.tenant = { ...this.state.tenant, ...updates };
-    this.persistToDisk(this.state);
-    return this.state.tenant;
+    return this.commit((draft) => {
+      draft.tenant = { ...draft.tenant, ...updates };
+      return draft.tenant;
+    });
   }
 
-  // Users
-  public getUsers(): UserAccount[] {
+  // Users & Sessions
+  public getUsers(): ServerUser[] {
     return this.state.users;
   }
 
-  public addUser(user: UserAccount): UserAccount {
-    this.state.users.push(user);
-    this.persistToDisk(this.state);
-    return user;
+  public getUserById(id: string): ServerUser | undefined {
+    return this.state.users.find(u => u.id === id);
+  }
+
+  public getUserByUsername(username: string): ServerUser | undefined {
+    return this.state.users.find(u => u.username.toLowerCase() === username.toLowerCase());
+  }
+
+  public addUser(user: ServerUser): ServerUser {
+    return this.commit((draft) => {
+      draft.users.push(user);
+      return user;
+    });
+  }
+
+  public createSession(userId: string, username: string, role: UserRole): SessionRecord {
+    const token = crypto.randomBytes(32).toString('hex');
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    const session: SessionRecord = {
+      token,
+      userId,
+      username,
+      role,
+      createdAt: now.toISOString(),
+      expiresAt
+    };
+    return this.commit((draft) => {
+      // Remove any existing sessions for this token or expired sessions
+      const nowIso = new Date().toISOString();
+      draft.sessions = draft.sessions.filter(s => s.expiresAt > nowIso && s.token !== token);
+      draft.sessions.push(session);
+      return session;
+    });
+  }
+
+  public getSession(token: string): SessionRecord | null {
+    if (!token) return null;
+    const session = this.state.sessions.find(s => s.token === token);
+    if (!session) return null;
+    if (new Date(session.expiresAt) <= new Date()) {
+      return null;
+    }
+    return session;
+  }
+
+  public deleteSession(token: string): boolean {
+    return this.commit((draft) => {
+      const initial = draft.sessions.length;
+      draft.sessions = draft.sessions.filter(s => s.token !== token);
+      return draft.sessions.length < initial;
+    });
   }
 
   // Tickets
   public addTicket(ticket: ITSMTicket): ITSMTicket {
-    this.state.tickets = [ticket, ...this.state.tickets];
-    this.persistToDisk(this.state);
-    return ticket;
+    return this.commit((draft) => {
+      draft.tickets = [ticket, ...draft.tickets];
+      return ticket;
+    });
   }
 
   public updateTicket(id: string, updates: Partial<ITSMTicket>): ITSMTicket | null {
-    const idx = this.state.tickets.findIndex(t => t.id === id);
-    if (idx === -1) return null;
-    this.state.tickets[idx] = { ...this.state.tickets[idx], ...updates };
-    this.persistToDisk(this.state);
-    return this.state.tickets[idx];
+    return this.commit((draft) => {
+      const idx = draft.tickets.findIndex(t => t.id === id);
+      if (idx === -1) return null;
+      draft.tickets[idx] = { ...draft.tickets[idx], ...updates };
+      return draft.tickets[idx];
+    });
   }
 
   // Endpoints
   public addEndpoint(endpoint: EndpointHealth): EndpointHealth {
-    this.state.endpoints = [endpoint, ...this.state.endpoints];
-    this.persistToDisk(this.state);
-    return endpoint;
+    return this.commit((draft) => {
+      draft.endpoints = [endpoint, ...draft.endpoints];
+      return endpoint;
+    });
   }
 
   public updateEndpoint(id: string, updates: Partial<EndpointHealth>): EndpointHealth | null {
-    const idx = this.state.endpoints.findIndex(e => e.id === id);
-    if (idx === -1) return null;
-    this.state.endpoints[idx] = { ...this.state.endpoints[idx], ...updates };
-    this.persistToDisk(this.state);
-    return this.state.endpoints[idx];
+    return this.commit((draft) => {
+      const idx = draft.endpoints.findIndex(e => e.id === id);
+      if (idx === -1) return null;
+      draft.endpoints[idx] = { ...draft.endpoints[idx], ...updates };
+      return draft.endpoints[idx];
+    });
   }
 
   // Assets
   public addAsset(asset: AssetItem): AssetItem {
-    this.state.assets = [asset, ...this.state.assets];
-    this.persistToDisk(this.state);
-    return asset;
+    return this.commit((draft) => {
+      draft.assets = [asset, ...draft.assets];
+      return asset;
+    });
   }
 
   public updateAsset(id: string, updates: Partial<AssetItem>): AssetItem | null {
-    const idx = this.state.assets.findIndex(a => a.id === id);
-    if (idx === -1) return null;
-    this.state.assets[idx] = { ...this.state.assets[idx], ...updates };
-    this.persistToDisk(this.state);
-    return this.state.assets[idx];
+    return this.commit((draft) => {
+      const idx = draft.assets.findIndex(a => a.id === id);
+      if (idx === -1) return null;
+      draft.assets[idx] = { ...draft.assets[idx], ...updates };
+      return draft.assets[idx];
+    });
   }
 
   // Software Licenses
   public addLicense(lic: SoftwareLicense): SoftwareLicense {
-    this.state.licenses = [lic, ...this.state.licenses];
-    this.persistToDisk(this.state);
-    return lic;
+    return this.commit((draft) => {
+      draft.licenses = [lic, ...draft.licenses];
+      return lic;
+    });
   }
 
   public reclaimLicense(id: string): SoftwareLicense | null {
-    const idx = this.state.licenses.findIndex(l => l.id === id);
-    if (idx === -1) return null;
-    const lic = this.state.licenses[idx];
-    lic.assignedSeats = lic.activeLast30Days;
-    lic.purchasedSeats = lic.activeLast30Days;
-    lic.unusedSeats = 0;
-    lic.annualWastedSpend = 0;
-    this.persistToDisk(this.state);
-    return lic;
+    return this.commit((draft) => {
+      const idx = draft.licenses.findIndex(l => l.id === id);
+      if (idx === -1) return null;
+      const lic = draft.licenses[idx];
+      lic.assignedSeats = lic.activeLast30Days;
+      lic.purchasedSeats = lic.activeLast30Days;
+      lic.unusedSeats = 0;
+      lic.annualWastedSpend = 0;
+      return lic;
+    });
   }
 
   // AMC
   public addAMC(amc: AMCContract): AMCContract {
-    this.state.amcs = [amc, ...this.state.amcs];
-    this.persistToDisk(this.state);
-    return amc;
+    return this.commit((draft) => {
+      draft.amcs = [amc, ...draft.amcs];
+      return amc;
+    });
   }
 
   // Invoices
   public addInvoice(invoice: InvoiceRecord): InvoiceRecord {
-    this.state.invoices = [invoice, ...this.state.invoices];
-    this.persistToDisk(this.state);
-    return invoice;
+    return this.commit((draft) => {
+      draft.invoices = [invoice, ...draft.invoices];
+      return invoice;
+    });
   }
 
-  public settleInvoice(invoiceNo: string): InvoiceRecord | null {
-    const inv = this.state.invoices.find(i => i.invoiceNo === invoiceNo);
-    if (!inv) return null;
-    inv.status = 'SETTLED';
-    inv.settledAt = new Date().toISOString();
-    this.persistToDisk(this.state);
-    return inv;
+  public settleInvoice(invoiceNo: string, settlementInfo?: { paymentReference?: string; method?: string }): InvoiceRecord | null {
+    return this.commit((draft) => {
+      const inv = draft.invoices.find(i => i.invoiceNo === invoiceNo);
+      if (!inv) return null;
+      inv.status = 'SETTLED';
+      inv.settledAt = new Date().toISOString();
+      if (settlementInfo?.paymentReference) {
+        inv.paymentReference = settlementInfo.paymentReference;
+      }
+      return inv;
+    });
   }
 
   // Proposals
   public addProposal(proposal: Proposal): Proposal {
-    this.state.proposals = [proposal, ...this.state.proposals];
-    this.persistToDisk(this.state);
-    return proposal;
+    return this.commit((draft) => {
+      draft.proposals = [proposal, ...draft.proposals];
+      return proposal;
+    });
   }
 
   public updateProposal(id: string, updates: Partial<Proposal>): Proposal | null {
-    const idx = this.state.proposals.findIndex(p => p.id === id);
-    if (idx === -1) return null;
-    this.state.proposals[idx] = { ...this.state.proposals[idx], ...updates };
-    this.persistToDisk(this.state);
-    return this.state.proposals[idx];
+    return this.commit((draft) => {
+      const idx = draft.proposals.findIndex(p => p.id === id);
+      if (idx === -1) return null;
+      draft.proposals[idx] = { ...draft.proposals[idx], ...updates };
+      return draft.proposals[idx];
+    });
   }
 
   // Products
   public addProduct(product: ProductItem): ProductItem {
-    this.state.products = [product, ...this.state.products];
-    this.persistToDisk(this.state);
-    return product;
+    return this.commit((draft) => {
+      draft.products = [product, ...draft.products];
+      return product;
+    });
   }
 
   public updateProduct(id: string, updates: Partial<ProductItem>): ProductItem | null {
-    const idx = this.state.products.findIndex(p => p.id === id);
-    if (idx === -1) return null;
-    this.state.products[idx] = { ...this.state.products[idx], ...updates };
-    this.persistToDisk(this.state);
-    return this.state.products[idx];
+    return this.commit((draft) => {
+      const idx = draft.products.findIndex(p => p.id === id);
+      if (idx === -1) return null;
+      draft.products[idx] = { ...draft.products[idx], ...updates };
+      return draft.products[idx];
+    });
   }
 
   public deleteProduct(id: string): boolean {
-    const initialLen = this.state.products.length;
-    this.state.products = this.state.products.filter(p => p.id !== id);
-    if (this.state.products.length !== initialLen) {
-      this.persistToDisk(this.state);
-      return true;
-    }
-    return false;
+    return this.commit((draft) => {
+      const initialLen = draft.products.length;
+      draft.products = draft.products.filter(p => p.id !== id);
+      return draft.products.length !== initialLen;
+    });
   }
 
   // Suppliers
   public addSupplier(supplier: SupplierInfo): SupplierInfo {
-    this.state.suppliers = [supplier, ...this.state.suppliers];
-    this.persistToDisk(this.state);
-    return supplier;
+    return this.commit((draft) => {
+      draft.suppliers = [supplier, ...draft.suppliers];
+      return supplier;
+    });
   }
 
   // RFQs
   public addRFQ(rfq: RFQItem): RFQItem {
-    this.state.rfqs = [rfq, ...this.state.rfqs];
-    this.persistToDisk(this.state);
-    return rfq;
+    return this.commit((draft) => {
+      draft.rfqs = [rfq, ...draft.rfqs];
+      return rfq;
+    });
   }
 
   public addSupplierQuoteToRFQ(rfqId: string, quote: RFQItem['supplierQuotes'][0]): RFQItem | null {
-    const rfq = this.state.rfqs.find(r => r.id === rfqId);
-    if (!rfq) return null;
-    rfq.supplierQuotes.push(quote);
-    if (rfq.status === 'OPEN' && rfq.supplierQuotes.length > 1) {
-      rfq.status = 'COMPARED';
-    }
-    this.persistToDisk(this.state);
-    return rfq;
+    return this.commit((draft) => {
+      const rfq = draft.rfqs.find(r => r.id === rfqId);
+      if (!rfq) return null;
+      rfq.supplierQuotes.push(quote);
+      if (rfq.status === 'OPEN' && rfq.supplierQuotes.length > 1) {
+        rfq.status = 'COMPARED';
+      }
+      return rfq;
+    });
   }
 
   public dispatchPO(rfqId: string, supplierId: string): RFQItem | null {
-    const rfq = this.state.rfqs.find(r => r.id === rfqId);
-    if (!rfq) return null;
-    rfq.status = 'PO_DISPATCHED';
-    this.persistToDisk(this.state);
-    return rfq;
+    return this.commit((draft) => {
+      const rfq = draft.rfqs.find(r => r.id === rfqId);
+      if (!rfq) return null;
+      rfq.status = 'PO_DISPATCHED';
+      return rfq;
+    });
   }
 
-  // Field Jobs
+  // Field Jobs & P3.1 Inventory Consumption
   public addJob(job: FieldJob): FieldJob {
-    this.state.jobs = [job, ...this.state.jobs];
-    this.persistToDisk(this.state);
-    return job;
+    return this.commit((draft) => {
+      draft.jobs = [job, ...draft.jobs];
+      return job;
+    });
   }
 
   public updateJob(id: string, updates: Partial<FieldJob>): FieldJob | null {
-    const idx = this.state.jobs.findIndex(j => j.id === id);
-    if (idx === -1) return null;
-    this.state.jobs[idx] = { ...this.state.jobs[idx], ...updates };
-    this.persistToDisk(this.state);
-    return this.state.jobs[idx];
+    return this.commit((draft) => {
+      const idx = draft.jobs.findIndex(j => j.id === id);
+      if (idx === -1) return null;
+      draft.jobs[idx] = { ...draft.jobs[idx], ...updates };
+      return draft.jobs[idx];
+    });
   }
 
-  public consumeJobPart(jobId: string, partName: string, cost: number): FieldJob | null {
-    const job = this.state.jobs.find(j => j.id === jobId);
-    if (!job) return null;
+  public consumeJobPart(
+    jobId: string,
+    productIdOrName: string,
+    quantity: number = 1,
+    explicitCost?: number
+  ): FieldJob | null {
+    return this.commit((draft) => {
+      // 1. Find actual job
+      const job = draft.jobs.find(j => j.id === jobId);
+      if (!job) {
+        throw new Error(`Field job not found: ${jobId}`);
+      }
 
-    job.partsConsumed.push({ partName, qty: 1, cost });
+      // 2. Validate quantity (positive integer)
+      const qty = Math.floor(quantity);
+      if (!qty || qty <= 0) {
+        throw new Error(`Invalid consumption quantity: must be positive integer`);
+      }
 
-    // Look for matching inventory product to decrement real warehouse stock
-    const matchingProduct = this.state.products.find(
-      p => p.name.toLowerCase().includes(partName.toLowerCase()) || p.sku.toLowerCase() === partName.toLowerCase()
-    );
+      // 3. Find exact product by ID first, then fallback to exact name/SKU
+      const product = draft.products.find(
+        p => p.id === productIdOrName || p.name === productIdOrName || p.sku === productIdOrName
+      );
+      if (!product) {
+        throw new Error(`Product not found in warehouse inventory: ${productIdOrName}`);
+      }
 
-    if (matchingProduct && matchingProduct.stockAvailable > 0) {
-      const prevStock = matchingProduct.stockAvailable;
-      matchingProduct.stockAvailable -= 1;
+      // 4. Check available unreserved stock
+      const availableUnreserved = (product.stockAvailable || 0) - (product.stockReserved || 0);
+      if (availableUnreserved < qty) {
+        throw new Error(
+          `Insufficient stock for ${product.name} (SKU: ${product.sku}). Available: ${availableUnreserved}, Requested: ${qty}`
+        );
+      }
+
+      // 5. Deduct stock atomically
+      const prevStock = product.stockAvailable;
+      product.stockAvailable -= qty;
+
+      // 6. Append matching job part with authoritative purchaseCost
+      const authoritativeCost = explicitCost !== undefined ? explicitCost : (product.purchaseCost || 0);
+      job.partsConsumed.push({
+        partName: product.name,
+        qty,
+        cost: authoritativeCost
+      });
+
+      // 7. Append inventory transaction
       const tx: InventoryTransaction = {
-        id: `tx-${Date.now()}`,
-        tenantId: this.state.tenant.id,
-        productId: matchingProduct.id,
-        sku: matchingProduct.sku,
-        productName: matchingProduct.name,
+        id: `tx-${crypto.randomUUID()}`,
+        tenantId: draft.tenant.id,
+        productId: product.id,
+        sku: product.sku,
+        productName: product.name,
         type: 'OUT',
-        qty: 1,
+        qty,
         previousStock: prevStock,
-        newStock: matchingProduct.stockAvailable,
+        newStock: product.stockAvailable,
         reason: `Consumed on Field Job ${job.jobCode} (${job.customerName})`,
         referenceId: job.id,
         timestamp: new Date().toISOString()
       };
-      this.state.inventoryTransactions.push(tx);
-    }
+      draft.inventoryTransactions.push(tx);
 
-    this.persistToDisk(this.state);
-    return job;
+      return job;
+    });
   }
 
-  // Projects
+  // Projects & Milestones
   public addProject(project: Project): Project {
-    this.state.projects = [project, ...this.state.projects];
-    this.persistToDisk(this.state);
-    return project;
+    return this.commit((draft) => {
+      draft.projects = [project, ...draft.projects];
+      return project;
+    });
   }
 
   public updateProject(id: string, updates: Partial<Project>): Project | null {
-    const idx = this.state.projects.findIndex(p => p.id === id);
-    if (idx === -1) return null;
-    this.state.projects[idx] = { ...this.state.projects[idx], ...updates };
-    this.persistToDisk(this.state);
-    return this.state.projects[idx];
+    return this.commit((draft) => {
+      const idx = draft.projects.findIndex(p => p.id === id);
+      if (idx === -1) return null;
+      draft.projects[idx] = { ...draft.projects[idx], ...updates };
+      return draft.projects[idx];
+    });
   }
 
-  // Events
+  public updateProjectMilestone(projectId: string, milestoneId: string, updates: Partial<ProjectMilestone>): Project | null {
+    return this.commit((draft) => {
+      const project = draft.projects.find(p => p.id === projectId);
+      if (!project) return null;
+      const ms = project.milestones.find(m => m.id === milestoneId);
+      if (!ms) return null;
+      Object.assign(ms, updates);
+      return project;
+    });
+  }
+
+  // Events (Authoritative server audit log)
   public addEvent(event: AutonomousEvent): AutonomousEvent {
-    this.state.events = [event, ...this.state.events];
-    this.persistToDisk(this.state);
-    return event;
+    return this.commit((draft) => {
+      draft.events = [event, ...draft.events];
+      return event;
+    });
   }
 
-  // Quotes
+  // Quotes (Strict exact ID matching, no .includes)
   public addQuote(quote: Quotation): Quotation {
-    this.state.quotes = [quote, ...this.state.quotes];
-    this.persistToDisk(this.state);
-    return quote;
+    return this.commit((draft) => {
+      draft.quotes = [quote, ...draft.quotes];
+      return quote;
+    });
   }
 
-  public approveQuote(quoteId: string): Quotation | null {
-    const q = this.state.quotes.find(item => item.id === quoteId || item.quoteNumber.includes(quoteId));
-    if (!q) return null;
-    q.status = 'APPROVED';
-    this.persistToDisk(this.state);
-    return q;
+  public approveQuote(quoteId: string, actor: string = 'System Admin'): Quotation | null {
+    return this.commit((draft) => {
+      const q = draft.quotes.find(item => item.id === quoteId || item.quoteNumber === quoteId);
+      if (!q) return null;
+      if (q.status === 'APPROVED') {
+        throw new Error(`Quotation ${q.quoteNumber} has already been approved.`);
+      }
+      q.status = 'APPROVED';
+      q.approvedBy = actor;
+      q.approvedAt = new Date().toISOString();
+      return q;
+    });
   }
 
-  public rejectQuote(quoteId: string, reason?: string): Quotation | null {
-    const q = this.state.quotes.find(item => item.id === quoteId || item.quoteNumber.includes(quoteId));
-    if (!q) return null;
-    q.status = 'REJECTED';
-    if (reason) q.approvalReason = reason;
-    this.persistToDisk(this.state);
-    return q;
+  public rejectQuote(quoteId: string, reason?: string, actor: string = 'System Admin'): Quotation | null {
+    return this.commit((draft) => {
+      const q = draft.quotes.find(item => item.id === quoteId || item.quoteNumber === quoteId);
+      if (!q) return null;
+      q.status = 'REJECTED';
+      if (reason) q.approvalReason = reason;
+      q.approvedBy = actor;
+      q.approvedAt = new Date().toISOString();
+      return q;
+    });
   }
 
   // Telegram
   public addTelegramMessage(msg: TelegramMessage): TelegramMessage {
-    this.state.telegramMessages = [...this.state.telegramMessages, msg];
-    this.persistToDisk(this.state);
-    return msg;
+    return this.commit((draft) => {
+      draft.telegramMessages = [...draft.telegramMessages, msg];
+      return msg;
+    });
   }
 
   // Workflows
   public addWorkflow(wf: AutomationWorkflow): AutomationWorkflow {
-    this.state.workflows = [wf, ...this.state.workflows];
-    this.persistToDisk(this.state);
-    return wf;
+    return this.commit((draft) => {
+      draft.workflows = [wf, ...draft.workflows];
+      return wf;
+    });
   }
 
   public toggleWorkflow(id: string): AutomationWorkflow | null {
-    const wf = this.state.workflows.find(w => w.id === id);
-    if (!wf) return null;
-    wf.active = !wf.active;
-    this.persistToDisk(this.state);
-    return wf;
+    return this.commit((draft) => {
+      const wf = draft.workflows.find(w => w.id === id);
+      if (!wf) return null;
+      wf.active = !wf.active;
+      return wf;
+    });
   }
 
   public recordWorkflowExecution(id: string): AutomationWorkflow | null {
-    const wf = this.state.workflows.find(w => w.id === id);
-    if (!wf) return null;
-    wf.executionCount += 1;
-    wf.lastExecuted = new Date().toISOString();
-    this.persistToDisk(this.state);
-    return wf;
+    return this.commit((draft) => {
+      const wf = draft.workflows.find(w => w.id === id);
+      if (!wf) return null;
+      wf.executionCount += 1;
+      wf.lastExecuted = new Date().toISOString();
+      return wf;
+    });
+  }
+
+  // P3.4 Persistent Collections (RMA, KB, CRM, Disputes)
+  public addRMAClaim(claim: RMAClaim): RMAClaim {
+    return this.commit((draft) => {
+      draft.rmaClaims = [claim, ...draft.rmaClaims];
+      return claim;
+    });
+  }
+
+  public updateRMAClaim(id: string, updates: Partial<RMAClaim>): RMAClaim | null {
+    return this.commit((draft) => {
+      const idx = draft.rmaClaims.findIndex(c => c.id === id);
+      if (idx === -1) return null;
+      draft.rmaClaims[idx] = { ...draft.rmaClaims[idx], ...updates };
+      return draft.rmaClaims[idx];
+    });
+  }
+
+  public addKnowledgeArticle(article: KnowledgeArticle): KnowledgeArticle {
+    return this.commit((draft) => {
+      draft.knowledgeArticles = [article, ...draft.knowledgeArticles];
+      return article;
+    });
+  }
+
+  public updateKnowledgeArticle(id: string, updates: Partial<KnowledgeArticle>): KnowledgeArticle | null {
+    return this.commit((draft) => {
+      const idx = draft.knowledgeArticles.findIndex(a => a.id === id);
+      if (idx === -1) return null;
+      draft.knowledgeArticles[idx] = { ...draft.knowledgeArticles[idx], ...updates };
+      return draft.knowledgeArticles[idx];
+    });
+  }
+
+  public addCRMOpportunity(opp: CRMOpportunity): CRMOpportunity {
+    return this.commit((draft) => {
+      draft.crmOpportunities = [opp, ...draft.crmOpportunities];
+      return opp;
+    });
+  }
+
+  public updateCRMOpportunity(id: string, updates: Partial<CRMOpportunity>): CRMOpportunity | null {
+    return this.commit((draft) => {
+      const idx = draft.crmOpportunities.findIndex(o => o.id === id);
+      if (idx === -1) return null;
+      draft.crmOpportunities[idx] = { ...draft.crmOpportunities[idx], ...updates };
+      return draft.crmOpportunities[idx];
+    });
+  }
+
+  public addMarketplaceDispute(dispute: MarketplaceDispute): MarketplaceDispute {
+    return this.commit((draft) => {
+      draft.marketplaceDisputes = [dispute, ...draft.marketplaceDisputes];
+      return dispute;
+    });
+  }
+
+  public updateMarketplaceDispute(id: string, updates: Partial<MarketplaceDispute>): MarketplaceDispute | null {
+    return this.commit((draft) => {
+      const idx = draft.marketplaceDisputes.findIndex(d => d.id === id);
+      if (idx === -1) return null;
+      draft.marketplaceDisputes[idx] = { ...draft.marketplaceDisputes[idx], ...updates };
+      return draft.marketplaceDisputes[idx];
+    });
   }
 }
 

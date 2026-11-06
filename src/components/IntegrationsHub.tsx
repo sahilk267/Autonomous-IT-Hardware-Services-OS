@@ -109,8 +109,18 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
                 <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5 text-xs font-mono">
                   <div className="flex justify-between text-slate-400">
                     <span>Connection Status:</span>
-                    <strong className={isConfigured ? 'text-emerald-400' : 'text-slate-500'}>
-                      {isConfigured ? 'Verified Active' : 'Not Configured'}
+                    <strong className={
+                      conn.status === 'CONNECTED'
+                        ? 'text-emerald-400'
+                        : conn.status === 'CONFIGURED'
+                        ? 'text-amber-400'
+                        : 'text-slate-500'
+                    }>
+                      {conn.status === 'CONNECTED'
+                        ? 'Verified Connected'
+                        : conn.status === 'CONFIGURED'
+                        ? 'Credentials Configured (Unverified)'
+                        : 'Not Configured'}
                     </strong>
                   </div>
                   <div className="flex justify-between text-slate-400">

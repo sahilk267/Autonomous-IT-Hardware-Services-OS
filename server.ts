@@ -1,14 +1,81 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
+import crypto from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
-import { dbStore, defaultConnectors } from './server/db';
+import { dbStore, defaultConnectors, hashPassword, verifyPassword } from './server/db.ts';
+import { UserRole } from './src/types.ts';
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
+
+function resolvePort(): number {
+  const portArgIndex = process.argv.indexOf('--port');
+  if (portArgIndex !== -1 && process.argv[portArgIndex + 1]) {
+    const parsed = Number(process.argv[portArgIndex + 1]);
+    if (!isNaN(parsed) && parsed > 0) return parsed;
+  }
+  // Development server must always listen on port 3000 (port 8080 is reserved for reverse proxy)
+  if (process.env.NODE_ENV !== 'production') {
+    return 3000;
+  }
+  return Number(process.env.PORT) || 3000;
+}
+
+const PORT = resolvePort();
 
 app.use(express.json());
+
+// Cookie parser helper
+function parseCookies(cookieHeader?: string): Record<string, string> {
+  const list: Record<string, string> = {};
+  if (!cookieHeader) return list;
+  cookieHeader.split(';').forEach(cookie => {
+    const parts = cookie.split('=');
+    const name = parts.shift()?.trim();
+    if (name) {
+      list[name] = decodeURIComponent(parts.join('='));
+    }
+  });
+  return list;
+}
+
+function getSessionToken(req: express.Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7).trim();
+  }
+  const cookies = parseCookies(req.headers.cookie);
+  if (cookies.apex_session) {
+    return cookies.apex_session;
+  }
+  return null;
+}
+
+// Security Middleware: Require Authenticated Session
+function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const token = getSessionToken(req);
+  if (!token) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Authentication session required' });
+  }
+  const session = dbStore.getSession(token);
+  if (!session) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Session invalid or expired' });
+  }
+  (req as any).user = session;
+  next();
+}
+
+// Security Middleware: Role-Based Authorization
+function requireRole(...roles: UserRole[]) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const user = (req as any).user;
+    if (!user || !roles.includes(user.role)) {
+      return res.status(403).json({ success: false, error: 'Forbidden: Insufficient privileges for this operation' });
+    }
+    next();
+  };
+}
 
 // Helper for Gemini initialization using modern @google/genai SDK
 function getGeminiClient(): GoogleGenAI | null {
@@ -24,7 +91,9 @@ function getGeminiClient(): GoogleGenAI | null {
   }
 }
 
-// 1. Health check & configuration status
+// --- Public Endpoints ---
+
+// 1. Health check & configuration status (Safe public endpoint - NO confidential business or PII leak)
 app.get('/api/health', (req, res) => {
   const state = dbStore.getState();
   const geminiConfigured = !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY';
@@ -56,37 +125,148 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// --- Authentication & Tenant Management ---
-
-app.get('/api/auth/me', (req, res) => {
+// Auth Status (Check if first-time administrator enrollment is needed)
+app.get('/api/auth/status', (req, res) => {
   const users = dbStore.getUsers();
-  const admin = users[0] || {
-    id: 'usr-1',
-    username: 'admin',
-    name: 'Enterprise IT Administrator',
-    email: 'admin@apex-it.internal',
-    role: 'BUSINESS_OWNER',
-    tenantId: dbStore.getState().tenant.id,
-    createdAt: new Date().toISOString()
-  };
-  res.json({ success: true, user: admin, tenant: dbStore.getState().tenant });
+  const token = getSessionToken(req);
+  const session = token ? dbStore.getSession(token) : null;
+  res.json({
+    success: true,
+    needsSetup: users.length === 0,
+    setupRequired: users.length === 0,
+    authenticated: !!session,
+    user: session ? {
+      id: session.userId,
+      username: session.username,
+      role: session.role
+    } : null
+  });
 });
 
-app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body;
-  if (!username) {
-    return res.status(400).json({ success: false, error: 'Username is required' });
+// First-time administrator enrollment (Allowed ONLY when users.length === 0)
+app.post('/api/auth/setup', (req, res) => {
+  try {
+    const users = dbStore.getUsers();
+    if (users.length > 0) {
+      return res.status(403).json({ success: false, error: 'Initial administrator enrollment is already completed.' });
+    }
+    const { username, password, name, email } = req.body;
+    if (!username || typeof username !== 'string' || username.trim().length < 3) {
+      return res.status(400).json({ success: false, error: 'Username must be at least 3 characters.' });
+    }
+    if (!password || typeof password !== 'string' || password.length < 8) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 8 characters.' });
+    }
+
+    const { salt, hash } = hashPassword(password);
+    const newUser = {
+      id: `usr-${crypto.randomUUID()}`,
+      username: username.trim(),
+      name: name?.trim() || 'System Administrator',
+      email: email?.trim() || `${username.trim()}@apex-it.internal`,
+      role: 'BUSINESS_OWNER' as UserRole,
+      tenantId: dbStore.getState().tenant.id,
+      createdAt: new Date().toISOString(),
+      salt,
+      passwordHash: hash
+    };
+
+    dbStore.addUser(newUser);
+    const session = dbStore.createSession(newUser.id, newUser.username, newUser.role);
+    res.setHeader('Set-Cookie', `apex_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+    res.status(201).json({
+      success: true,
+      user: {
+        id: newUser.id,
+        username: newUser.username,
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        tenantId: newUser.tenantId
+      },
+      token: session.token
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
   }
-  const users = dbStore.getUsers();
-  const user = users.find(u => u.username === username) || users[0];
-  res.json({ success: true, user, token: `token_${Date.now()}` });
 });
 
-app.get('/api/tenant', (req, res) => {
+// Secure Login (scrypt KDF verification)
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ success: false, error: 'Username and password are required.' });
+    }
+    const user = dbStore.getUserByUsername(username);
+    if (!user || !user.salt || !user.passwordHash) {
+      return res.status(401).json({ success: false, error: 'Invalid username or password.' });
+    }
+    const isValid = verifyPassword(password, user.salt, user.passwordHash);
+    if (!isValid) {
+      return res.status(401).json({ success: false, error: 'Invalid username or password.' });
+    }
+
+    const session = dbStore.createSession(user.id, user.username, user.role);
+    res.setHeader('Set-Cookie', `apex_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        tenantId: user.tenantId
+      },
+      token: session.token
+    });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// --- Protected Authentication & Tenant Endpoints ---
+
+app.get('/api/auth/me', requireAuth, (req, res) => {
+  const session = (req as any).user;
+  const user = dbStore.getUserById(session.userId) || {
+    id: session.userId,
+    username: session.username,
+    name: session.username,
+    email: `${session.username}@apex-it.internal`,
+    role: session.role,
+    tenantId: dbStore.getState().tenant.id,
+    createdAt: session.createdAt
+  };
+  res.json({
+    success: true,
+    user: {
+      id: user.id,
+      username: user.username,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      tenantId: user.tenantId
+    },
+    tenant: dbStore.getState().tenant
+  });
+});
+
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  const token = getSessionToken(req);
+  if (token) {
+    dbStore.deleteSession(token);
+  }
+  res.setHeader('Set-Cookie', 'apex_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+  res.json({ success: true, message: 'Logged out successfully.' });
+});
+
+app.get('/api/tenant', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().tenant });
 });
 
-app.post('/api/tenant', (req, res) => {
+app.post('/api/tenant', requireAuth, (req, res) => {
   try {
     const { name, gstin, state, address, contactEmail, contactPhone, pan } = req.body;
     const updated = dbStore.updateTenant({
@@ -101,10 +281,10 @@ app.post('/api/tenant', (req, res) => {
     });
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'TenantProfileUpdated',
-      agent: 'Telegram Orchestrator',
+      agent: (req as any).user?.username || 'Admin',
       summary: `Updated organization settings for "${updated.name}" (GSTIN: ${updated.gstin || 'None'}).`,
       autonomousActionTaken: 'Reconfigured organization context across multi-tenant business engine.',
       humanApprovalRequired: false,
@@ -118,23 +298,38 @@ app.post('/api/tenant', (req, res) => {
   }
 });
 
-// Full Application State
-app.get('/api/state', (req, res) => {
+// Full Application State (Protected - secrets and password hashes stripped)
+app.get('/api/state', requireAuth, (req, res) => {
   try {
-    const state = dbStore.getState();
-    res.json({ success: true, data: state });
+    const rawState = dbStore.getState();
+    const safeUsers = rawState.users.map(({ passwordHash, salt, ...u }) => u);
+    res.json({
+      success: true,
+      data: {
+        ...rawState,
+        users: safeUsers,
+        sessions: undefined
+      }
+    });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Administrative Clean State Reset (Strictly Clean Slate, Zero Demo Data)
-app.post('/api/state/reset', (req, res) => {
+// Administrative Clean State Reset (Protected, requires BUSINESS_OWNER + explicit confirmation)
+app.post('/api/state/reset', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
+    const confirm = req.body?.confirm === true || req.headers['x-apex-confirm-reset'] === 'true';
+    if (!confirm) {
+      return res.status(400).json({
+        success: false,
+        error: 'Confirmation required. Must provide { confirm: true } in body or X-Apex-Confirm-Reset header.'
+      });
+    }
     const cleaned = dbStore.resetToCleanSlate();
     res.json({
       success: true,
-      message: 'Workspace initialized in clean slate mode (0 records). Ready for production data.',
+      message: 'Workspace initialized in clean slate mode (0 business records).',
       data: cleaned
     });
   } catch (err: any) {
@@ -142,12 +337,12 @@ app.post('/api/state/reset', (req, res) => {
   }
 });
 
-// Products CRUD
-app.get('/api/products', (req, res) => {
+// Products CRUD (Protected)
+app.get('/api/products', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().products });
 });
 
-app.post('/api/products', (req, res) => {
+app.post('/api/products', requireAuth, (req, res) => {
   try {
     const prod = req.body;
     if (!prod || !prod.name || !prod.sku) {
@@ -155,14 +350,14 @@ app.post('/api/products', (req, res) => {
     }
     const created = dbStore.addProduct({
       ...prod,
-      id: prod.id || `prod-${Date.now()}`
+      id: prod.id || `prod-${crypto.randomUUID()}`
     });
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'ProductCreatedInCatalog',
-      agent: 'Procurement Agent',
+      agent: (req as any).user?.username || 'Procurement',
       summary: `Registered SKU ${created.sku} (${created.name}) in warehouse catalog.`,
       autonomousActionTaken: 'Indexed product specs and safety thresholds in ERP store.',
       humanApprovalRequired: false,
@@ -176,7 +371,7 @@ app.post('/api/products', (req, res) => {
   }
 });
 
-app.patch('/api/products/:id', (req, res) => {
+app.patch('/api/products/:id', requireAuth, (req, res) => {
   try {
     const updated = dbStore.updateProduct(req.params.id, req.body);
     if (!updated) {
@@ -188,7 +383,7 @@ app.patch('/api/products/:id', (req, res) => {
   }
 });
 
-app.delete('/api/products/:id', (req, res) => {
+app.delete('/api/products/:id', requireAuth, (req, res) => {
   try {
     const deleted = dbStore.deleteProduct(req.params.id);
     if (!deleted) {
@@ -200,12 +395,12 @@ app.delete('/api/products/:id', (req, res) => {
   }
 });
 
-// Suppliers CRUD
-app.get('/api/suppliers', (req, res) => {
+// Suppliers CRUD (Protected)
+app.get('/api/suppliers', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().suppliers });
 });
 
-app.post('/api/suppliers', (req, res) => {
+app.post('/api/suppliers', requireAuth, (req, res) => {
   try {
     const supp = req.body;
     if (!supp || !supp.name) {
@@ -213,7 +408,7 @@ app.post('/api/suppliers', (req, res) => {
     }
     const created = dbStore.addSupplier({
       ...supp,
-      id: supp.id || `sup-${Date.now()}`
+      id: supp.id || `sup-${crypto.randomUUID()}`
     });
     res.status(201).json({ success: true, data: created });
   } catch (err: any) {
@@ -221,12 +416,12 @@ app.post('/api/suppliers', (req, res) => {
   }
 });
 
-// RFQs CRUD
-app.get('/api/rfqs', (req, res) => {
+// RFQs CRUD (Protected)
+app.get('/api/rfqs', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().rfqs });
 });
 
-app.post('/api/rfqs', (req, res) => {
+app.post('/api/rfqs', requireAuth, (req, res) => {
   try {
     const rfq = req.body;
     if (!rfq || !rfq.productName) {
@@ -234,16 +429,16 @@ app.post('/api/rfqs', (req, res) => {
     }
     const created = dbStore.addRFQ({
       ...rfq,
-      id: rfq.id || `rfq-${Date.now()}`,
+      id: rfq.id || `rfq-${Date.now().toString().slice(-6)}`,
       supplierQuotes: rfq.supplierQuotes || [],
       status: 'OPEN'
     });
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'ProcurementRFQInitiated',
-      agent: 'Procurement Agent',
+      agent: (req as any).user?.username || 'Procurement',
       summary: `Initiated procurement RFQ for ${created.productName} (Qty: ${created.requiredQty}).`,
       autonomousActionTaken: 'Registered request in procurement desk. Awaiting supplier quote entries.',
       humanApprovalRequired: false,
@@ -257,7 +452,7 @@ app.post('/api/rfqs', (req, res) => {
   }
 });
 
-app.post('/api/rfqs/:id/quotes', (req, res) => {
+app.post('/api/rfqs/:id/quotes', requireAuth, (req, res) => {
   try {
     const quote = req.body;
     if (!quote || !quote.supplierName || quote.unitCost === undefined) {
@@ -273,7 +468,7 @@ app.post('/api/rfqs/:id/quotes', (req, res) => {
   }
 });
 
-app.post('/api/rfqs/:id/dispatch-po', (req, res) => {
+app.post('/api/rfqs/:id/dispatch-po', requireAuth, (req, res) => {
   try {
     const { supplierId } = req.body;
     const updated = dbStore.dispatchPO(req.params.id, supplierId);
@@ -282,10 +477,10 @@ app.post('/api/rfqs/:id/dispatch-po', (req, res) => {
     }
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'PurchaseOrderDispatched',
-      agent: 'Procurement Agent',
+      agent: (req as any).user?.username || 'Procurement',
       summary: `Dispatched Purchase Order for RFQ #${req.params.id} to supplier ID ${supplierId}.`,
       autonomousActionTaken: 'Updated RFQ status to PO_DISPATCHED in procurement ledger.',
       humanApprovalRequired: false,
@@ -299,35 +494,71 @@ app.post('/api/rfqs/:id/dispatch-po', (req, res) => {
   }
 });
 
-// Quotations CRUD
-app.get('/api/quotes', (req, res) => {
+// Quotations CRUD (Protected, P3.2 Server-side Recalculation)
+app.get('/api/quotes', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().quotes });
 });
 
-app.post('/api/quotes', (req, res) => {
+app.post('/api/quotes', requireAuth, (req, res) => {
   try {
     const quote = req.body;
     if (!quote || !quote.customerName) {
       return res.status(400).json({ success: false, error: 'customerName is required' });
     }
+
+    const items = Array.isArray(quote.items) ? quote.items : [];
+    let calculatedSubtotal = 0;
+    let calculatedTotalCost = 0;
+
+    for (const item of items) {
+      const q = Number(item.qty) || 0;
+      const unitCost = Number(item.purchaseCost) || 0;
+      const unitPrice = Number(item.sellingPrice) || 0;
+      if (q <= 0 || unitCost < 0 || unitPrice < 0) {
+        return res.status(400).json({ success: false, error: 'Invalid item values: qty must be > 0, costs must be non-negative' });
+      }
+      calculatedSubtotal += q * unitPrice;
+      calculatedTotalCost += q * unitCost;
+    }
+
+    const discount = Number(quote.discount) || 0;
+    if (discount < 0 || (calculatedSubtotal > 0 && discount >= calculatedSubtotal)) {
+      return res.status(400).json({ success: false, error: 'Discount must be non-negative and less than subtotal' });
+    }
+
+    const netSubtotal = Math.max(0, calculatedSubtotal - discount);
+    const profit = netSubtotal - calculatedTotalCost;
+    const marginPercent = netSubtotal > 0 ? Math.round(((profit / netSubtotal) * 100) * 10) / 10 : 0;
+    const gstTotal = Math.round(netSubtotal * 0.18);
+    const grandTotal = netSubtotal + gstTotal;
+
+    const isException = marginPercent < 15;
+    const authoritativeStatus = isException ? 'PENDING_APPROVAL' : 'APPROVED';
+
     const created = dbStore.addQuote({
       ...quote,
-      id: quote.id || `quote-${Date.now()}`,
+      id: `quote-${crypto.randomUUID()}`,
       quoteNumber: quote.quoteNumber || `QT-${Date.now().toString().slice(-6)}`,
-      createdDate: quote.createdDate || new Date().toISOString().split('T')[0]
+      items,
+      subtotal: calculatedSubtotal,
+      discount,
+      gstTotal,
+      grandTotal,
+      marginPercent,
+      status: authoritativeStatus,
+      createdAt: new Date().toISOString()
     });
 
-    const isException = created.status === 'PENDING_OWNER_APPROVAL';
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: isException ? 'MarginThresholdBreach' : 'QuotationGenerated',
-      agent: 'Pricing Agent',
-      summary: `Quotation ${created.quoteNumber} created for ${created.customerName} (${created.marginPercent}% margin, Total: ₹${created.totalAmount.toLocaleString('en-IN')}).`,
-      autonomousActionTaken: isException ? 'Placed on hold for Owner authorization' : 'Ready for client delivery',
+      agent: (req as any).user?.username || 'Pricing Engine',
+      summary: `Quotation ${created.quoteNumber} created for ${created.customerName} (${created.marginPercent}% margin, Total: ₹${created.grandTotal.toLocaleString('en-IN')}).`,
+      autonomousActionTaken: isException ? 'Placed on hold for Owner authorization' : 'Pricing verified against policy rules.',
       humanApprovalRequired: isException,
       approvalStatus: isException ? 'PENDING_TELEGRAM' : 'AUTO_APPROVED',
-      confidenceScore: 0.98
+      confidenceScore: 1.0
     });
 
     res.status(201).json({ success: true, data: created });
@@ -336,18 +567,19 @@ app.post('/api/quotes', (req, res) => {
   }
 });
 
-app.patch('/api/quotes/:id/approve', (req, res) => {
+app.patch('/api/quotes/:id/approve', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const approved = dbStore.approveQuote(req.params.id);
+    const actor = (req as any).user?.username || 'Business Owner';
+    const approved = dbStore.approveQuote(req.params.id, actor);
     if (!approved) {
       return res.status(404).json({ success: false, error: 'Quotation not found' });
     }
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'OwnerExceptionAuthorized',
-      agent: 'Telegram Orchestrator',
+      agent: actor,
       summary: `Owner authorized concession on Quote ${approved.quoteNumber}.`,
       autonomousActionTaken: 'Quotation status updated to APPROVED in business ledger.',
       humanApprovalRequired: false,
@@ -357,23 +589,24 @@ app.patch('/api/quotes/:id/approve', (req, res) => {
 
     res.json({ success: true, data: approved });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(400).json({ success: false, error: err.message });
   }
 });
 
-app.patch('/api/quotes/:id/reject', (req, res) => {
+app.patch('/api/quotes/:id/reject', requireAuth, (req, res) => {
   try {
     const { reason } = req.body;
-    const rejected = dbStore.rejectQuote(req.params.id, reason);
+    const actor = (req as any).user?.username || 'Business Owner';
+    const rejected = dbStore.rejectQuote(req.params.id, reason, actor);
     if (!rejected) {
       return res.status(404).json({ success: false, error: 'Quotation not found' });
     }
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'QuotationRejected',
-      agent: 'Telegram Orchestrator',
+      agent: actor,
       summary: `Quote ${rejected.quoteNumber} rejected: ${reason || 'Pricing threshold violation'}.`,
       autonomousActionTaken: 'Quotation marked REJECTED in database.',
       humanApprovalRequired: false,
@@ -387,12 +620,12 @@ app.patch('/api/quotes/:id/reject', (req, res) => {
   }
 });
 
-// Invoices CRUD
-app.get('/api/invoices', (req, res) => {
+// Invoices CRUD (Protected)
+app.get('/api/invoices', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().invoices });
 });
 
-app.post('/api/invoices', (req, res) => {
+app.post('/api/invoices', requireAuth, (req, res) => {
   try {
     const inv = req.body;
     if (!inv || !inv.customer || !inv.amount) {
@@ -400,17 +633,17 @@ app.post('/api/invoices', (req, res) => {
     }
     const created = dbStore.addInvoice({
       ...inv,
-      id: inv.id || `inv-${Date.now()}`,
+      id: inv.id || `inv-${crypto.randomUUID()}`,
       invoiceNo: inv.invoiceNo || `INV-${Date.now().toString().slice(-6)}`,
       createdAt: inv.createdAt || new Date().toISOString().split('T')[0],
       status: inv.status || 'ACTIVE'
     });
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'InvoiceCreated',
-      agent: 'Pricing Agent',
+      agent: (req as any).user?.username || 'Billing',
       summary: `Created invoice ${created.invoiceNo} for ${created.customer} (Amount: ₹${created.amount.toLocaleString('en-IN')}).`,
       autonomousActionTaken: 'Saved invoice in receivables ledger.',
       humanApprovalRequired: false,
@@ -424,18 +657,19 @@ app.post('/api/invoices', (req, res) => {
   }
 });
 
-app.patch('/api/invoices/:invoiceNo/settle', (req, res) => {
+app.patch('/api/invoices/:invoiceNo/settle', requireAuth, (req, res) => {
   try {
-    const settled = dbStore.settleInvoice(req.params.invoiceNo);
+    const { paymentReference, method } = req.body;
+    const settled = dbStore.settleInvoice(req.params.invoiceNo, { paymentReference, method });
     if (!settled) {
       return res.status(404).json({ success: false, error: 'Invoice not found' });
     }
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'InvoiceSettled',
-      agent: 'Pricing Agent',
+      agent: (req as any).user?.username || 'Finance',
       summary: `Invoice ${settled.invoiceNo} (${settled.customer}) marked SETTLED in ledger.`,
       autonomousActionTaken: 'Excluded invoice from outstanding receivables balance.',
       humanApprovalRequired: false,
@@ -449,12 +683,12 @@ app.patch('/api/invoices/:invoiceNo/settle', (req, res) => {
   }
 });
 
-// Tickets CRUD
-app.get('/api/tickets', (req, res) => {
+// Tickets CRUD (Protected)
+app.get('/api/tickets', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().tickets });
 });
 
-app.post('/api/tickets', (req, res) => {
+app.post('/api/tickets', requireAuth, (req, res) => {
   try {
     const ticket = req.body;
     if (!ticket || !ticket.title) {
@@ -462,17 +696,17 @@ app.post('/api/tickets', (req, res) => {
     }
     const created = dbStore.addTicket({
       ...ticket,
-      id: ticket.id || `tkt-${Date.now()}`,
+      id: ticket.id || `tkt-${crypto.randomUUID()}`,
       ticketNumber: ticket.ticketNumber || `INC-${Date.now().toString().slice(-6)}`,
       createdAt: ticket.createdAt || new Date().toISOString().split('T')[0],
       status: ticket.status || 'OPEN'
     });
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'NewTicketLogged',
-      agent: 'SLA Monitor',
+      agent: (req as any).user?.username || 'ITSM Desk',
       summary: `Logged incident ${created.ticketNumber} for ${created.requesterName}: "${created.title}".`,
       autonomousActionTaken: 'Indexed ticket context and evaluated SLA policy clock.',
       humanApprovalRequired: false,
@@ -486,39 +720,24 @@ app.post('/api/tickets', (req, res) => {
   }
 });
 
-app.patch('/api/tickets/:id', (req, res) => {
+app.patch('/api/tickets/:id', requireAuth, (req, res) => {
   try {
     const updated = dbStore.updateTicket(req.params.id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Ticket not found' });
     }
-
-    if (req.body.status === 'RESOLVED') {
-      dbStore.addEvent({
-        id: `evt-${Date.now()}`,
-        timestamp: new Date().toLocaleTimeString(),
-        eventType: 'TicketResolved',
-        agent: 'SLA Monitor',
-        summary: `Incident ${updated.ticketNumber} marked RESOLVED.`,
-        autonomousActionTaken: 'Recorded closure notes and stopped SLA clock in database.',
-        humanApprovalRequired: false,
-        approvalStatus: 'AUTO_APPROVED',
-        confidenceScore: 1.0
-      });
-    }
-
     res.json({ success: true, data: updated });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Endpoints CRUD
-app.get('/api/endpoints', (req, res) => {
+// Endpoints CRUD (Protected)
+app.get('/api/endpoints', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().endpoints });
 });
 
-app.post('/api/endpoints', (req, res) => {
+app.post('/api/endpoints', requireAuth, (req, res) => {
   try {
     const ep = req.body;
     if (!ep || !ep.deviceName) {
@@ -526,17 +745,17 @@ app.post('/api/endpoints', (req, res) => {
     }
     const created = dbStore.addEndpoint({
       ...ep,
-      id: ep.id || `ep-${Date.now()}`,
+      id: ep.id || `ep-${crypto.randomUUID()}`,
       lastSeen: new Date().toISOString()
     });
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'RMMAgentEnrolled',
-      agent: 'SLA Monitor',
-      summary: `Enrolled device ${created.deviceName} (${created.os}) in asset directory.`,
-      autonomousActionTaken: 'Registered hardware identifiers in RMM directory.',
+      agent: (req as any).user?.username || 'RMM',
+      summary: `Registered device ${created.deviceName} in asset directory.`,
+      autonomousActionTaken: 'Saved hardware record in directory.',
       humanApprovalRequired: false,
       approvalStatus: 'AUTO_APPROVED',
       confidenceScore: 1.0
@@ -548,12 +767,12 @@ app.post('/api/endpoints', (req, res) => {
   }
 });
 
-// Field Jobs CRUD
-app.get('/api/jobs', (req, res) => {
+// Field Jobs & P3.1 Inventory Consumption (Protected)
+app.get('/api/jobs', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().jobs });
 });
 
-app.post('/api/jobs', (req, res) => {
+app.post('/api/jobs', requireAuth, (req, res) => {
   try {
     const job = req.body;
     if (!job || !job.title) {
@@ -561,17 +780,17 @@ app.post('/api/jobs', (req, res) => {
     }
     const created = dbStore.addJob({
       ...job,
-      id: job.id || `job-${Date.now()}`,
+      id: job.id || `job-${crypto.randomUUID()}`,
       jobCode: job.jobCode || `JOB-${Date.now().toString().slice(-6)}`,
       status: job.status || 'SCHEDULED',
       partsConsumed: job.partsConsumed || []
     });
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'FieldJobScheduled',
-      agent: 'Telegram Orchestrator',
+      agent: (req as any).user?.username || 'Dispatch',
       summary: `Scheduled field service job ${created.jobCode} for ${created.customerName}: "${created.title}".`,
       autonomousActionTaken: 'Assigned technician and saved dispatch record in database.',
       humanApprovalRequired: false,
@@ -585,7 +804,7 @@ app.post('/api/jobs', (req, res) => {
   }
 });
 
-app.patch('/api/jobs/:id', (req, res) => {
+app.patch('/api/jobs/:id', requireAuth, (req, res) => {
   try {
     const updated = dbStore.updateJob(req.params.id, req.body);
     if (!updated) {
@@ -597,28 +816,36 @@ app.patch('/api/jobs/:id', (req, res) => {
   }
 });
 
-app.post('/api/jobs/:id/consume-part', (req, res) => {
+// P3.1 Strict Inventory Consumption
+app.post('/api/jobs/:id/consume-part', requireAuth, (req, res) => {
   try {
-    const { partName, cost } = req.body;
-    if (!partName) {
-      return res.status(400).json({ success: false, error: 'partName is required' });
+    const { productId, partName, quantity, cost } = req.body;
+    const targetProduct = productId || partName;
+    if (!targetProduct) {
+      return res.status(400).json({ success: false, error: 'productId or partName is required' });
     }
-    const updated = dbStore.consumeJobPart(req.params.id, partName, Number(cost) || 0);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Job not found' });
+    const qty = Number(quantity) || 1;
+    if (qty <= 0 || !Number.isInteger(qty)) {
+      return res.status(400).json({ success: false, error: 'Quantity must be a positive integer' });
     }
+    const updated = dbStore.consumeJobPart(
+      req.params.id,
+      targetProduct,
+      qty,
+      cost !== undefined ? Number(cost) : undefined
+    );
     res.json({ success: true, data: updated });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    res.status(400).json({ success: false, error: err.message });
   }
 });
 
-// Assets CRUD
-app.get('/api/assets', (req, res) => {
+// Assets CRUD (Protected)
+app.get('/api/assets', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().assets });
 });
 
-app.post('/api/assets', (req, res) => {
+app.post('/api/assets', requireAuth, (req, res) => {
   try {
     const asset = req.body;
     if (!asset || !asset.name) {
@@ -626,15 +853,15 @@ app.post('/api/assets', (req, res) => {
     }
     const created = dbStore.addAsset({
       ...asset,
-      id: asset.id || `ast-${Date.now()}`,
+      id: asset.id || `ast-${crypto.randomUUID()}`,
       assetTag: asset.assetTag || `TAG-${Date.now().toString().slice(-6)}`
     });
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'AssetRegisteredInCMDB',
-      agent: 'Telegram Orchestrator',
+      agent: (req as any).user?.username || 'CMDB',
       summary: `Registered asset ${created.assetTag} (${created.name}) in CMDB.`,
       autonomousActionTaken: 'Saved hardware record and warranty tracking timestamps.',
       humanApprovalRequired: false,
@@ -648,7 +875,7 @@ app.post('/api/assets', (req, res) => {
   }
 });
 
-app.patch('/api/assets/:id', (req, res) => {
+app.patch('/api/assets/:id', requireAuth, (req, res) => {
   try {
     const updated = dbStore.updateAsset(req.params.id, req.body);
     if (!updated) {
@@ -660,12 +887,12 @@ app.patch('/api/assets/:id', (req, res) => {
   }
 });
 
-// Software Licenses CRUD
-app.get('/api/licenses', (req, res) => {
+// Software Licenses CRUD (Protected)
+app.get('/api/licenses', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().licenses });
 });
 
-app.post('/api/licenses', (req, res) => {
+app.post('/api/licenses', requireAuth, (req, res) => {
   try {
     const lic = req.body;
     if (!lic || !lic.softwareName) {
@@ -673,7 +900,7 @@ app.post('/api/licenses', (req, res) => {
     }
     const created = dbStore.addLicense({
       ...lic,
-      id: lic.id || `lic-${Date.now()}`
+      id: lic.id || `lic-${crypto.randomUUID()}`
     });
     res.status(201).json({ success: true, data: created });
   } catch (err: any) {
@@ -681,7 +908,7 @@ app.post('/api/licenses', (req, res) => {
   }
 });
 
-app.patch('/api/licenses/:id/reclaim', (req, res) => {
+app.patch('/api/licenses/:id/reclaim', requireAuth, (req, res) => {
   try {
     const reclaimed = dbStore.reclaimLicense(req.params.id);
     if (!reclaimed) {
@@ -689,10 +916,10 @@ app.patch('/api/licenses/:id/reclaim', (req, res) => {
     }
 
     dbStore.addEvent({
-      id: `evt-${Date.now()}`,
+      id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
       eventType: 'SaaSSeatsReclaimed',
-      agent: 'Procurement Agent',
+      agent: (req as any).user?.username || 'Asset Manager',
       summary: `Reclaimed unused software seats in internal license registry for ${reclaimed.softwareName}.`,
       autonomousActionTaken: 'Updated license allocation record in database.',
       humanApprovalRequired: false,
@@ -706,12 +933,12 @@ app.patch('/api/licenses/:id/reclaim', (req, res) => {
   }
 });
 
-// AMC Contracts CRUD
-app.get('/api/amcs', (req, res) => {
+// AMC Contracts CRUD (Protected)
+app.get('/api/amcs', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().amcs });
 });
 
-app.post('/api/amcs', (req, res) => {
+app.post('/api/amcs', requireAuth, (req, res) => {
   try {
     const amc = req.body;
     if (!amc || !amc.clientName) {
@@ -719,20 +946,8 @@ app.post('/api/amcs', (req, res) => {
     }
     const created = dbStore.addAMC({
       ...amc,
-      id: amc.id || `amc-${Date.now()}`,
+      id: amc.id || `amc-${crypto.randomUUID()}`,
       contractNumber: amc.contractNumber || `AMC-${Date.now().toString().slice(-6)}`
-    });
-
-    dbStore.addEvent({
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'AMCContractRegistered',
-      agent: 'Telegram Orchestrator',
-      summary: `Registered ${created.type} AMC contract ${created.contractNumber} for ${created.clientName}.`,
-      autonomousActionTaken: 'Recorded preventive maintenance schedules in service database.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
     });
 
     res.status(201).json({ success: true, data: created });
@@ -741,12 +956,12 @@ app.post('/api/amcs', (req, res) => {
   }
 });
 
-// Projects & Proposals (POST /api/projects WAS PREVIOUSLY MISSING!)
-app.get('/api/projects', (req, res) => {
+// Projects & Proposals CRUD (Protected)
+app.get('/api/projects', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().projects });
 });
 
-app.post('/api/projects', (req, res) => {
+app.post('/api/projects', requireAuth, (req, res) => {
   try {
     const proj = req.body;
     if (!proj || !proj.title) {
@@ -754,22 +969,10 @@ app.post('/api/projects', (req, res) => {
     }
     const created = dbStore.addProject({
       ...proj,
-      id: proj.id || `proj-${Date.now()}`,
+      id: proj.id || `proj-${crypto.randomUUID()}`,
       projectCode: proj.projectCode || `PRJ-${Date.now().toString().slice(-6)}`,
       createdAt: proj.createdAt || new Date().toISOString().split('T')[0],
       milestones: proj.milestones || []
-    });
-
-    dbStore.addEvent({
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'NewProjectPublished',
-      agent: 'Sales Agent',
-      summary: `Published project ${created.projectCode} ("${created.title}") in project marketplace.`,
-      autonomousActionTaken: 'Created project milestone ledger and opened for proposals.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
     });
 
     res.status(201).json({ success: true, data: created });
@@ -778,7 +981,7 @@ app.post('/api/projects', (req, res) => {
   }
 });
 
-app.patch('/api/projects/:id', (req, res) => {
+app.patch('/api/projects/:id', requireAuth, (req, res) => {
   try {
     const updated = dbStore.updateProject(req.params.id, req.body);
     if (!updated) {
@@ -790,11 +993,23 @@ app.patch('/api/projects/:id', (req, res) => {
   }
 });
 
-app.get('/api/proposals', (req, res) => {
+app.patch('/api/projects/:id/milestones/:milestoneId', requireAuth, (req, res) => {
+  try {
+    const updated = dbStore.updateProjectMilestone(req.params.id, req.params.milestoneId, req.body);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Project or milestone not found' });
+    }
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/proposals', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().proposals });
 });
 
-app.post('/api/proposals', (req, res) => {
+app.post('/api/proposals', requireAuth, (req, res) => {
   try {
     const proposal = req.body;
     if (!proposal || !proposal.providerName || !proposal.projectId) {
@@ -802,11 +1017,10 @@ app.post('/api/proposals', (req, res) => {
     }
     const created = dbStore.addProposal({
       ...proposal,
-      id: proposal.id || `prop-${Date.now()}`,
+      id: proposal.id || `prop-${crypto.randomUUID()}`,
       status: proposal.status || 'SUBMITTED'
     });
 
-    // Update project proposal count
     const project = dbStore.getState().projects.find(p => p.id === proposal.projectId);
     if (project) {
       dbStore.updateProject(project.id, { proposalsCount: (project.proposalsCount || 0) + 1 });
@@ -818,7 +1032,7 @@ app.post('/api/proposals', (req, res) => {
   }
 });
 
-app.patch('/api/proposals/:id/accept', (req, res) => {
+app.patch('/api/proposals/:id/accept', requireAuth, (req, res) => {
   try {
     const prop = dbStore.getState().proposals.find(p => p.id === req.params.id);
     if (!prop) {
@@ -828,31 +1042,156 @@ app.patch('/api/proposals/:id/accept', (req, res) => {
     if (prop.projectId) {
       dbStore.updateProject(prop.projectId, { status: 'IN_PROGRESS' });
     }
-
-    dbStore.addEvent({
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'ProjectProposalAwarded',
-      agent: 'Pricing Agent',
-      summary: `Awarded project bid to ${prop.providerName} (Bid: ₹${prop.commercialBid.toLocaleString('en-IN')}).`,
-      autonomousActionTaken: 'Updated project status to IN_PROGRESS in database.',
-      humanApprovalRequired: false,
-      approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
-    });
-
     res.json({ success: true, data: updated });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// Workflows CRUD
-app.get('/api/workflows', (req, res) => {
+// P3.4 Missing Collections: RMA, Knowledge Base, CRM, Disputes
+app.get('/api/rma', requireAuth, (req, res) => {
+  res.json({ success: true, data: dbStore.getState().rmaClaims });
+});
+
+app.post('/api/rma', requireAuth, (req, res) => {
+  try {
+    const claim = req.body;
+    if (!claim || !claim.assetName || !claim.faultDescription) {
+      return res.status(400).json({ success: false, error: 'assetName and faultDescription are required' });
+    }
+    const created = dbStore.addRMAClaim({
+      ...claim,
+      id: claim.id || `rma-${crypto.randomUUID()}`,
+      status: 'FAULT_LOGGED',
+      createdAt: new Date().toISOString()
+    });
+    res.status(201).json({ success: true, data: created });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.patch('/api/rma/:id', requireAuth, (req, res) => {
+  try {
+    const updated = dbStore.updateRMAClaim(req.params.id, req.body);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'RMA claim not found' });
+    }
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/knowledge', requireAuth, (req, res) => {
+  res.json({ success: true, data: dbStore.getState().knowledgeArticles });
+});
+
+app.post('/api/knowledge', requireAuth, (req, res) => {
+  try {
+    const article = req.body;
+    if (!article || !article.title || !article.content) {
+      return res.status(400).json({ success: false, error: 'title and content are required' });
+    }
+    const created = dbStore.addKnowledgeArticle({
+      ...article,
+      id: article.id || `kb-${crypto.randomUUID()}`,
+      views: 0,
+      helpfulCount: 0,
+      tags: article.tags || [],
+      lastUpdated: new Date().toISOString()
+    });
+    res.status(201).json({ success: true, data: created });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.patch('/api/knowledge/:id', requireAuth, (req, res) => {
+  try {
+    const updated = dbStore.updateKnowledgeArticle(req.params.id, req.body);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Knowledge article not found' });
+    }
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/crm', requireAuth, (req, res) => {
+  res.json({ success: true, data: dbStore.getState().crmOpportunities });
+});
+
+app.post('/api/crm', requireAuth, (req, res) => {
+  try {
+    const opp = req.body;
+    if (!opp || !opp.clientName || !opp.title) {
+      return res.status(400).json({ success: false, error: 'clientName and title are required' });
+    }
+    const created = dbStore.addCRMOpportunity({
+      ...opp,
+      id: opp.id || `crm-${crypto.randomUUID()}`,
+      createdAt: new Date().toISOString()
+    });
+    res.status(201).json({ success: true, data: created });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.patch('/api/crm/:id', requireAuth, (req, res) => {
+  try {
+    const updated = dbStore.updateCRMOpportunity(req.params.id, req.body);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'CRM opportunity not found' });
+    }
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/disputes', requireAuth, (req, res) => {
+  res.json({ success: true, data: dbStore.getState().marketplaceDisputes });
+});
+
+app.post('/api/disputes', requireAuth, (req, res) => {
+  try {
+    const dispute = req.body;
+    if (!dispute || !dispute.reason || !dispute.projectTitle) {
+      return res.status(400).json({ success: false, error: 'reason and projectTitle are required' });
+    }
+    const created = dbStore.addMarketplaceDispute({
+      ...dispute,
+      id: dispute.id || `dsp-${crypto.randomUUID()}`,
+      status: 'UNDER_ARBITRATION',
+      createdAt: new Date().toISOString()
+    });
+    res.status(201).json({ success: true, data: created });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.patch('/api/disputes/:id', requireAuth, (req, res) => {
+  try {
+    const updated = dbStore.updateMarketplaceDispute(req.params.id, req.body);
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Dispute not found' });
+    }
+    res.json({ success: true, data: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Workflows CRUD (Protected)
+app.get('/api/workflows', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().workflows });
 });
 
-app.post('/api/workflows', (req, res) => {
+app.post('/api/workflows', requireAuth, (req, res) => {
   try {
     const wf = req.body;
     if (!wf || !wf.name) {
@@ -860,7 +1199,7 @@ app.post('/api/workflows', (req, res) => {
     }
     const created = dbStore.addWorkflow({
       ...wf,
-      id: wf.id || `wf-${Date.now()}`,
+      id: wf.id || `wf-${crypto.randomUUID()}`,
       active: true,
       executionCount: 0,
       lastExecuted: 'Never'
@@ -871,7 +1210,7 @@ app.post('/api/workflows', (req, res) => {
   }
 });
 
-app.patch('/api/workflows/:id/toggle', (req, res) => {
+app.patch('/api/workflows/:id/toggle', requireAuth, (req, res) => {
   try {
     const toggled = dbStore.toggleWorkflow(req.params.id);
     if (!toggled) {
@@ -883,33 +1222,8 @@ app.patch('/api/workflows/:id/toggle', (req, res) => {
   }
 });
 
-app.post('/api/workflows/:id/execute', (req, res) => {
-  try {
-    const executed = dbStore.recordWorkflowExecution(req.params.id);
-    if (!executed) {
-      return res.status(404).json({ success: false, error: 'Workflow not found' });
-    }
-
-    dbStore.addEvent({
-      id: `evt-${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'WorkflowRuleExecuted',
-      agent: 'Telegram Orchestrator',
-      summary: `Rule "${executed.name}" executed against live domain state.`,
-      autonomousActionTaken: executed.autonomousAction || 'Action executed successfully.',
-      humanApprovalRequired: executed.humanApprovalRequired,
-      approvalStatus: executed.humanApprovalRequired ? 'PENDING_TELEGRAM' : 'AUTO_APPROVED',
-      confidenceScore: 1.0
-    });
-
-    res.json({ success: true, data: executed });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 // Connectors & Integrations
-app.get('/api/connectors', (req, res) => {
+app.get('/api/connectors', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().connectors });
 });
 
@@ -923,21 +1237,28 @@ app.get('/api/integrations/status', (req, res) => {
   });
 });
 
-// Audit Events
-app.get('/api/events', (req, res) => {
+// Authoritative Audit Events (Protected - P1.5 Server-side Agent Assignment)
+app.get('/api/events', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().events });
 });
 
-app.post('/api/events', (req, res) => {
+app.post('/api/events', requireAuth, (req, res) => {
   try {
-    const event = req.body;
-    if (!event || !event.summary) {
-      return res.status(400).json({ success: false, error: 'Event summary is required' });
+    const { eventType, summary, autonomousActionTaken, humanApprovalRequired, approvalStatus } = req.body;
+    if (!summary || !eventType) {
+      return res.status(400).json({ success: false, error: 'eventType and summary are required' });
     }
+    const agent = (req as any).user?.username || 'System';
     const created = dbStore.addEvent({
-      ...event,
-      id: event.id || `evt-${Date.now()}`,
-      timestamp: event.timestamp || new Date().toLocaleTimeString()
+      id: `evt-${crypto.randomUUID()}`,
+      timestamp: new Date().toLocaleTimeString(),
+      eventType,
+      agent,
+      summary,
+      autonomousActionTaken: autonomousActionTaken || 'Action recorded in audit log.',
+      humanApprovalRequired: !!humanApprovalRequired,
+      approvalStatus: approvalStatus || 'AUTO_APPROVED',
+      confidenceScore: 1.0
     });
     res.status(201).json({ success: true, data: created });
   } catch (err: any) {
@@ -945,14 +1266,17 @@ app.post('/api/events', (req, res) => {
   }
 });
 
-// Telegram Live Webhook (Validates authentic tokens & transactions)
+// Telegram Live Webhook (P1.4 Verified webhook secret & exact quote match)
 app.post('/api/telegram/webhook', (req, res) => {
   try {
     const secret = req.headers['x-telegram-bot-api-secret-token'];
     const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
 
-    if (expectedSecret && secret !== expectedSecret) {
-      return res.status(401).json({ success: false, error: 'Unauthorized webhook secret' });
+    if (!expectedSecret) {
+      return res.status(503).json({ success: false, error: 'Telegram webhook is not configured with TELEGRAM_WEBHOOK_SECRET' });
+    }
+    if (secret !== expectedSecret) {
+      return res.status(401).json({ success: false, error: 'Unauthorized: Invalid Telegram webhook secret token' });
     }
 
     const update = req.body;
@@ -960,21 +1284,44 @@ app.post('/api/telegram/webhook', (req, res) => {
       return res.status(400).json({ success: false, error: 'Empty payload' });
     }
 
-    if (update.callback_query) {
-      const data = update.callback_query.data;
-      const from = update.callback_query.from?.first_name || 'Owner';
+    const authorizedChat = process.env.TELEGRAM_AUTHORIZED_CHAT_ID;
+    const authorizedUser = process.env.TELEGRAM_AUTHORIZED_USER_ID;
 
-      // Check if data is approving a specific quotation: approve_quote_<id>
+    if (update.callback_query) {
+      const from = update.callback_query.from;
+      const messageChat = update.callback_query.message?.chat;
+
+      if (authorizedUser && String(from?.id) !== String(authorizedUser)) {
+        return res.status(403).json({ success: false, error: 'Forbidden: Unauthorized Telegram user' });
+      }
+      if (authorizedChat && String(messageChat?.id) !== String(authorizedChat)) {
+        return res.status(403).json({ success: false, error: 'Forbidden: Unauthorized Telegram chat' });
+      }
+
+      const data = update.callback_query.data;
+      const actorName = from?.username ? `@${from.username}` : (from?.first_name || 'Telegram Owner');
+
       if (typeof data === 'string' && data.startsWith('approve_quote_')) {
-        const quoteId = data.replace('approve_quote_', '');
-        const approved = dbStore.approveQuote(quoteId);
+        const quoteId = data.replace('approve_quote_', '').trim();
+        const targetQuote = dbStore.getState().quotes.find(q => q.id === quoteId || q.quoteNumber === quoteId);
+        if (!targetQuote) {
+          return res.status(404).json({ success: false, error: 'Quotation not found' });
+        }
+        if (targetQuote.status === 'APPROVED') {
+          return res.status(400).json({ success: false, error: 'Quotation already approved' });
+        }
+        if (targetQuote.status !== 'PENDING_APPROVAL' && targetQuote.status !== 'PENDING_OWNER_APPROVAL') {
+          return res.status(400).json({ success: false, error: 'Quotation is not pending approval' });
+        }
+
+        const approved = dbStore.approveQuote(targetQuote.id, actorName);
         if (approved) {
           const newEvt = dbStore.addEvent({
-            id: `evt-tlg-${Date.now()}`,
+            id: `evt-tlg-${crypto.randomUUID()}`,
             timestamp: new Date().toLocaleTimeString(),
             eventType: 'TelegramApprovalCallback',
-            agent: 'Telegram Orchestrator',
-            summary: `Owner ${from} approved quotation #${approved.quoteNumber} via Telegram callback.`,
+            agent: `Telegram (${actorName})`,
+            summary: `Owner ${actorName} approved quotation #${approved.quoteNumber} via Telegram callback.`,
             autonomousActionTaken: 'Marked quotation as APPROVED in database.',
             humanApprovalRequired: false,
             approvalStatus: 'AUTHORIZED',
@@ -988,11 +1335,21 @@ app.post('/api/telegram/webhook', (req, res) => {
     }
 
     if (update.message && update.message.text) {
+      const from = update.message.from;
+      const chat = update.message.chat;
+
+      if (authorizedUser && String(from?.id) !== String(authorizedUser)) {
+        return res.status(403).json({ success: false, error: 'Forbidden: Unauthorized Telegram user' });
+      }
+      if (authorizedChat && String(chat?.id) !== String(authorizedChat)) {
+        return res.status(403).json({ success: false, error: 'Forbidden: Unauthorized Telegram chat' });
+      }
+
       const text = update.message.text;
-      const user = update.message.from?.first_name || 'User';
+      const user = from?.first_name || 'User';
 
       dbStore.addTelegramMessage({
-        id: `tlg-${Date.now()}`,
+        id: `tlg-${crypto.randomUUID()}`,
         sender: 'owner',
         text: `[${user}] ${text}`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -1008,7 +1365,7 @@ app.post('/api/telegram/webhook', (req, res) => {
 });
 
 // Payments: Honest, zero-mock integration status (Rejects fake payments)
-app.post('/api/payments/create-order', (req, res) => {
+app.post('/api/payments/create-order', requireAuth, (req, res) => {
   const hasGateway = !!process.env.RAZORPAY_KEY_ID && !!process.env.RAZORPAY_KEY_SECRET;
   if (!hasGateway) {
     return res.status(503).json({
@@ -1016,10 +1373,10 @@ app.post('/api/payments/create-order', (req, res) => {
       error: 'Payment gateway integration is not configured. Real payment orders cannot be created without valid RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET credentials in .env.'
     });
   }
-  res.status(501).json({ success: false, error: 'Payment provider adapter initializing' });
+  res.status(501).json({ success: false, error: 'Payment provider adapter is not implemented yet. Payment transactions cannot be processed.' });
 });
 
-app.post('/api/payments/verify', (req, res) => {
+app.post('/api/payments/verify', requireAuth, (req, res) => {
   const hasGateway = !!process.env.RAZORPAY_KEY_ID && !!process.env.RAZORPAY_KEY_SECRET;
   if (!hasGateway) {
     return res.status(503).json({
@@ -1027,11 +1384,11 @@ app.post('/api/payments/verify', (req, res) => {
       error: 'Payment verification unavailable: Payment gateway credentials not configured. Fabricated verification is forbidden.'
     });
   }
-  res.status(501).json({ success: false, error: 'Payment provider adapter initializing' });
+  res.status(501).json({ success: false, error: 'Payment provider adapter is not implemented yet. Payment verification cannot be processed.' });
 });
 
 // GST: Honest, zero-mock IRN generation (Rejects fake IRN generation)
-app.post('/api/gst/generate-irn', (req, res) => {
+app.post('/api/gst/generate-irn', requireAuth, (req, res) => {
   const hasGstCredentials = !!process.env.GST_API_KEY && !!process.env.GST_SELLER_GSTIN;
   if (!hasGstCredentials) {
     return res.status(503).json({
@@ -1039,11 +1396,11 @@ app.post('/api/gst/generate-irn', (req, res) => {
       error: 'GST e-invoicing integration is not configured. An internal invoice draft can be recorded in the ledger, but a legally verified government IRN cannot be fabricated without active IRP portal credentials.'
     });
   }
-  res.status(501).json({ success: false, error: 'GST IRP adapter initializing' });
+  res.status(501).json({ success: false, error: 'GST IRP adapter is not implemented yet. Government IRNs cannot be generated.' });
 });
 
-// 2. Real AI BOM & Solution Builder
-app.post('/api/ai/bom-builder', async (req, res) => {
+// Real AI BOM & Solution Builder (Protected)
+app.post('/api/ai/bom-builder', requireAuth, async (req, res) => {
   const { requirement, budget, officeSize, preference } = req.body;
   const gemini = getGeminiClient();
 
@@ -1121,12 +1478,11 @@ The JSON must follow this exact structure:
   }
 });
 
-// 3. Real AI Telegram Command & Natural Language Interface
-app.post('/api/ai/telegram-command', async (req, res) => {
+// Real AI Telegram Command & Natural Language Interface (Protected)
+app.post('/api/ai/telegram-command', requireAuth, async (req, res) => {
   const { command } = req.body;
   const state = dbStore.getState();
 
-  // Compute live, genuine database metrics
   const quotes = state.quotes;
   const invoices = state.invoices;
   const products = state.products;
@@ -1140,7 +1496,7 @@ app.post('/api/ai/telegram-command', async (req, res) => {
     .filter(i => i.status !== 'SETTLED')
     .reduce((acc, i) => acc + i.amount, 0);
 
-  const pendingApprovals = quotes.filter(q => q.status === 'PENDING_OWNER_APPROVAL');
+  const pendingApprovals = quotes.filter(q => q.status === 'PENDING_APPROVAL' || q.status === 'PENDING_OWNER_APPROVAL');
   const lowStockProducts = products.filter(p => p.stockAvailable <= 2);
   const openTickets = tickets.filter(t => t.status !== 'RESOLVED');
 
@@ -1154,7 +1510,7 @@ app.post('/api/ai/telegram-command', async (req, res) => {
         totalPaidRevenue: `₹${totalClosedRevenue.toLocaleString('en-IN')}`,
         outstandingReceivables: `₹${pendingReceivables.toLocaleString('en-IN')}`,
         pendingApprovalsCount: pendingApprovals.length,
-        pendingApprovalsList: pendingApprovals.map(q => ({ quoteNo: q.quoteNumber, customer: q.customerName, amount: q.totalAmount, margin: q.marginPercent })),
+        pendingApprovalsList: pendingApprovals.map(q => ({ quoteNo: q.quoteNumber, customer: q.customerName, amount: q.grandTotal, margin: q.marginPercent })),
         lowStockItems: lowStockProducts.map(p => ({ sku: p.sku, name: p.name, available: p.stockAvailable })),
         openTicketsCount: openTickets.length,
         totalCatalogItems: products.length
@@ -1199,7 +1555,7 @@ Instructions:
       reply = `✅ *No Pending Approvals:*\n\nAll quotations and orders are within standard policy thresholds. 0 approvals required.`;
     } else {
       reply = `🔔 *${pendingApprovals.length} Pending Owner Approvals:*\n\n` +
-        pendingApprovals.map((q, idx) => `${idx + 1}️⃣ *Quote #${q.quoteNumber}* — ${q.customerName}\n   • Amount: ₹${q.totalAmount.toLocaleString('en-IN')} | Margin: *${q.marginPercent}%* (Floor: 12.0%)`).join('\n\n') +
+        pendingApprovals.map((q, idx) => `${idx + 1}️⃣ *Quote #${q.quoteNumber}* — ${q.customerName}\n   • Amount: ₹${q.grandTotal.toLocaleString('en-IN')} | Margin: *${q.marginPercent}%* (Floor: 15.0%)`).join('\n\n') +
         `\n\n_Reply with "Approve Quote <number>" to authorize._`;
       actions = pendingApprovals.slice(0, 3).map(q => `Approve ${q.quoteNumber}`);
     }
@@ -1227,8 +1583,8 @@ Instructions:
   return res.json({ success: true, text: reply, actions });
 });
 
-// 4. Real AI Copilot Endpoint (Executive Dashboard)
-app.post('/api/ai/copilot', async (req, res) => {
+// Real AI Copilot Endpoint (Executive Dashboard, Protected)
+app.post('/api/ai/copilot', requireAuth, async (req, res) => {
   const { query } = req.body;
   const gemini = getGeminiClient();
   const state = dbStore.getState();
@@ -1279,8 +1635,8 @@ Provide a strict, factual, professional answer in JSON format:
   }
 });
 
-// 5. Real AI IT Diagnosis & Problem Solver
-app.post('/api/ai/diagnosis', async (req, res) => {
+// Real AI IT Diagnosis & Problem Solver (Protected)
+app.post('/api/ai/diagnosis', requireAuth, async (req, res) => {
   const { symptom, deviceType, urgency } = req.body;
   const gemini = getGeminiClient();
 

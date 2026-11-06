@@ -16,7 +16,7 @@
       "email": "admin@apex-it.internal",
       "role": "BUSINESS_OWNER",
       "tenantId": "tenant-1",
-      "createdAt": "2026-11-04T17:03:16.216Z"
+      "createdAt": "2026-11-05T00:46:23.954Z"
     }
   ],
   "products": [],
@@ -128,5 +128,5 @@
   "crmOpportunities": [],
   "marketplaceDisputes": [],
   "inventoryTransactions": [],
-  "lastUpdated": "2026-11-04T17:03:16.216Z"
+  "lastUpdated": "2026-11-05T00:46:23.954Z"
 }

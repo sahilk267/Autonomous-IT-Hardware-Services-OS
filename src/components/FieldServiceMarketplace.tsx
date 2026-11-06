@@ -49,6 +49,7 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
   const [dispatchTech, setDispatchTech] = useState('');
   const [dispatchPhone, setDispatchPhone] = useState('');
   const [dispatchSlot, setDispatchSlot] = useState('');
+  const [actionBanner, setActionBanner] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedJobId(jobs[0]?.id || '');
@@ -63,8 +64,6 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
       category: 'Server Deployment',
       price: 24000,
       sla: 'Same Day Deployment',
-      rating: 4.9,
-      reviewsCount: 142,
       description: 'Bare-metal installation, RAID 10 configuration, Domain Controller setup, group policies, and automated VM backup schedules.'
     },
     {
@@ -73,8 +72,6 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
       category: 'Network Security',
       price: 18000,
       sla: 'Within 4 Hours',
-      rating: 4.8,
-      reviewsCount: 98,
       description: 'Multi-VLAN isolation, intrusion prevention (IPS), web application filtering, and multi-factor VPN authentication for remote workforce.'
     },
     {
@@ -83,8 +80,6 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
       category: 'Structured Cabling',
       price: 14500,
       sla: 'Next Business Day',
-      rating: 4.9,
-      reviewsCount: 210,
       description: 'Core fusion splicing, decibel loss certification report, server rack management with customized Velcro dressing.'
     },
     {
@@ -93,8 +88,6 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
       category: 'Hardware Repair',
       price: 6500,
       sla: '24-Hour Turnaround',
-      rating: 4.7,
-      reviewsCount: 320,
       description: 'BGA chipset rework, power IC replacement, ultra-high performance thermal paste re-application, and diagnostic stress test.'
     }
   ];
@@ -112,42 +105,43 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
   const handleAddPart = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedJob || !newPartName.trim()) return;
-    const cost = parseInt(newPartCost, 10) || 1000;
+    const cost = parseInt(newPartCost, 10) || 0;
     onConsumePart(selectedJob.id, newPartName, cost);
     setNewPartName('');
   };
 
   const handleBookFromCatalog = (pkg: typeof servicesCatalog[0]) => {
-    if (onCreateJob) {
-      onCreateJob({
-        title: pkg.title,
-        customerName: 'Enterprise Client',
-        address: 'Client Operational Facility',
-        technicianName: 'Assigned Field Specialist',
-        technicianPhone: '',
-        status: 'SCHEDULED',
-        scheduledTime: pkg.sla,
-        partsConsumed: []
-      });
-    }
+    // Open dispatch modal with package title pre-filled to capture real customer, site and technician data
+    setDispatchTitle(pkg.title);
+    setShowDispatchModal(true);
   };
 
   const handleDispatchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dispatchTitle.trim() || !onCreateJob) return;
+    if (!dispatchTitle.trim() || !dispatchCustomer.trim() || !dispatchAddress.trim() || !dispatchTech.trim()) {
+      setActionBanner('Job title, customer name, site address, and assigned technician are all required.');
+      return;
+    }
+    if (!onCreateJob) return;
 
     onCreateJob({
-      title: dispatchTitle,
-      customerName: dispatchCustomer || 'Enterprise Client',
-      address: dispatchAddress || 'Mumbai Tech Hub',
-      technicianName: dispatchTech,
-      technicianPhone: dispatchPhone,
+      title: dispatchTitle.trim(),
+      customerName: dispatchCustomer.trim(),
+      address: dispatchAddress.trim(),
+      technicianName: dispatchTech.trim(),
+      technicianPhone: dispatchPhone.trim() || 'N/A',
       status: 'SCHEDULED',
-      scheduledTime: dispatchSlot,
+      scheduledTime: dispatchSlot.trim() || 'Scheduled Window',
       partsConsumed: []
     });
 
     setShowDispatchModal(false);
+    setDispatchTitle('');
+    setDispatchCustomer('');
+    setDispatchAddress('');
+    setDispatchTech('');
+    setDispatchPhone('');
+    setDispatchSlot('');
   };
 
   return (
@@ -407,10 +401,7 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
                   <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-[10px] text-slate-500 font-mono">
                     <span className="text-cyan-400">SLA: {pkg.sla}</span>
-                    <span className="flex items-center gap-1 text-amber-400">
-                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
-                      {pkg.rating} ({pkg.reviewsCount})
-                    </span>
+                    <span className="text-slate-400 font-sans">Standard Catalog Package</span>
                   </div>
 
                   <button

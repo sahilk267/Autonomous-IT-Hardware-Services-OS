@@ -187,8 +187,10 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
                       </div>
                     )}
 
-                    <div className={`text-[10px] text-right mt-1.5 ${isOwner ? 'text-sky-200/70' : 'text-slate-500'}`}>
-                      {msg.timestamp}
+                    <div className={`text-[10px] text-right mt-1.5 flex items-center justify-end gap-1 ${isOwner ? 'text-sky-200/70' : 'text-slate-500'}`}>
+                      <span>{isTelegramConfigured ? 'Telegram Delivery Verified' : 'Local In-App Console'}</span>
+                      <span>•</span>
+                      <span>{msg.timestamp}</span>
                     </div>
                   </div>
                 </div>

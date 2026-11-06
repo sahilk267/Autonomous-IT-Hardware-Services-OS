@@ -72,13 +72,15 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
       deviceName: newEpDeviceName.trim(),
       assignedUser: newEpUser.trim() || 'Unassigned',
       os: newEpOs,
-      lastSeen: new Date().toISOString(),
-      cpuLoad: 0,
-      ramUsagePercent: 0,
-      diskFreePercent: 0,
-      batteryHealthPercent: 100,
-      smartStatus: 'HEALTHY',
-      antivirusStatus: 'UP_TO_DATE'
+      lastSeen: 'Awaiting agent check-in',
+      cpuLoad: -1,
+      ramUsagePercent: -1,
+      diskFreePercent: -1,
+      batteryHealthPercent: -1,
+      smartStatus: 'UNAVAILABLE',
+      antivirusStatus: 'UNAVAILABLE',
+      status: 'UNENROLLED',
+      telemetryAvailable: false
     };
 
     if (onAddEndpoint) {
@@ -397,8 +399,10 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                   <Plus className="w-3.5 h-3.5" />
                   <span>+ Enroll Endpoint</span>
                 </button>
-                <span className="px-3 py-1.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono text-xs font-semibold">
-                  RMM Agent v4.8 Active
+                <span className="px-3 py-1.5 rounded-full bg-slate-900 text-slate-400 border border-slate-800 font-mono text-xs font-semibold">
+                  {endpoints.filter(e => e.telemetryAvailable !== false).length > 0
+                    ? `Active Telemetry (${endpoints.filter(e => e.telemetryAvailable !== false).length})`
+                    : 'RMM Telemetry Unavailable'}
                 </span>
               </div>
             </div>

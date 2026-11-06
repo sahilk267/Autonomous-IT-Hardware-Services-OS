@@ -168,8 +168,8 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   const [propBidDays, setPropBidDays] = useState('14');
   const [propBidApproach, setPropBidApproach] = useState('');
 
-  // AI Diagnosis State
-  const [symptomText, setSymptomText] = useState('Server VM disk IOPS bottleneck during peak payroll processing hours');
+  // AI Diagnosis State - Starts clean, requires actual user input
+  const [symptomText, setSymptomText] = useState('');
   const [deviceType, setDeviceType] = useState('Server Infrastructure');
   const [isDiagnosing, setIsDiagnosing] = useState(false);
   const [diagnosticResult, setDiagnosticResult] = useState<{
@@ -178,21 +178,16 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
     fixLevel: string;
     estimatedCost: number;
     recommendedProviderType: string;
-  } | null>({
-    diagnosisSummary: 'Storage pool queue depth saturated; RAID 5 write-penalty causing 680ms latency spikes.',
-    rootCauses: [
-      'Write-heavy transactional workload running on parity RAID 5 without SSD caching tier',
-      'Hypervisor host HBAs running outdated queue depth firmware driver'
-    ],
-    fixLevel: 'L3_INFRASTRUCTURE_OPTIMIZATION',
-    estimatedCost: 18500,
-    recommendedProviderType: 'VMware & SAN Storage Architect'
-  });
+  } | null>(null);
 
   const selectedProject = projects.find(p => p.id === selectedProjectId) || projects[0];
   const projectProposals = proposals.filter(p => p.projectId === selectedProject?.id);
 
   const handleRunDiagnosis = async () => {
+    if (!symptomText.trim()) {
+      setMpNotice('Please enter the reported symptom or error log details to diagnose.');
+      return;
+    }
     setIsDiagnosing(true);
     try {
       const res = await fetch('/api/ai/diagnosis', {
@@ -208,14 +203,16 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
       if (data.data) {
         setDiagnosticResult({
           diagnosisSummary: data.data.diagnosisSummary,
-          rootCauses: data.data.rootCauseHypothesis || ['Hardware controller degradation'],
+          rootCauses: data.data.rootCauseHypothesis || ['Diagnosis indicates hardware investigation required'],
           fixLevel: data.data.recommendedFixLevel || 'L2_ON_SITE',
-          estimatedCost: data.data.requiredParts?.reduce((acc: number, p: any) => acc + p.cost, 0) || 12000,
+          estimatedCost: data.data.requiredParts?.reduce((acc: number, p: any) => acc + p.cost, 0) || 0,
           recommendedProviderType: 'Certified Enterprise Field Engineer'
         });
+      } else {
+        setMpNotice(data.error || 'AI Diagnosis service unavailable. Please configure GEMINI_API_KEY.');
       }
-    } catch (e) {
-      console.warn('Diagnostic error:', e);
+    } catch (e: any) {
+      setMpNotice(e.message || 'Diagnostic service error.');
     } finally {
       setIsDiagnosing(false);
     }
@@ -223,23 +220,27 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
   const handleCreateProjectSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim()) return;
+    if (!newTitle.trim() || !newClient.trim()) {
+      setMpNotice('Project title and client organization name are required.');
+      return;
+    }
 
+    const budgetNum = parseInt(newBudget, 10) || 0;
     const newProj: Partial<Project> = {
       projectCode: `PRJ-2026-${Math.floor(100 + Math.random() * 900)}`,
-      title: newTitle,
-      clientName: newClient || 'Enterprise Client',
-      clientLocation: 'Mumbai Metro, MH',
-      budget: parseInt(newBudget, 10) || 400000,
+      title: newTitle.trim(),
+      clientName: newClient.trim(),
+      clientLocation: 'On-site / Multi-facility',
+      budget: budgetNum,
       category: newCategory,
-      scopeDescription: newScope || 'Comprehensive enterprise deployment and verification.',
+      scopeDescription: newScope.trim() || 'Enterprise IT deployment and acceptance verification.',
       deliverables: ['Design Document', 'Implementation', 'Final UAT Sign-off'],
       skillsRequired: ['Enterprise Architecture', 'SLA Adherence'],
       status: 'PROPOSALS_OPEN',
       proposalsCount: 0,
       milestones: [
-        { id: `m-${Date.now()}-1`, title: 'Milestone 1: Kickoff & Staging', amount: Math.round((parseInt(newBudget, 10) || 400000) * 0.3), status: 'ESCROW_HELD', dueDate: '2026-09-20' },
-        { id: `m-${Date.now()}-2`, title: 'Milestone 2: Execution & Handover', amount: Math.round((parseInt(newBudget, 10) || 400000) * 0.7), status: 'PENDING_FUNDING', dueDate: '2026-10-10' }
+        { id: `m-${Date.now()}-1`, title: 'Milestone 1: Kickoff & Staging', amount: Math.round(budgetNum * 0.3), status: 'PENDING_FUNDING', dueDate: '2026-09-20' },
+        { id: `m-${Date.now()}-2`, title: 'Milestone 2: Execution & Handover', amount: Math.round(budgetNum * 0.7), status: 'PENDING_FUNDING', dueDate: '2026-10-10' }
       ]
     };
 

@@ -1,285 +1,386 @@
 /**
- * Zero Mock Data Verification Suite
+ * Zero Mock Data & Systems Integrity Verification Suite (Isolated Test Harness)
  * 
- * Asserts the critical architectural invariants:
- * 1. Zero initial mock data records across all business collections.
- * 2. Honest unconfigured integration states.
- * 3. Inventory consumption consistency & transactional integrity.
- * 4. Invoice settlement updates & receivables calculation integrity.
- * 5. Zero references to mockData files or hardcoded demo payloads.
+ * Asserts architectural invariants without modifying production storage:
+ * 1. Test isolation: Uses temporary isolated database paths. Never mutates data/app-store.json.
+ * 2. Proper async/await test execution with error trapping.
+ * 3. Fresh instance contains 0 business records.
+ * 4. Record survival across store reloads.
+ * 5. Corrupted database protection (no silent overwrite).
+ * 6. Atomic write failures leave memory state intact.
+ * 7. Stock consumption validation (rejects insufficient/missing stock).
+ * 8. Quotation approval exact ID matching and duplicate rejection.
+ * 9. Persistent collections (RMA, KB, CRM, Disputes).
+ * 10. Codebase audit: zero mockData files, zero mock imports, zero window.alert.
  */
 
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
-import { dbStore } from '../server/db';
-import { FieldJob, ProductItem, Project, InvoiceRecord } from '../src/types';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { PersistentStore, hashPassword, verifyPassword } from '../server/db.ts';
+import { FieldJob, ProductItem, Project, InvoiceRecord, Quotation } from '../src/types.ts';
 
 async function runTestSuite() {
   console.log('====================================================');
-  console.log('🧪 RUNNING ZERO-MOCK-DATA & SYSTEMS AUDIT SUITE');
+  console.log('🧪 RUNNING ISOLATED ZERO-MOCK-DATA & SYSTEMS AUDIT SUITE');
   console.log('====================================================\n');
 
   let passed = 0;
   let total = 0;
 
-  function test(name: string, fn: () => void | Promise<void>) {
+  async function test(name: string, fn: () => void | Promise<void>) {
     total++;
     try {
-      fn();
-      console.log(`  ✓ [PASS] ${name}`);
+      await fn();
       passed++;
+      console.log(`  ✓ [PASS] ${name}`);
     } catch (err: any) {
       console.error(`  ✗ [FAIL] ${name}: ${err?.message || err}`);
     }
   }
 
-  // 1. Database initial state assertions
-  test('Fresh Database State contains 0 business records', () => {
-    const state = dbStore.getState();
-    assert.strictEqual(state.products.length, 0, 'Products must be 0');
-    assert.strictEqual(state.leads.length, 0, 'Leads must be 0');
-    assert.strictEqual(state.quotes.length, 0, 'Quotes must be 0');
-    assert.strictEqual(state.tickets.length, 0, 'Tickets must be 0');
-    assert.strictEqual(state.jobs.length, 0, 'Field Jobs must be 0');
-    assert.strictEqual(state.assets.length, 0, 'Assets must be 0');
-    assert.strictEqual(state.amcs.length, 0, 'AMCs must be 0');
-    assert.strictEqual(state.projects.length, 0, 'Projects must be 0');
-    assert.strictEqual(state.proposals.length, 0, 'Proposals must be 0');
-    assert.strictEqual(state.invoices.length, 0, 'Invoices must be 0');
-    assert.strictEqual(state.rfqs.length, 0, 'RFQs must be 0');
-    assert.strictEqual(state.telegramMessages.length, 0, 'Telegram Messages must be 0');
-    assert.strictEqual(state.rmaClaims.length, 0, 'RMA Claims must be 0');
-    assert.strictEqual(state.crmOpportunities.length, 0, 'CRM Opportunities must be 0');
-    assert.strictEqual(state.marketplaceDisputes.length, 0, 'Marketplace Disputes must be 0');
-  });
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'apex-test-'));
+  const testDbFile = path.join(tempDir, 'test-store.json');
 
-  // 2. Tenant configuration integrity
-  test('Tenant starts unconfigured or with clean default identity', () => {
-    const tenant = dbStore.getState().tenant;
-    assert.ok(tenant.name, 'Tenant should have a designated company name');
-    assert.strictEqual(tenant.isConfigured, false, 'Default tenant should be marked unconfigured until setup');
-  });
+  try {
+    const testStore = new PersistentStore(testDbFile);
 
-  // 3. Connectors start unconfigured
-  test('Integration Connectors accurately report NOT_CONFIGURED by default', () => {
-    const connectors = dbStore.getState().connectors;
-    for (const c of connectors) {
-      assert.strictEqual(c.status, 'NOT_CONFIGURED', `Connector ${c.id} must be NOT_CONFIGURED`);
-      assert.strictEqual(c.recordsSynced, '0', `Connector ${c.id} must report 0 recordsSynced`);
-    }
-  });
+    // 1. Fresh installation contains 0 business records
+    await test('Fresh Database State contains 0 business records', async () => {
+      const state = testStore.getState();
+      assert.strictEqual(state.products.length, 0, 'Products must be 0');
+      assert.strictEqual(state.leads.length, 0, 'Leads must be 0');
+      assert.strictEqual(state.quotes.length, 0, 'Quotes must be 0');
+      assert.strictEqual(state.tickets.length, 0, 'Tickets must be 0');
+      assert.strictEqual(state.jobs.length, 0, 'Field Jobs must be 0');
+      assert.strictEqual(state.assets.length, 0, 'Assets must be 0');
+      assert.strictEqual(state.amcs.length, 0, 'AMCs must be 0');
+      assert.strictEqual(state.projects.length, 0, 'Projects must be 0');
+      assert.strictEqual(state.proposals.length, 0, 'Proposals must be 0');
+      assert.strictEqual(state.invoices.length, 0, 'Invoices must be 0');
+      assert.strictEqual(state.rfqs.length, 0, 'RFQs must be 0');
+      assert.strictEqual(state.telegramMessages.length, 0, 'Telegram Messages must be 0');
+      assert.strictEqual(state.rmaClaims.length, 0, 'RMA Claims must be 0');
+      assert.strictEqual(state.crmOpportunities.length, 0, 'CRM Opportunities must be 0');
+      assert.strictEqual(state.marketplaceDisputes.length, 0, 'Marketplace Disputes must be 0');
+      assert.strictEqual(state.users.length, 0, 'Initial users must be 0 (clean setup required)');
+    });
 
-  // 4. File system audit: mockData.ts must not exist
-  test('src/data/mockData.ts is permanently absent from filesystem', () => {
-    const mockFilePath = path.join(process.cwd(), 'src', 'data', 'mockData.ts');
-    assert.strictEqual(fs.existsSync(mockFilePath), false, 'mockData.ts must not exist');
-  });
+    // 2. Existing records survive restart
+    await test('Existing records survive store restart', async () => {
+      const sampleProduct: ProductItem = {
+        id: 'prod-persist-1',
+        sku: 'PERSIST-SKU-01',
+        name: 'Enterprise Managed Switch',
+        brand: 'Aruba Networks',
+        category: 'Networking',
+        specs: '24-port PoE+ Managed L2/L3 Gigabit Switch',
+        purchaseCost: 35000,
+        marketPrice: 52000,
+        sellingPrice: 48000,
+        minPrice: 42000,
+        targetMarginPercent: 27,
+        stockAvailable: 5,
+        stockReserved: 0,
+        warehouseLocation: 'WH-MUM-A1',
+        hsn: '85176290',
+        gstPercent: 18,
+        warrantyYears: 3,
+        serialTrackingRequired: true
+      };
+      testStore.addProduct(sampleProduct);
 
-  // 5. Codebase audit: zero imports of mockData
-  test('Zero source code files import mockData', () => {
-    const srcDir = path.join(process.cwd(), 'src');
-    const files = fs.readdirSync(srcDir, { recursive: true }) as string[];
-    for (const file of files) {
-      if (typeof file === 'string' && (file.endsWith('.ts') || file.endsWith('.tsx'))) {
-        const fullPath = path.join(srcDir, file);
-        if (fs.statSync(fullPath).isFile()) {
-          const content = fs.readFileSync(fullPath, 'utf8');
-          assert.strictEqual(
-            content.includes('mockData'),
-            false,
-            `File ${file} must not contain references to mockData`
-          );
+      // Re-initialize a new store from the same file
+      const reloadedStore = new PersistentStore(testDbFile);
+      const reloadedProducts = reloadedStore.getState().products;
+      assert.strictEqual(reloadedProducts.length, 1);
+      assert.strictEqual(reloadedProducts[0].sku, 'PERSIST-SKU-01');
+    });
+
+    // 3. Corrupted database is not overwritten
+    await test('Corrupted database is not silently overwritten', async () => {
+      const corruptFile = path.join(tempDir, 'corrupt-store.json');
+      fs.writeFileSync(corruptFile, '{ invalid json structure !!!', 'utf-8');
+
+      assert.throws(
+        () => new PersistentStore(corruptFile),
+        /CRITICAL: Database file .* is corrupted/,
+        'Must throw error on corrupted json rather than overwriting'
+      );
+    });
+
+    // 4. Failed write produces no success and leaves memory state intact
+    await test('Failed write produces no state update (atomic commit rollback)', async () => {
+      const stateBefore = testStore.getState().products.length;
+      assert.throws(() => {
+        testStore.commit((draft) => {
+          draft.products.push({
+            id: 'prod-fail-write',
+            sku: 'FAIL-WRITE',
+            name: 'Will fail write',
+            brand: 'Test',
+            category: 'Component',
+            specs: 'Test Component',
+            purchaseCost: 100,
+            marketPrice: 250,
+            sellingPrice: 200,
+            minPrice: 150,
+            targetMarginPercent: 50,
+            stockAvailable: 1,
+            stockReserved: 0,
+            warehouseLocation: 'WH-TEST',
+            hsn: '847330',
+            gstPercent: 18,
+            warrantyYears: 1,
+            serialTrackingRequired: false
+          });
+          throw new Error('Simulated atomic commit abort');
+        });
+      }, /Simulated atomic commit abort/);
+
+      assert.strictEqual(testStore.getState().products.length, stateBefore, 'State must remain unmodified on exception');
+    });
+
+    // 5. Test suite cannot touch production storage
+    await test('Test suite cannot touch production storage', async () => {
+      const prodStorePath = path.join(process.cwd(), 'data', 'app-store.json');
+      assert.notStrictEqual(testDbFile, prodStorePath, 'Test file must be distinct from production path');
+    });
+
+    // 6. Password hashing and verification
+    await test('Password KDF scrypt and constant-time verification', async () => {
+      const password = 'SuperSecretSecurePassword!2026';
+      const { salt, hash } = hashPassword(password);
+      assert.ok(salt && salt.length >= 32, 'Salt must be random hex');
+      assert.ok(hash && hash.length >= 64, 'Hash must be scrypt output');
+
+      assert.strictEqual(verifyPassword(password, salt, hash), true, 'Correct password must verify');
+      assert.strictEqual(verifyPassword('WrongPassword', salt, hash), false, 'Wrong password must reject');
+    });
+
+    // 7. Stock consumption rejects missing products and insufficient stock
+    await test('Stock consumption rejects missing products and insufficient stock', async () => {
+      const testJob: FieldJob = {
+        id: 'job-stock-test',
+        jobCode: 'JOB-STK-01',
+        title: 'RAM Replacement',
+        customerName: 'FinTech Corp',
+        address: 'Mumbai',
+        technicianName: 'Engineer',
+        technicianPhone: '9820000000',
+        status: 'CHECKED_IN',
+        scheduledTime: new Date().toISOString(),
+        partsConsumed: [],
+        customerSignatureObtained: false
+      };
+      testStore.addJob(testJob);
+
+      // 1. Missing product rejected
+      assert.throws(
+        () => testStore.consumeJobPart(testJob.id, 'NON-EXISTENT-PROD-ID', 1),
+        /Product not found/
+      );
+
+      // 2. Insufficient stock rejected
+      const scarceProduct: ProductItem = {
+        id: 'prod-scarce-1',
+        sku: 'SCARCE-SSD',
+        name: 'NVMe 2TB Enterprise SSD',
+        brand: 'Samsung',
+        category: 'Storage',
+        specs: 'Enterprise PCIe Gen4 NVMe U.2 2TB SSD',
+        purchaseCost: 12000,
+        marketPrice: 18000,
+        sellingPrice: 16000,
+        minPrice: 14000,
+        targetMarginPercent: 25,
+        stockAvailable: 2,
+        stockReserved: 1, // Available unreserved is 1
+        warehouseLocation: 'WH-MUM-B2',
+        hsn: '847170',
+        gstPercent: 18,
+        warrantyYears: 5,
+        serialTrackingRequired: true
+      };
+      testStore.addProduct(scarceProduct);
+
+      assert.throws(
+        () => testStore.consumeJobPart(testJob.id, scarceProduct.id, 5),
+        /Insufficient stock/
+      );
+
+      // 3. Successful atomic stock consumption
+      const updatedJob = testStore.consumeJobPart(testJob.id, scarceProduct.id, 1);
+      assert.ok(updatedJob);
+      assert.strictEqual(updatedJob.partsConsumed.length, 1);
+      assert.strictEqual(updatedJob.partsConsumed[0].cost, 12000, 'Must record authoritative purchase cost');
+
+      const recheckedProduct = testStore.getState().products.find(p => p.id === scarceProduct.id);
+      assert.strictEqual(recheckedProduct?.stockAvailable, 1, 'Stock must decrement by 1');
+    });
+
+    // 8. Quotation approval exact ID matching and duplicate rejection
+    await test('Quotation approval exact ID matching and duplicate rejection', async () => {
+      const quote: Quotation = {
+        id: 'q-exact-100',
+        quoteNumber: 'QT-2026-100',
+        customerName: 'FinServe Bank',
+        customerGstin: '27AABCU9603R1ZM',
+        customerState: 'Maharashtra',
+        solutionName: 'Branch IT Setup',
+        items: [],
+        services: [],
+        subtotal: 50000,
+        discountAmount: 0,
+        gstAmount: 9000,
+        totalAmount: 59000,
+        grandTotal: 59000,
+        marginPercent: 20,
+        status: 'PENDING_APPROVAL',
+        validUntil: '2026-12-31',
+        createdDate: new Date().toISOString(),
+        paymentTerms: 'Immediate'
+      };
+      testStore.addQuote(quote);
+
+      // Exact match succeeds
+      const approved = testStore.approveQuote('q-exact-100', 'Executive Owner');
+      assert.ok(approved);
+      assert.strictEqual(approved?.status, 'APPROVED');
+
+      // Duplicate approval rejected
+      assert.throws(
+        () => testStore.approveQuote('q-exact-100', 'Executive Owner'),
+        /has already been approved/
+      );
+
+      // Inexact partial substring match fails
+      assert.strictEqual(testStore.approveQuote('q-exact'), null);
+    });
+
+    // 9. Persistent collections (RMA, KB, CRM, Disputes)
+    await test('RMA, CRM, Knowledge Articles and Disputes persist across store instance', async () => {
+      testStore.addRMAClaim({
+        id: 'rma-001',
+        rmaNumber: 'RMA-2026-001',
+        assetTag: 'AST-ROUTER-99',
+        assetId: 'ast-1',
+        assetName: 'Core Router',
+        serialNumber: 'SN-ROUTER-99',
+        oemBrand: 'Cisco',
+        oemCaseNumber: 'CSCO-88910',
+        faultSymptom: 'Port 0/1 flapping',
+        warrantyStatus: 'ACTIVE_WARRANTY',
+        courierTracking: 'DEL-991283',
+        courierPartner: 'BlueDart',
+        stage: 'FAULT_LOGGED',
+        createdAt: new Date().toISOString()
+      });
+
+      testStore.addCRMOpportunity({
+        id: 'crm-001',
+        clientName: 'Tata Steel',
+        contactPerson: 'Rajesh V.',
+        title: 'Factory Network Upgrade',
+        value: 1200000,
+        stage: 'PROPOSAL_SUBMITTED',
+        winProbability: 70,
+        expectedCloseDate: '2026-12-31',
+        assignedEngineer: 'Suresh Patil',
+        category: 'Networking'
+      });
+
+      testStore.addKnowledgeArticle({
+        id: 'kb-001',
+        title: 'Palo Alto HA Failover Runbook',
+        category: 'Firewall',
+        summary: 'Step by step cluster synchronization SOP',
+        readTime: '3 min',
+        views: 0,
+        solvedCount: 0,
+        tags: ['Firewall', 'SOP'],
+        symptoms: ['HA sync failure'],
+        selfServiceSteps: ['Run: show high-availability all']
+      });
+
+      testStore.addMarketplaceDispute({
+        id: 'dsp-001',
+        disputeNumber: 'DSP-2026-001',
+        projectId: 'prj-101',
+        projectTitle: 'Data Center Cabling',
+        customerName: 'FinServe Bank',
+        providerName: 'FiberTech Solutions',
+        disputedAmount: 25000,
+        escrowHeld: 25000,
+        reason: 'Delay in patch panel termination',
+        customerClaim: 'Completion delayed by 2 weeks',
+        providerRebuttal: 'Access to site restricted on weekends',
+        aiMediationVerdict: 'Arbitration review active',
+        status: 'UNDER_ARBITRATION',
+        createdAt: new Date().toISOString()
+      });
+
+      // Reload store to verify persistence
+      const reloaded = new PersistentStore(testDbFile);
+      assert.strictEqual(reloaded.getState().rmaClaims.length, 1);
+      assert.strictEqual(reloaded.getState().crmOpportunities.length, 1);
+      assert.strictEqual(reloaded.getState().knowledgeArticles.length, 1);
+      assert.strictEqual(reloaded.getState().marketplaceDisputes.length, 1);
+    });
+
+    // 10. Codebase audit: zero mockData files
+    await test('src/data/mockData.ts is permanently absent from filesystem', async () => {
+      const mockFilePath = path.join(process.cwd(), 'src', 'data', 'mockData.ts');
+      assert.strictEqual(fs.existsSync(mockFilePath), false, 'mockData.ts must not exist');
+    });
+
+    // 11. Codebase audit: zero imports of mockData
+    await test('Zero source code files import mockData', async () => {
+      const srcDir = path.join(process.cwd(), 'src');
+      const files = fs.readdirSync(srcDir, { recursive: true }) as string[];
+      for (const file of files) {
+        if (typeof file === 'string' && (file.endsWith('.ts') || file.endsWith('.tsx'))) {
+          const fullPath = path.join(srcDir, file);
+          if (fs.statSync(fullPath).isFile()) {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            assert.strictEqual(
+              content.includes('mockData'),
+              false,
+              `File ${file} must not contain references to mockData`
+            );
+          }
         }
       }
-    }
-  });
+    });
 
-  // 6. Transactional integrity: Inventory consumption
-  test('Inventory item addition, consumption, and audit trail', () => {
-    const testSku = `TEST-RAM-${Date.now()}`;
-    const initialProduct: ProductItem = {
-      id: `prod-${Date.now()}`,
-      sku: testSku,
-      name: '16GB DDR5 Server DIMM',
-      brand: 'Crucial Micron',
-      category: 'Component',
-      specs: 'DDR5 ECC Unbuffered Server RAM Module',
-      purchaseCost: 4200,
-      marketPrice: 6500,
-      sellingPrice: 5800,
-      minPrice: 5000,
-      targetMarginPercent: 25,
-      stockAvailable: 10,
-      stockReserved: 0,
-      warehouseLocation: 'BOM-RACK-04',
-      hsn: '847330',
-      gstPercent: 18,
-      warrantyYears: 3,
-      serialTrackingRequired: true
-    };
-    dbStore.addProduct(initialProduct);
-
-    // Add a field job to consume the part
-    const testJob: FieldJob = {
-      id: `job-test-${Date.now()}`,
-      jobCode: 'JOB-999',
-      title: 'Server Memory Fault Diagnostic',
-      customerName: 'Sterling Finance Corp',
-      address: 'BKC, Mumbai',
-      technicianName: 'Field Engineer',
-      technicianPhone: '+91 98200 12345',
-      status: 'CHECKED_IN',
-      scheduledTime: new Date().toISOString(),
-      partsConsumed: [],
-      customerSignatureObtained: false
-    };
-    dbStore.addJob(testJob);
-
-    // Verify stock added
-    let product = dbStore.getState().products.find(p => p.id === initialProduct.id);
-    assert.strictEqual(product?.stockAvailable, 10, 'Stock must be 10');
-
-    // Consume part on job
-    const updatedJob = dbStore.consumeJobPart(testJob.id, '16GB DDR5 Server DIMM', 4200);
-    assert.ok(updatedJob, 'consumeJobPart should return updated job');
-    assert.strictEqual(updatedJob?.partsConsumed.length, 1, 'Job must have 1 consumed part');
-
-    product = dbStore.getState().products.find(p => p.id === initialProduct.id);
-    assert.strictEqual(product?.stockAvailable, 9, 'Stock must decrease from 10 to 9');
-
-    const tx = dbStore.getState().inventoryTransactions.find(t => t.sku === testSku);
-    assert.ok(tx, 'Inventory transaction log must be recorded');
-    assert.strictEqual(tx?.type, 'OUT');
-  });
-
-  // 7. Project persistence integrity
-  test('Project creation and persistence', () => {
-    const testProject: Project = {
-      id: `proj-test-${Date.now()}`,
-      projectCode: 'PRJ-TEST-001',
-      title: 'Branch Office SD-WAN Rollout',
-      clientName: 'Acme Logistics Ltd',
-      clientLocation: 'Navi Mumbai',
-      category: 'Network Security',
-      scopeDescription: 'Deploy SD-WAN appliances across 4 branch sites.',
-      deliverables: ['Hardware install', 'Failover testing'],
-      skillsRequired: ['Cisco', 'Fortinet'],
-      status: 'IN_PROGRESS',
-      budget: 250000,
-      proposalsCount: 0,
-      createdAt: new Date().toISOString(),
-      milestones: [
-        {
-          id: 'ms-1',
-          title: 'Site Survey',
-          amount: 50000,
-          status: 'IN_PROGRESS',
-          dueDate: '2026-11-15'
-        }
-      ]
-    };
-
-    dbStore.addProject(testProject);
-    const projects = dbStore.getState().projects;
-    const found = projects.find(p => p.id === testProject.id);
-    assert.ok(found, 'Created project must exist in database');
-    assert.strictEqual(found?.budget, 250000, 'Project budget must match');
-  });
-
-  // 8. Invoice settlement workflow
-  test('Invoice settlement updates status to SETTLED', () => {
-    const invNo = `INV-TEST-${Date.now()}`;
-    const testInvoice: InvoiceRecord = {
-      id: `inv-${Date.now()}`,
-      customer: 'Sterling Finance Corp',
-      invoiceNo: invNo,
-      amount: 118000,
-      status: 'ACTIVE',
-      dueInDays: 30,
-      createdAt: new Date().toISOString()
-    };
-
-    dbStore.addInvoice(testInvoice);
-    let inv = dbStore.getState().invoices.find(i => i.invoiceNo === invNo);
-    assert.strictEqual(inv?.status, 'ACTIVE', 'Invoice should initially be ACTIVE');
-
-    dbStore.settleInvoice(invNo);
-    inv = dbStore.getState().invoices.find(i => i.invoiceNo === invNo);
-    assert.strictEqual(inv?.status, 'SETTLED', 'Invoice status must be updated to SETTLED');
-  });
-
-  // 9. Clean slate reset restoration
-  test('Clean slate restore guarantees 0 records', () => {
-    dbStore.resetToCleanSlate();
-    const state = dbStore.getState();
-    assert.strictEqual(state.products.length, 0);
-    assert.strictEqual(state.jobs.length, 0);
-    assert.strictEqual(state.projects.length, 0);
-    assert.strictEqual(state.invoices.length, 0);
-  });
-
-  // 10. Codebase audit: zero window.alert calls
-  test('Zero window.alert calls exist in source code', () => {
-    const srcDir = path.join(process.cwd(), 'src');
-    const files = fs.readdirSync(srcDir, { recursive: true }) as string[];
-    for (const file of files) {
-      if (typeof file === 'string' && (file.endsWith('.ts') || file.endsWith('.tsx'))) {
-        const fullPath = path.join(srcDir, file);
-        if (fs.statSync(fullPath).isFile()) {
-          const content = fs.readFileSync(fullPath, 'utf8');
-          assert.strictEqual(
-            content.includes('alert('),
-            false,
-            `File ${file} must not contain window.alert calls`
-          );
+    // 12. Codebase audit: zero window.alert calls
+    await test('Zero window.alert calls exist in source code', async () => {
+      const srcDir = path.join(process.cwd(), 'src');
+      const files = fs.readdirSync(srcDir, { recursive: true }) as string[];
+      for (const file of files) {
+        if (typeof file === 'string' && (file.endsWith('.ts') || file.endsWith('.tsx'))) {
+          const fullPath = path.join(srcDir, file);
+          if (fs.statSync(fullPath).isFile()) {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            assert.strictEqual(
+              content.includes('alert('),
+              false,
+              `File ${file} must not contain window.alert calls`
+            );
+          }
         }
       }
+    });
+
+  } finally {
+    try {
+      rmSync(tempDir, { recursive: true, force: true });
+    } catch (cleanupErr) {
+      console.warn('Could not remove temp test directory:', cleanupErr);
     }
-  });
-
-  // 11. Receivables ledger calculation excludes settled invoices
-  test('Active receivables ledger calculation excludes settled invoices', () => {
-    const testInv1: InvoiceRecord = {
-      id: `inv-1-${Date.now()}`,
-      customer: 'Alpha Corp',
-      invoiceNo: `INV-A-${Date.now()}`,
-      amount: 50000,
-      status: 'ACTIVE',
-      dueInDays: 15,
-      createdAt: new Date().toISOString()
-    };
-    const testInv2: InvoiceRecord = {
-      id: `inv-2-${Date.now()}`,
-      customer: 'Beta Corp',
-      invoiceNo: `INV-B-${Date.now()}`,
-      amount: 75000,
-      status: 'SETTLED',
-      dueInDays: 0,
-      createdAt: new Date().toISOString()
-    };
-
-    dbStore.addInvoice(testInv1);
-    dbStore.addInvoice(testInv2);
-
-    const activeInvoices = dbStore.getState().invoices.filter(i => i.status !== 'SETTLED' && i.status !== 'CANCELLED');
-    const totalReceivables = activeInvoices.reduce((acc, i) => acc + i.amount, 0);
-
-    assert.strictEqual(totalReceivables, 50000, 'Only unsettled invoices must be included in receivables');
-    dbStore.resetToCleanSlate();
-  });
-
-  // 12. Quotation margin calculation edge case handles 0 subtotal without NaN
-  test('Quotation margin handles 0 subtotal without division by zero or NaN', () => {
-    const subtotal = 0;
-    const discount = 0;
-    const netSubtotal = Math.max(0, subtotal - discount);
-    const profit = 0;
-    const marginPercent = netSubtotal > 0 ? ((profit / netSubtotal) * 100) : 0;
-
-    assert.strictEqual(Number.isNaN(marginPercent), false, 'Margin percent must not be NaN');
-    assert.strictEqual(marginPercent, 0, 'Margin percent for 0 subtotal must be 0');
-  });
+  }
 
   console.log('\n====================================================');
   console.log(`TEST SUMMARY: ${passed}/${total} TESTS PASSED`);

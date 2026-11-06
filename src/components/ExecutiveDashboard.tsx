@@ -11,7 +11,7 @@ import {
   Building,
   Plus
 } from 'lucide-react';
-import { TenantInfo, ITSMTicket, AssetItem, AMCContract, Quotation, ProductItem, InvoiceRecord, SupplierInfo, RFQItem } from '../types';
+import { TenantInfo, ITSMTicket, AssetItem, AMCContract, Quotation, ProductItem, InvoiceRecord, SupplierInfo, RFQItem, EndpointHealth } from '../types';
 
 interface ExecutiveDashboardProps {
   tenant: TenantInfo;
@@ -25,6 +25,7 @@ interface ExecutiveDashboardProps {
   invoices?: InvoiceRecord[];
   suppliers?: SupplierInfo[];
   rfqs?: RFQItem[];
+  endpoints?: EndpointHealth[];
 }
 
 export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
@@ -38,7 +39,8 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
   products = [],
   invoices = [],
   suppliers = [],
-  rfqs = []
+  rfqs = [],
+  endpoints = []
 }) => {
   // Enterprise AI Copilot State
   const [copilotQuery, setCopilotQuery] = useState('');
@@ -69,9 +71,10 @@ export const ExecutiveDashboard: React.FC<ExecutiveDashboardProps> = ({
     ? `${((resolvedTickets.filter(t => t.slaPercentUsed <= 100).length / resolvedTickets.length) * 100).toFixed(1)}%`
     : 'N/A';
 
-  const itHealthScore = (assets.length === 0 && tickets.length === 0)
-    ? 'N/A'
-    : (criticalIncidentsCount === 0 ? '100%' : `${Math.max(40, 100 - (criticalIncidentsCount * 15))}%`);
+  // Do not infer 100% health when no genuine telemetry measurements exist
+  const itHealthScore = endpoints.length === 0
+    ? 'N/A (No Telemetry)'
+    : `${Math.round((endpoints.filter(e => e.status === 'HEALTHY').length / endpoints.length) * 100)}%`;
 
   // Handle Copilot Submission via real backend API
   const handleCopilotSubmit = async (queryText: string) => {

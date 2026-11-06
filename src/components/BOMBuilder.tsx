@@ -24,8 +24,8 @@ const emptyBOMSolution: BOMSolution = {
   solutionName: 'New Architecture Solution',
   category: 'Custom Architecture',
   summary: 'Clean enterprise Bill of Materials canvas. Add hardware components, servers, or networking items.',
-  compatibilityStatus: 'VERIFIED_COMPATIBLE',
-  compatibilityNotes: 'No compatibility bottlenecks detected.',
+  compatibilityStatus: 'UNVERIFIED',
+  compatibilityNotes: 'BOM is currently empty. Add catalog components or run AI architecting to evaluate compatibility.',
   recommendedMargin: 15,
   items: [],
   servicesIncluded: [],
@@ -113,19 +113,32 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
 
   // Handle AI Customer Negotiation
   const handleSimulateNegotiation = () => {
-    const requestedDiscount = parseInt(negotiationText.replace(/[^0-9]/g, ''), 10) || 120000;
+    const rawParsed = parseInt(negotiationText.replace(/[^0-9]/g, ''), 10);
+    if (isNaN(rawParsed) || rawParsed <= 0) {
+      setNegotiationResult('⚠️ Please enter a specific discount amount in rupees (e.g. "Customer requested ₹25,000 discount").');
+      return;
+    }
+    if (grossSubtotal <= 0) {
+      setNegotiationResult('⚠️ Cannot evaluate negotiation on an empty BOM. Please add hardware components first.');
+      return;
+    }
+    const requestedDiscount = rawParsed;
+    if (requestedDiscount >= grossSubtotal) {
+      setNegotiationResult(`🚨 Discount cannot exceed total BOM subtotal of ₹${grossSubtotal.toLocaleString('en-IN')}.`);
+      return;
+    }
     const testSubtotal = grossSubtotal - requestedDiscount;
     const testProfit = testSubtotal - totalCost;
-    const testMargin = (testProfit / testSubtotal) * 100;
+    const testMargin = testSubtotal > 0 ? (testProfit / testSubtotal) * 100 : 0;
 
     if (testMargin >= 12.0) {
       setDiscountAmount(requestedDiscount);
       setNegotiationResult(
-        `✅ ACCEPTED BY AI SALES AGENT: Margin remains at ${testMargin.toFixed(1)}% (within authorized 12.0% floor rule). Discount of ₹${requestedDiscount.toLocaleString('en-IN')} applied automatically.`
+        `✅ ACCEPTED BY PRICING RULES: Margin remains at ${testMargin.toFixed(1)}% (within authorized 12.0% floor rule). Discount of ₹${requestedDiscount.toLocaleString('en-IN')} applied.`
       );
     } else {
       setNegotiationResult(
-        `🚨 MARGIN VIOLATION (${testMargin.toFixed(1)}% < 12.0% floor): AI cannot auto-authorize this discount. An approval exception has been dispatched to the Business Owner via Telegram Command Center.`
+        `🚨 MARGIN EXCEPTION (${testMargin.toFixed(1)}% < 12.0% floor): Discount of ₹${requestedDiscount.toLocaleString('en-IN')} requires explicit Business Owner approval.`
       );
     }
   };
