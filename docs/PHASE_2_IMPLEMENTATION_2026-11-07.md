@@ -27,7 +27,7 @@
 
 ## Independently verified CI evidence
 
-On commit `c714f7f5a7bd2206af6a055a589e5fddd27a11b3`, [GitHub Actions #42282725284](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42282725284) finished green with type-check, production build, 15/15 isolated regressions, 37/37 production-mode HTTP checks, and 16/16 multi-role HTTP permissions checks. All HTTP tests used ephemeral databases.
+After the follow-up health privacy hardening, [GitHub Actions #42283191813](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) finished green with type-check, production build, 15/15 isolated regressions, 38/38 production-mode HTTP checks, and 16/16 multi-role HTTP permissions checks. All HTTP tests used ephemeral databases.
 
 ## Acceptance gates
 
