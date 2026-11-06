@@ -14,7 +14,7 @@
 | BOOT-02 | P0 | Production first-admin setup protected with server-provisioned one-time token | Implemented | Deploy test pending | Configure `APEX_INITIAL_SETUP_TOKEN` |
 | SEC-01 | P1 | Production secure session cookie, no token in login JSON | Implemented | HTTP integration test pending | Login/logout, CSRF scenarios |
 | SEC-02 | P1 | Basic browser Origin checks for writes | Implemented | Proxy/Hostinger test pending | Test forwarded host behavior |
-| SEC-03 | P1 | RBAC on 48 sensitive API routes + role-scoped state collection filtering | Phase 2 code staged | CI multi-role HTTP test pending | True per-user/tenant row isolation and endpoint ownership |
+| SEC-03 | P1 | RBAC on 48 API routes + role-scoped state collection filtering | **CI verified** | [16/16 role HTTP tests pass](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42282725284) | Per-user/tenant row isolation, ownership & comprehensive threat modeling |
 | SEC-04 | P1 | Block browser-generated authoritative audit events | Implemented | End-to-end test pending | Replace all remaining client audit producers |
 | SEC-05 | P1 | Telegram webhook fails closed without allowed user + chat | Implemented | Telegram live webhook pending | Replay IDs, outbound API, delivery receipts |
 | DATA-01 | P0 | Existing `commit()` clone-before-write semantics retained | Already present at baseline | Disk-failure test pending | Durable backups & concurrent writes |
@@ -25,9 +25,10 @@
 | FIELD-01 | P3 | Diagnosis no longer silently creates fake customer/site/parts | Implemented | UI test pending | Explicit booking form |
 | WORK-01 | P3 | Missing workflow execute route responds honestly with 501 | Implemented (fail closed) | API smoke pending | Actual audited action dispatcher |
 | CI-01 | P4 | GitHub Actions typecheck/build/15 isolated tests | **Verified** | [Run 42257640364: green](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42257640364) | Expand regression suite |
-| CI-02 | P4 | Real production-mode Express HTTP smoke suite (21 checks, temporary DB) | **Verified** | [Run 42257640364: 21/21 PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42257640364) | Browser, role matrix, live provider tests |
+| CI-02 | P4 | Production-mode Express HTTP smoke suite (37 checks, temp DB) | **Verified** | [Run 42282725284: 37/37 PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42282725284) | Browser, live provider tests |
+| CI-03 | P4 | Five-role HTTP access matrix (16 assertions, temporary seeded fixture) | **Verified** | [Run 42282725284: 16/16 PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42282725284) | Object-level authorization tests |
 | DOC-01 | P4 | Implementation report + tracker | Added | Reviewed with code | Keep synchronized per commit |
-| PERSIST-01 | P3 | RMA, CRM, KB and disputes connect to server CRUD and reload state | Phase 2 code staged | API + UI regression pending | Browser acceptance and permissions |
+| PERSIST-01 | P3 | RMA, CRM, KB and disputes connected to typed server APIs and state | **API verified; browser pending** | [37/37 HTTP tests pass](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42282725284) | Browser UX, screen-based save/reload and OEM evidence |
 | INT-01 | P4 | Verified Razorpay/Cashfree transactions | **Pending / 501** | — | Real provider implementation |
 | GST-01 | P4 | Verified NIC IRP / GST filing adapter | **Pending / 501** | — | Real provider implementation |
 | RMM-01 | P4 | Authenticated real endpoint agent telemetry | **Pending** | — | Enrollment and ingestion |
@@ -40,7 +41,7 @@
 
 ## Phase 2 — 7 November 2026
 
-Phase 2 changes are staged on the existing draft PR and **must be verified through GitHub Actions** before changing status to PASS.
+Phase 2 implementation was pushed as commit `c714f7f5a7bd2206af6a055a589e5fddd27a11b3`. Independent [GitHub Actions run 42282725284](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42282725284) verified **type-check PASS, build PASS, isolated regression 15/15, production HTTP 37/37, role permissions 16/16**. Browser/Hostinger testing remains pending.
 
 - Role-based collection-level reads and route-level permissions (still **single tenant**, not per-user ownership/tenant isolation).
 - RMA: real registered assets only; `FAULT_LOGGED` initial status; verified OEM case/AWB needed for stage progression.

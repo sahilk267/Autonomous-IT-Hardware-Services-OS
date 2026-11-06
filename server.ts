@@ -128,35 +128,9 @@ function getGeminiClient(): GoogleGenAI | null {
 // --- Public Endpoints ---
 
 // 1. Health check & configuration status (Safe public endpoint - NO confidential business or PII leak)
+// Public liveness check: no business record counts or integration configuration leak.
 app.get('/api/health', (req, res) => {
-  const state = dbStore.getState();
-  const geminiConfigured = !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY';
-  const telegramConfigured = !!process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'MY_TELEGRAM_BOT_TOKEN';
-
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    integrations: {
-      gemini: geminiConfigured ? 'CONFIGURED' : 'NOT_CONFIGURED',
-      telegram: telegramConfigured ? 'CONFIGURED' : 'NOT_CONFIGURED',
-      payments: process.env.RAZORPAY_KEY_ID ? 'CONFIGURED' : 'NOT_CONFIGURED',
-      gst: process.env.GST_API_KEY ? 'CONFIGURED' : 'NOT_CONFIGURED'
-    },
-    database: {
-      status: 'ready',
-      recordCounts: {
-        products: state.products.length,
-        quotes: state.quotes.length,
-        invoices: state.invoices.length,
-        tickets: state.tickets.length,
-        jobs: state.jobs.length,
-        assets: state.assets.length,
-        projects: state.projects.length,
-        events: state.events.length
-      }
-    }
-  });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Auth Status (Check if first-time administrator enrollment is needed)

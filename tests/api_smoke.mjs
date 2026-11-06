@@ -75,6 +75,14 @@ try {
   }
   if (!ready) throw new Error('Server did not start: ' + serverOutput);
 
+  let publicHealth = await request('/api/health');
+  verify('Anonymous liveness never leaks business volumes or integration config', () => {
+    assert.equal(publicHealth.response.status, 200);
+    assert.ok(!('database' in publicHealth.body));
+    assert.ok(!('integrations' in publicHealth.body));
+    assert.ok(!('environment' in publicHealth.body));
+  });
+
   let result = await request('/api/state');
   verify('Anonymous private state denied', () => assert.equal(result.response.status, 401));
   result = await request('/api/auth/status');
