@@ -32,7 +32,8 @@ On existing deployments, if a legacy passwordless admin was previously stored, *
 
 - GitHub source/blob patches were assembled against exact baseline file contents.
 - A local shell `git pull` was unavailable because network DNS resolution of `github.com` failed. GitHub's connected repository API was used for source reads and branch push instead.
-- `npm run lint`, `npm run build`, `npm test`, real APIs, browser and Hostinger startup are **NOT YET CERTIFIED** by this report. Added GitHub Actions to generate independent evidence.
+- GitHub Actions [run 42256237304](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42256237304) **PASSED** on Node 20: `npm run lint`, `npm run build`, and `npm test` (**15/15 assertions**).
+- The follow-up adds an isolated `APEX_DATA_FILE` setting and production-mode `npm run smoke` HTTP checks. Live providers, browser UX and Hostinger deployment are **NOT CERTIFIED** by CI.
 - This push is an **implementation increment**, not a production-ready declaration.
 
 ## Unfinished work

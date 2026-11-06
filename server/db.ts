@@ -92,7 +92,10 @@ export interface AppStoreState {
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'app-store.json');
+// Explicitly isolated database path is required for API smoke tests and deployments.
+const DB_FILE = process.env.APEX_DATA_FILE
+  ? path.resolve(process.env.APEX_DATA_FILE)
+  : path.join(DATA_DIR, 'app-store.json');
 
 export const defaultConnectors: IntegrationConnector[] = [
   {

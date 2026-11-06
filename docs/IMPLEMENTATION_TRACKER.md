@@ -24,7 +24,7 @@
 | PROJ-01 | P3 | Project milestone completion persisted via API | Implemented | Reload test pending | Guard financial escrow claims |
 | FIELD-01 | P3 | Diagnosis no longer silently creates fake customer/site/parts | Implemented | UI test pending | Explicit booking form |
 | WORK-01 | P3 | Missing workflow execute route responds honestly with 501 | Implemented (fail closed) | API smoke pending | Actual audited action dispatcher |
-| CI-01 | P4 | Automated GitHub Actions typecheck/build/isolated tests | Added | Workflow results pending | Fix any failed checks |
+| CI-01 | P4 | GitHub Actions typecheck/build/15 isolated tests | Verified on first push | [Run 42256237304: green](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42256237304) | Extend production-mode API smoke checks |
 | DOC-01 | P4 | Implementation report + tracker | Added | Reviewed with code | Keep synchronized per commit |
 | PERSIST-01 | P3 | RMA/CRM/KB/disputes UI wired to server CRUD | **Pending** | — | UI persistence wiring |
 | INT-01 | P4 | Verified Razorpay/Cashfree transactions | **Pending / 501** | — | Real provider implementation |
@@ -45,6 +45,12 @@
 4. Do not report `CONFIGURED` as `CONNECTED`. Do not claim external money movement or signed IRN without provider confirmation.
 5. Security and deployment sign-off require actual build logs plus API tests, not agent narrative.
 6. Update this table with commit SHA and evidence after every verified phase.
+
+## First independent CI evidence
+
+- **Run:** [Apex OS verification #42256237304](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42256237304)
+- **Node 20:** npm install PASS; `npm run lint` PASS; `npm run build` PASS; `npm test` **15/15 PASS**.
+- **New next gate:** isolated production-mode HTTP smoke script (added in the next incremental commit). Provider integrations, browser UX and Hostinger deployment still unverified.
 
 ## Suggested milestone order
 

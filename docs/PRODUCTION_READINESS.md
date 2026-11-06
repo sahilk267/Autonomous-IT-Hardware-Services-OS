@@ -1,3 +1,5 @@
+> **CAUTION — HISTORICAL CHECKLIST, NOT CURRENT PRODUCTION SIGN-OFF (2026-11-06).** Many PASS claims below predate the latest audit and refer only to code or mock-free startup, not provider transactions, tenant isolation, endpoint authorizations or live Hostinger deployment. See [current implementation tracker](IMPLEMENTATION_TRACKER.md) and [implementation report](IMPLEMENTATION_REPORT_2026-11-06.md). Actual production readiness remains **BLOCKED**.
+
 # Production Readiness & Hardening Checklist
 
 **Application**: Apex Autonomous IT Hardware & Services Operating System  

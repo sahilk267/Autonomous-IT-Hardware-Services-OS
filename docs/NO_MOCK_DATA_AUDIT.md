@@ -1,3 +1,5 @@
+> **Historical snapshot:** The quoted 12/12 test result and claims below describe an earlier version. The current CI run [42256237304](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42256237304) verified 15/15 isolated tests, lint, and build on the first security-increment branch. Static UI service packages, metrics and unverified integration claims still require cleanup. See [tracker](IMPLEMENTATION_TRACKER.md).
+
 # Strict Zero Mock Data Verification & Audit Report
 
 **Application**: Apex Autonomous IT Hardware & Services Operating System  
