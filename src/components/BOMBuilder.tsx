@@ -74,10 +74,10 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
   const totalItemsSelling = currentSolution.items.reduce((acc, i) => acc + (i.sellingPrice * i.qty), 0);
   const totalServices = currentSolution.servicesIncluded.reduce((acc, s) => acc + s.price, 0);
   const grossSubtotal = totalItemsSelling + totalServices;
-  const netSubtotal = grossSubtotal - discountAmount;
+  const netSubtotal = Math.max(0, grossSubtotal - discountAmount);
   const grossProfit = netSubtotal - totalCost;
-  const marginPercent = grossSubtotal > 0 ? ((grossProfit / netSubtotal) * 100) : 0;
-  const isMarginException = marginPercent < 12.0;
+  const marginPercent = netSubtotal > 0 ? ((grossProfit / netSubtotal) * 100) : 0;
+  const isMarginException = netSubtotal <= 0 || marginPercent < 12.0;
 
   // Handle AI BOM Generation via Server Endpoint
   const handleAIGenerateBOM = async () => {

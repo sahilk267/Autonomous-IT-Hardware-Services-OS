@@ -24,7 +24,31 @@ function resolvePort(): number {
 
 const PORT = resolvePort();
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+// Browser-origin CSRF defense for state-changing API requests. Telegram webhooks
+// use a separate authenticated integration secret and are not browser sessions.
+app.use('/api', (req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  const origin = req.headers.origin;
+  if (origin) {
+    try {
+      const host = req.get('x-forwarded-host') || req.get('host');
+      if (!host || new URL(origin).host !== host) {
+        return res.status(403).json({ success: false, error: 'Cross-origin mutation rejected.' });
+      }
+    } catch {
+      return res.status(403).json({ success: false, error: 'Malformed request origin.' });
+    }
+  }
+  next();
+});
+
+function setSessionCookie(res: express.Response, token: string, clear = false) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.setHeader('Set-Cookie',
+    `apex_session=${token}; Path=/; HttpOnly; SameSite=Strict${secure}; Max-Age=${clear ? 0 : 86400}`);
+}
 
 // Cookie parser helper
 function parseCookies(cookieHeader?: string): Record<string, string> {
@@ -150,6 +174,13 @@ app.post('/api/auth/setup', (req, res) => {
     if (users.length > 0) {
       return res.status(403).json({ success: false, error: 'Initial administrator enrollment is already completed.' });
     }
+    const setupSecret = process.env.APEX_INITIAL_SETUP_TOKEN;
+    if (process.env.NODE_ENV === 'production' && !setupSecret) {
+      return res.status(503).json({ success: false, error: 'Set APEX_INITIAL_SETUP_TOKEN in the server environment before first administrator setup.' });
+    }
+    if (setupSecret && req.body?.setupToken !== setupSecret) {
+      return res.status(403).json({ success: false, error: 'Invalid administrator setup token.' });
+    }
     const { username, password, name, email } = req.body;
     if (!username || typeof username !== 'string' || username.trim().length < 3) {
       return res.status(400).json({ success: false, error: 'Username must be at least 3 characters.' });
@@ -173,7 +204,7 @@ app.post('/api/auth/setup', (req, res) => {
 
     dbStore.addUser(newUser);
     const session = dbStore.createSession(newUser.id, newUser.username, newUser.role);
-    res.setHeader('Set-Cookie', `apex_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+    setSessionCookie(res, session.token);
     res.status(201).json({
       success: true,
       user: {
@@ -184,7 +215,6 @@ app.post('/api/auth/setup', (req, res) => {
         role: newUser.role,
         tenantId: newUser.tenantId
       },
-      token: session.token
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -208,7 +238,7 @@ app.post('/api/auth/login', (req, res) => {
     }
 
     const session = dbStore.createSession(user.id, user.username, user.role);
-    res.setHeader('Set-Cookie', `apex_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+    setSessionCookie(res, session.token);
     res.json({
       success: true,
       user: {
@@ -219,7 +249,6 @@ app.post('/api/auth/login', (req, res) => {
         role: user.role,
         tenantId: user.tenantId
       },
-      token: session.token
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -230,15 +259,10 @@ app.post('/api/auth/login', (req, res) => {
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
   const session = (req as any).user;
-  const user = dbStore.getUserById(session.userId) || {
-    id: session.userId,
-    username: session.username,
-    name: session.username,
-    email: `${session.username}@apex-it.internal`,
-    role: session.role,
-    tenantId: dbStore.getState().tenant.id,
-    createdAt: session.createdAt
-  };
+  const user = dbStore.getUserById(session.userId);
+  if (!user || !user.passwordHash || !user.salt) {
+    return res.status(401).json({ success: false, error: 'User account no longer valid.' });
+  }
   res.json({
     success: true,
     user: {
@@ -258,7 +282,7 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
   if (token) {
     dbStore.deleteSession(token);
   }
-  res.setHeader('Set-Cookie', 'apex_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+  setSessionCookie(res, '', true);
   res.json({ success: true, message: 'Logged out successfully.' });
 });
 
@@ -266,7 +290,7 @@ app.get('/api/tenant', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().tenant });
 });
 
-app.post('/api/tenant', requireAuth, (req, res) => {
+app.post('/api/tenant', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const { name, gstin, state, address, contactEmail, contactPhone, pan } = req.body;
     const updated = dbStore.updateTenant({
@@ -318,6 +342,9 @@ app.get('/api/state', requireAuth, (req, res) => {
 
 // Administrative Clean State Reset (Protected, requires BUSINESS_OWNER + explicit confirmation)
 app.post('/api/state/reset', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  if (process.env.NODE_ENV === 'production' && process.env.APEX_ALLOW_PRODUCTION_RESET !== 'true') {
+    return res.status(403).json({ success: false, error: 'Production reset is disabled. Explicit server-side authorization required.' });
+  }
   try {
     const confirm = req.body?.confirm === true || req.headers['x-apex-confirm-reset'] === 'true';
     if (!confirm) {
@@ -342,7 +369,7 @@ app.get('/api/products', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().products });
 });
 
-app.post('/api/products', requireAuth, (req, res) => {
+app.post('/api/products', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const prod = req.body;
     if (!prod || !prod.name || !prod.sku) {
@@ -371,7 +398,7 @@ app.post('/api/products', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/products/:id', requireAuth, (req, res) => {
+app.patch('/api/products/:id', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const updated = dbStore.updateProduct(req.params.id, req.body);
     if (!updated) {
@@ -383,7 +410,7 @@ app.patch('/api/products/:id', requireAuth, (req, res) => {
   }
 });
 
-app.delete('/api/products/:id', requireAuth, (req, res) => {
+app.delete('/api/products/:id', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const deleted = dbStore.deleteProduct(req.params.id);
     if (!deleted) {
@@ -400,7 +427,7 @@ app.get('/api/suppliers', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().suppliers });
 });
 
-app.post('/api/suppliers', requireAuth, (req, res) => {
+app.post('/api/suppliers', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const supp = req.body;
     if (!supp || !supp.name) {
@@ -421,7 +448,7 @@ app.get('/api/rfqs', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().rfqs });
 });
 
-app.post('/api/rfqs', requireAuth, (req, res) => {
+app.post('/api/rfqs', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const rfq = req.body;
     if (!rfq || !rfq.productName) {
@@ -452,7 +479,7 @@ app.post('/api/rfqs', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/rfqs/:id/quotes', requireAuth, (req, res) => {
+app.post('/api/rfqs/:id/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const quote = req.body;
     if (!quote || !quote.supplierName || quote.unitCost === undefined) {
@@ -468,7 +495,7 @@ app.post('/api/rfqs/:id/quotes', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/rfqs/:id/dispatch-po', requireAuth, (req, res) => {
+app.post('/api/rfqs/:id/dispatch-po', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const { supplierId } = req.body;
     const updated = dbStore.dispatchPO(req.params.id, supplierId);
@@ -499,68 +526,78 @@ app.get('/api/quotes', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().quotes });
 });
 
-app.post('/api/quotes', requireAuth, (req, res) => {
+app.post('/api/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
-    const quote = req.body;
-    if (!quote || !quote.customerName) {
-      return res.status(400).json({ success: false, error: 'customerName is required' });
+    const quote = req.body || {};
+    if (typeof quote.customerName !== 'string' || !quote.customerName.trim()) {
+      return res.status(400).json({ success: false, error: 'A real customer name is required.' });
     }
-
     const items = Array.isArray(quote.items) ? quote.items : [];
-    let calculatedSubtotal = 0;
-    let calculatedTotalCost = 0;
-
+    const services = Array.isArray(quote.services) ? quote.services : [];
+    if (items.length + services.length === 0) {
+      return res.status(400).json({ success: false, error: 'Quotation must contain at least one line item or service.' });
+    }
+    let subtotal = 0;
+    let totalCost = 0;
     for (const item of items) {
-      const q = Number(item.qty) || 0;
-      const unitCost = Number(item.purchaseCost) || 0;
-      const unitPrice = Number(item.sellingPrice) || 0;
-      if (q <= 0 || unitCost < 0 || unitPrice < 0) {
-        return res.status(400).json({ success: false, error: 'Invalid item values: qty must be > 0, costs must be non-negative' });
+      const qty = Number(item.qty);
+      const purchaseCost = Number(item.purchaseCost);
+      const sellingPrice = Number(item.sellingPrice);
+      if (!Number.isSafeInteger(qty) || qty <= 0 ||
+          !Number.isFinite(purchaseCost) || purchaseCost < 0 ||
+          !Number.isFinite(sellingPrice) || sellingPrice < 0) {
+        return res.status(400).json({ success: false, error: 'Invalid item quantity, cost or selling price.' });
       }
-      calculatedSubtotal += q * unitPrice;
-      calculatedTotalCost += q * unitCost;
+      subtotal += qty * sellingPrice;
+      totalCost += qty * purchaseCost;
     }
-
-    const discount = Number(quote.discount) || 0;
-    if (discount < 0 || (calculatedSubtotal > 0 && discount >= calculatedSubtotal)) {
-      return res.status(400).json({ success: false, error: 'Discount must be non-negative and less than subtotal' });
+    for (const service of services) {
+      const price = Number(service.price);
+      if (!Number.isFinite(price) || price < 0) {
+        return res.status(400).json({ success: false, error: 'Service price must be a non-negative number.' });
+      }
+      subtotal += price;
     }
+    const discountAmount = Number(quote.discountAmount ?? 0);
+    if (!Number.isFinite(subtotal) || subtotal <= 0 ||
+        !Number.isFinite(discountAmount) || discountAmount < 0 || discountAmount >= subtotal) {
+      return res.status(400).json({ success: false, error: 'Subtotal must be positive and discount must be below subtotal.' });
+    }
+    const netSubtotal = subtotal - discountAmount;
+    const marginPercent = Math.round(((netSubtotal - totalCost) / netSubtotal) * 1000) / 10;
 
-    const netSubtotal = Math.max(0, calculatedSubtotal - discount);
-    const profit = netSubtotal - calculatedTotalCost;
-    const marginPercent = netSubtotal > 0 ? Math.round(((profit / netSubtotal) * 100) * 10) / 10 : 0;
-    const gstTotal = Math.round(netSubtotal * 0.18);
-    const grandTotal = netSubtotal + gstTotal;
-
-    const isException = marginPercent < 15;
-    const authoritativeStatus = isException ? 'PENDING_APPROVAL' : 'APPROVED';
-
+    // Interim 18% estimate only. Verified HSN/SAC tax computation and filing remain pending.
+    const gstAmount = Math.round(netSubtotal * 0.18);
+    const totalAmount = netSubtotal + gstAmount;
+    const isException = marginPercent < 12;
     const created = dbStore.addQuote({
       ...quote,
       id: `quote-${crypto.randomUUID()}`,
-      quoteNumber: quote.quoteNumber || `QT-${Date.now().toString().slice(-6)}`,
+      quoteNumber: `QT-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
+      customerName: quote.customerName.trim(),
       items,
-      subtotal: calculatedSubtotal,
-      discount,
-      gstTotal,
-      grandTotal,
+      services,
+      subtotal,
+      discountAmount,
       marginPercent,
-      status: authoritativeStatus,
-      createdAt: new Date().toISOString()
+      gstAmount,
+      totalAmount,
+      status: isException ? 'PENDING_OWNER_APPROVAL' : 'DRAFT',
+      createdDate: new Date().toISOString().slice(0, 10),
+      validUntil: quote.validUntil || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      paymentTerms: typeof quote.paymentTerms === 'string' ? quote.paymentTerms : '',
     });
-
     dbStore.addEvent({
       id: `evt-${crypto.randomUUID()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: isException ? 'MarginThresholdBreach' : 'QuotationGenerated',
+      timestamp: new Date().toISOString(),
+      eventType: isException ? 'MarginThresholdBreach' : 'QuotationDraftCreated',
       agent: (req as any).user?.username || 'Pricing Engine',
-      summary: `Quotation ${created.quoteNumber} created for ${created.customerName} (${created.marginPercent}% margin, Total: ₹${created.grandTotal.toLocaleString('en-IN')}).`,
-      autonomousActionTaken: isException ? 'Placed on hold for Owner authorization' : 'Pricing verified against policy rules.',
+      summary: `Quote ${created.quoteNumber} saved as ${created.status}; customer dispatch not verified.`,
+      autonomousActionTaken: 'Calculated a provisional quotation draft in the local ledger.',
       humanApprovalRequired: isException,
       approvalStatus: isException ? 'PENDING_TELEGRAM' : 'AUTO_APPROVED',
-      confidenceScore: 1.0
+      confidenceScore: 1,
     });
-
     res.status(201).json({ success: true, data: created });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -593,7 +630,7 @@ app.patch('/api/quotes/:id/approve', requireAuth, requireRole('BUSINESS_OWNER'),
   }
 });
 
-app.patch('/api/quotes/:id/reject', requireAuth, (req, res) => {
+app.patch('/api/quotes/:id/reject', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const { reason } = req.body;
     const actor = (req as any).user?.username || 'Business Owner';
@@ -625,7 +662,7 @@ app.get('/api/invoices', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().invoices });
 });
 
-app.post('/api/invoices', requireAuth, (req, res) => {
+app.post('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const inv = req.body;
     if (!inv || !inv.customer || !inv.amount) {
@@ -657,9 +694,12 @@ app.post('/api/invoices', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/invoices/:invoiceNo/settle', requireAuth, (req, res) => {
+app.patch('/api/invoices/:invoiceNo/settle', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const { paymentReference, method } = req.body;
+    const { paymentReference, method } = req.body || {};
+    if (typeof paymentReference !== 'string' || paymentReference.trim().length < 4) {
+      return res.status(400).json({ success: false, error: 'Verified bank or UPI payment reference is required before marking settlement.' });
+    }
     const settled = dbStore.settleInvoice(req.params.invoiceNo, { paymentReference, method });
     if (!settled) {
       return res.status(404).json({ success: false, error: 'Invoice not found' });
@@ -737,7 +777,7 @@ app.get('/api/endpoints', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().endpoints });
 });
 
-app.post('/api/endpoints', requireAuth, (req, res) => {
+app.post('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const ep = req.body;
     if (!ep || !ep.deviceName) {
@@ -745,14 +785,22 @@ app.post('/api/endpoints', requireAuth, (req, res) => {
     }
     const created = dbStore.addEndpoint({
       ...ep,
-      id: ep.id || `ep-${crypto.randomUUID()}`,
-      lastSeen: new Date().toISOString()
+      id: `ep-${crypto.randomUUID()}`,
+      lastSeen: 'Awaiting agent check-in',
+      status: 'UNENROLLED',
+      telemetryAvailable: false,
+      cpuLoad: -1,
+      ramUsagePercent: -1,
+      diskFreePercent: -1,
+      batteryHealthPercent: -1,
+      smartStatus: 'UNAVAILABLE',
+      antivirusStatus: 'UNAVAILABLE'
     });
 
     dbStore.addEvent({
       id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
-      eventType: 'RMMAgentEnrolled',
+      eventType: 'EndpointRegisteredWithoutAgent',
       agent: (req as any).user?.username || 'RMM',
       summary: `Registered device ${created.deviceName} in asset directory.`,
       autonomousActionTaken: 'Saved hardware record in directory.',
@@ -772,7 +820,7 @@ app.get('/api/jobs', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().jobs });
 });
 
-app.post('/api/jobs', requireAuth, (req, res) => {
+app.post('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const job = req.body;
     if (!job || !job.title) {
@@ -819,21 +867,14 @@ app.patch('/api/jobs/:id', requireAuth, (req, res) => {
 // P3.1 Strict Inventory Consumption
 app.post('/api/jobs/:id/consume-part', requireAuth, (req, res) => {
   try {
-    const { productId, partName, quantity, cost } = req.body;
-    const targetProduct = productId || partName;
-    if (!targetProduct) {
-      return res.status(400).json({ success: false, error: 'productId or partName is required' });
+    const { productId, quantity } = req.body || {};
+    if (typeof productId !== 'string' || !productId.trim()) {
+      return res.status(400).json({ success: false, error: 'Exact productId is required' });
     }
-    const qty = Number(quantity) || 1;
-    if (qty <= 0 || !Number.isInteger(qty)) {
-      return res.status(400).json({ success: false, error: 'Quantity must be a positive integer' });
+    if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+      return res.status(400).json({ success: false, error: 'Quantity must be a positive safe integer' });
     }
-    const updated = dbStore.consumeJobPart(
-      req.params.id,
-      targetProduct,
-      qty,
-      cost !== undefined ? Number(cost) : undefined
-    );
+    const updated = dbStore.consumeJobPart(req.params.id, productId, quantity);
     res.json({ success: true, data: updated });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
@@ -993,7 +1034,7 @@ app.patch('/api/projects/:id', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/projects/:id/milestones/:milestoneId', requireAuth, (req, res) => {
+app.patch('/api/projects/:id/milestones/:milestoneId', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const updated = dbStore.updateProjectMilestone(req.params.id, req.params.milestoneId, req.body);
     if (!updated) {
@@ -1156,7 +1197,7 @@ app.get('/api/disputes', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().marketplaceDisputes });
 });
 
-app.post('/api/disputes', requireAuth, (req, res) => {
+app.post('/api/disputes', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const dispute = req.body;
     if (!dispute || !dispute.reason || !dispute.projectTitle) {
@@ -1174,7 +1215,7 @@ app.post('/api/disputes', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/disputes/:id', requireAuth, (req, res) => {
+app.patch('/api/disputes/:id', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const updated = dbStore.updateMarketplaceDispute(req.params.id, req.body);
     if (!updated) {
@@ -1191,7 +1232,7 @@ app.get('/api/workflows', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().workflows });
 });
 
-app.post('/api/workflows', requireAuth, (req, res) => {
+app.post('/api/workflows', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const wf = req.body;
     if (!wf || !wf.name) {
@@ -1210,7 +1251,7 @@ app.post('/api/workflows', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/workflows/:id/toggle', requireAuth, (req, res) => {
+app.patch('/api/workflows/:id/toggle', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const toggled = dbStore.toggleWorkflow(req.params.id);
     if (!toggled) {
@@ -1223,6 +1264,14 @@ app.patch('/api/workflows/:id/toggle', requireAuth, (req, res) => {
 });
 
 // Connectors & Integrations
+// Until real action adapters exist, never claim a workflow executed.
+app.post('/api/workflows/:id/execute', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  return res.status(501).json({
+    success: false,
+    error: 'Workflow execution is unavailable: verified action adapters and audit evidence are not implemented. Use dry-run preview only.'
+  });
+});
+
 app.get('/api/connectors', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().connectors });
 });
@@ -1243,6 +1292,8 @@ app.get('/api/events', requireAuth, (req, res) => {
 });
 
 app.post('/api/events', requireAuth, (req, res) => {
+  return res.status(403).json({ success: false, error: 'Authoritative audit events are emitted only by server business operations.' });
+  /* Legacy client-generated audit event support intentionally disabled.
   try {
     const { eventType, summary, autonomousActionTaken, humanApprovalRequired, approvalStatus } = req.body;
     if (!summary || !eventType) {
@@ -1264,6 +1315,7 @@ app.post('/api/events', requireAuth, (req, res) => {
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
+  */
 });
 
 // Telegram Live Webhook (P1.4 Verified webhook secret & exact quote match)
@@ -1286,6 +1338,9 @@ app.post('/api/telegram/webhook', (req, res) => {
 
     const authorizedChat = process.env.TELEGRAM_AUTHORIZED_CHAT_ID;
     const authorizedUser = process.env.TELEGRAM_AUTHORIZED_USER_ID;
+    if (!authorizedUser || !authorizedChat) {
+      return res.status(503).json({ success: false, error: 'Explicit Telegram authorized user and chat IDs must be configured.' });
+    }
 
     if (update.callback_query) {
       const from = update.callback_query.from;

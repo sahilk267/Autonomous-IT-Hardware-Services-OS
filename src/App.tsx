@@ -210,10 +210,11 @@ export default function App() {
     try {
       const res = await fetch('/api/state/reset', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true })
       });
       const data = await res.json();
-      if (data.success && data.data) {
+      if (res.ok && data.success && data.data) {
         const s = data.data;
         setProducts(s.products || []);
         setLeads(s.leads || []);
@@ -257,18 +258,25 @@ export default function App() {
     }
   };
 
-  const handleSettleInvoice = async (invoiceNo: string) => {
+  const handleSettleInvoice = async (invoiceNo: string, paymentReference: string): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/invoices/${invoiceNo}/settle`, {
-        method: 'PATCH'
+      const res = await fetch(`/api/invoices/${encodeURIComponent(invoiceNo)}/settle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentReference })
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setInvoices(prev => prev.map(i => i.invoiceNo === invoiceNo ? data.data : i));
-        showToast(`Invoice ${invoiceNo} settled in ledger.`);
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Settlement failed. Check payment reference and permissions.');
+        return false;
       }
+      setInvoices(prev => prev.map(i => i.invoiceNo === invoiceNo ? data.data : i));
+      showToast(`Invoice ${invoiceNo} settled in the ledger with recorded evidence.`);
+      return true;
     } catch (err) {
       console.error('Sync settle invoice failed:', err);
+      showToast('Network error. Invoice was not confirmed settled.');
+      return false;
     }
   };
 
@@ -283,7 +291,7 @@ export default function App() {
   };
 
   // Computed count of pending approvals
-  const pendingApprovalsCount = quotes.filter(q => q.status === 'PENDING_OWNER_APPROVAL').length;
+  const pendingApprovalsCount = quotes.filter(q => q.status === 'PENDING_OWNER_APPROVAL' || q.status === 'PENDING_APPROVAL').length;
 
   // Handle Telegram Chat Messages
   const handleSendMessage = async (text: string) => {
@@ -394,7 +402,7 @@ export default function App() {
       marginPercent: parseFloat(marginPercent.toFixed(1)),
       gstAmount: Math.round(netSubtotal * 0.18),
       totalAmount: Math.round(netSubtotal * 1.18),
-      status: isException ? 'PENDING_OWNER_APPROVAL' : 'SENT_TO_CUSTOMER',
+      status: isException ? 'PENDING_OWNER_APPROVAL' : 'DRAFT',
       approvalReason: isException ? `Margin ${marginPercent.toFixed(1)}% is below 12.0% floor policy.` : undefined,
       createdDate: new Date().toISOString().split('T')[0],
       validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -431,7 +439,7 @@ export default function App() {
             }
           };
           setTelegramMessages(prev => [...prev, alertMsg]);
-          showToast(`Quote #${data.data.quoteNumber} escalated to Telegram Command Hub.`);
+          showToast(`Quote #${data.data.quoteNumber} added to the in-app approval queue. Telegram delivery not verified.`);
           setActiveTab('telegram');
         } else {
           showToast(`Quotation #${data.data.quoteNumber} generated at ${data.data.marginPercent}% margin.`);
@@ -501,24 +509,26 @@ export default function App() {
     }
   };
 
-  const handleConsumePart = async (jobId: string, partName: string, cost: number) => {
+  const handleConsumePart = async (jobId: string, productId: string, quantity: number) => {
     try {
       const res = await fetch(`/api/jobs/${jobId}/consume-part`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ partName, cost })
+        body: JSON.stringify({ productId, quantity })
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
-        // Refresh catalog inventory from server
-        fetch('/api/products')
-          .then(r => r.json())
-          .then(pData => { if (pData.success) setProducts(pData.data); });
-        showToast(`Part "${partName}" consumed on job ${data.data.jobCode}. Warehouse stock updated.`);
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Warehouse part consumption failed.');
+        return;
       }
+      setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
+      const catalogRes = await fetch('/api/products');
+      const catalogData = await catalogRes.json();
+      if (catalogRes.ok && catalogData.success) setProducts(catalogData.data);
+      showToast(`Part consumed on job ${data.data.jobCode}. Warehouse stock updated.`);
     } catch (err) {
       console.error('Consume part failed:', err);
+      showToast('Part consumption not confirmed. Please retry.');
     }
   };
 
@@ -541,14 +551,23 @@ export default function App() {
 
   // Handler: Release Project Milestone Escrow
   const handleReleaseMilestone = async (projectId: string, milestoneId: string) => {
-    setProjects(prev => prev.map(p => {
-      if (p.id !== projectId) return p;
-      return {
-        ...p,
-        milestones: p.milestones.map(m => m.id === milestoneId ? { ...m, status: 'COMPLETED' } : m)
-      };
-    }));
-    showToast('Milestone status marked COMPLETED in ledger (Payment escrow gateway not configured).');
+    try {
+      const res = await fetch(`/api/projects/${projectId}/milestones/${milestoneId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'COMPLETED' })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Milestone update failed.');
+        return;
+      }
+      setProjects(prev => prev.map(p => p.id === projectId ? data.data : p));
+      showToast('Milestone marked completed in the project ledger. No escrow payout occurred.');
+    } catch (err) {
+      console.error('Update milestone failed:', err);
+      showToast('Milestone completion could not be confirmed.');
+    }
   };
 
   // Handler: Accept Project Proposal
@@ -591,20 +610,9 @@ export default function App() {
 
   // Handler: Diagnostic Booking
   const handleRequestDiagnosticBooking = async (diagnosisSummary: string, estimatedCost: number) => {
-    const newJob: Partial<FieldJob> = {
-      title: `Diagnostic: ${diagnosisSummary.slice(0, 45)}`,
-      customerName: 'Enterprise Client',
-      address: 'Client Site',
-      technicianName: 'Field Support Team',
-      technicianPhone: '',
-      status: 'SCHEDULED',
-      scheduledTime: 'Scheduled Onsite',
-      partsConsumed: [
-        { partName: 'Replacement Diagnostic Part', qty: 1, cost: estimatedCost }
-      ]
-    };
-    handleCreateJob(newJob);
+    // AI hypotheses do not authorize technician dispatch or inventory consumption.
     setActiveTab('field');
+    showToast('Enter real customer, site, technician and appointment details in Field Service. No booking created.');
   };
 
   // Handler: Create Field Service Job
@@ -961,6 +969,7 @@ export default function App() {
             jobs={jobs}
             onUpdateJobStatus={handleUpdateJobStatus}
             onConsumePart={handleConsumePart}
+            products={products}
             onSignOffJob={handleSignOffJob}
             onCreateJob={handleCreateJob}
           />

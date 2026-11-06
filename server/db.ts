@@ -353,7 +353,10 @@ export class PersistentStore {
     if (new Date(session.expiresAt) <= new Date()) {
       return null;
     }
-    return session;
+    // Reject legacy passwordless users and apply the user's current role.
+    const user = this.state.users.find(u => u.id === session.userId);
+    if (!user || !user.passwordHash || !user.salt) return null;
+    return { ...session, role: user.role, username: user.username };
   }
 
   public deleteSession(token: string): boolean {
@@ -452,15 +455,20 @@ export class PersistentStore {
     });
   }
 
-  public settleInvoice(invoiceNo: string, settlementInfo?: { paymentReference?: string; method?: string }): InvoiceRecord | null {
+  public settleInvoice(invoiceNo: string, settlementInfo: { paymentReference: string; method?: string }): InvoiceRecord | null {
+    const reference = settlementInfo?.paymentReference?.trim();
+    if (!reference || reference.length < 4 || reference.length > 200) {
+      throw new Error('A verified bank/UPI payment reference (4-200 characters) is required.');
+    }
     return this.commit((draft) => {
       const inv = draft.invoices.find(i => i.invoiceNo === invoiceNo);
       if (!inv) return null;
+      if (inv.status === 'SETTLED' || inv.status === 'CANCELLED') {
+        throw new Error('This invoice cannot be settled again or is cancelled.');
+      }
       inv.status = 'SETTLED';
       inv.settledAt = new Date().toISOString();
-      if (settlementInfo?.paymentReference) {
-        inv.paymentReference = settlementInfo.paymentReference;
-      }
+      inv.paymentReference = reference;
       return inv;
     });
   }
@@ -564,8 +572,7 @@ export class PersistentStore {
   public consumeJobPart(
     jobId: string,
     productIdOrName: string,
-    quantity: number = 1,
-    explicitCost?: number
+    quantity: number = 1
   ): FieldJob | null {
     return this.commit((draft) => {
       // 1. Find actual job
@@ -575,15 +582,13 @@ export class PersistentStore {
       }
 
       // 2. Validate quantity (positive integer)
-      const qty = Math.floor(quantity);
-      if (!qty || qty <= 0) {
+      const qty = quantity;
+      if (!Number.isSafeInteger(qty) || qty <= 0) {
         throw new Error(`Invalid consumption quantity: must be positive integer`);
       }
 
-      // 3. Find exact product by ID first, then fallback to exact name/SKU
-      const product = draft.products.find(
-        p => p.id === productIdOrName || p.name === productIdOrName || p.sku === productIdOrName
-      );
+      // 3. Use only an exact, stable inventory product ID.
+      const product = draft.products.find(p => p.id === productIdOrName);
       if (!product) {
         throw new Error(`Product not found in warehouse inventory: ${productIdOrName}`);
       }
@@ -601,7 +606,7 @@ export class PersistentStore {
       product.stockAvailable -= qty;
 
       // 6. Append matching job part with authoritative purchaseCost
-      const authoritativeCost = explicitCost !== undefined ? explicitCost : (product.purchaseCost || 0);
+      const authoritativeCost = product.purchaseCost || 0;
       job.partsConsumed.push({
         partName: product.name,
         qty,

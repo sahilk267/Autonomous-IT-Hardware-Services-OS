@@ -237,15 +237,15 @@ export const InventoryProcurement: React.FC<InventoryProcurementProps> = ({
           <div className="text-xs text-slate-400 mt-1">{activeShortagesCount === 0 ? 'No Critical Shortages' : 'Awaiting PO dispatch'}</div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400 uppercase font-mono">Top Distributor Rating</span>
+          <span className="text-xs text-slate-400 uppercase font-mono">Registered Distributor</span>
           <div className="text-xl font-bold text-sky-400 mt-1">
             {suppliers && suppliers.length > 0
-              ? `${suppliers[0].name} (${suppliers[0].fulfillmentScore}%)`
+              ? `${suppliers[0].name} (${suppliers[0].deliveryScore}%)`
               : 'N/A (No Suppliers)'}
           </div>
           <div className="text-xs text-slate-400 mt-1">
             {suppliers && suppliers.length > 0
-              ? `Delivery SLA: ${suppliers[0].deliverySlaDays} Days • Category: ${suppliers[0].category}`
+              ? `Delivery score: ${suppliers[0].deliveryScore}% • Payment terms: ${suppliers[0].paymentTerms}`
               : 'Awaiting supplier registration in procurement desk'}
           </div>
         </div>

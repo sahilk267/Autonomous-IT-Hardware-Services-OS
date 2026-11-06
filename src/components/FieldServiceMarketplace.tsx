@@ -17,12 +17,13 @@ import {
   UserCheck,
   Check
 } from 'lucide-react';
-import { FieldJob } from '../types';
+import { FieldJob, ProductItem } from '../types';
 
 interface FieldServiceMarketplaceProps {
   jobs: FieldJob[];
+  products: ProductItem[];
   onUpdateJobStatus: (jobId: string, nextStatus: FieldJob['status']) => void;
-  onConsumePart: (jobId: string, partName: string, cost: number) => void;
+  onConsumePart: (jobId: string, productId: string, quantity: number) => void;
   onSignOffJob: (jobId: string) => void;
   onCreateJob?: (newJob: Partial<FieldJob>) => void;
   isCleanSlate?: boolean;
@@ -30,6 +31,7 @@ interface FieldServiceMarketplaceProps {
 
 export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = ({
   jobs,
+  products,
   onUpdateJobStatus,
   onConsumePart,
   onSignOffJob,
@@ -37,8 +39,8 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
   isCleanSlate = false
 }) => {
   const [selectedJobId, setSelectedJobId] = useState<string>(isCleanSlate ? '' : (jobs[0]?.id || ''));
-  const [newPartName, setNewPartName] = useState('');
-  const [newPartCost, setNewPartCost] = useState('4200');
+  const [selectedPartId, setSelectedPartId] = useState('');
+  const [partQuantity, setPartQuantity] = useState(1);
   const [signatureName, setSignatureName] = useState('');
 
   // Dispatch Job Modal State
@@ -104,10 +106,10 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
   const handleAddPart = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedJob || !newPartName.trim()) return;
-    const cost = parseInt(newPartCost, 10) || 0;
-    onConsumePart(selectedJob.id, newPartName, cost);
-    setNewPartName('');
+    if (!selectedJob || !selectedPartId || !Number.isSafeInteger(partQuantity) || partQuantity <= 0) return;
+    onConsumePart(selectedJob.id, selectedPartId, partQuantity);
+    setSelectedPartId('');
+    setPartQuantity(1);
   };
 
   const handleBookFromCatalog = (pkg: typeof servicesCatalog[0]) => {
@@ -285,25 +287,33 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
                 {/* Add Part Form */}
                 <form onSubmit={handleAddPart} className="flex gap-2 text-xs">
-                  <input
-                    type="text"
-                    value={newPartName}
-                    onChange={(e) => setNewPartName(e.target.value)}
-                    placeholder="e.g. Cisco SFP+ 10G Optical Transceiver"
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-                  />
+                  <select
+                    aria-label="Warehouse product"
+                    value={selectedPartId}
+                    onChange={e => setSelectedPartId(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                    required
+                  >
+                    <option value="">Select a real warehouse SKU</option>
+                    {products.filter(p => p.stockAvailable - p.stockReserved > 0).map(p => (
+                      <option key={p.id} value={p.id}>{p.sku} — {p.name} ({p.stockAvailable - p.stockReserved} available)</option>
+                    ))}
+                  </select>
                   <input
                     type="number"
-                    value={newPartCost}
-                    onChange={(e) => setNewPartCost(e.target.value)}
-                    placeholder="Cost ₹"
-                    className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-right focus:outline-none focus:border-cyan-500"
+                    min={1}
+                    step={1}
+                    aria-label="Part quantity"
+                    value={partQuantity}
+                    onChange={e => setPartQuantity(Number(e.target.value))}
+                    className="w-20 bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-white"
                   />
                   <button
                     type="submit"
-                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold border border-slate-700 cursor-pointer"
+                    disabled={!selectedPartId || partQuantity <= 0}
+                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold border border-slate-700 disabled:opacity-40"
                   >
-                    Add Part
+                    Consume
                   </button>
                 </form>
               </div>

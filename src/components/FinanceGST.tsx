@@ -34,7 +34,7 @@ interface FinanceGSTProps {
   isCleanSlate?: boolean;
   invoices?: InvoiceItem[];
   onAddInvoice?: (inv: InvoiceItem) => void;
-  onSettleInvoice?: (invoiceNo: string) => void;
+  onSettleInvoice?: (invoiceNo: string, paymentReference: string) => Promise<boolean>;
 }
 
 export const FinanceGST: React.FC<FinanceGSTProps> = ({ 
@@ -94,13 +94,17 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
     setTimeout(() => setSettleToast(null), 4000);
   };
 
-  const handleSettleReceivable = (invNo: string, customer: string, amount: number) => {
-    if (onSettleInvoice) {
-      onSettleInvoice(invNo);
-    } else {
-      setLocalInvoices(prev => prev.map(i => i.invoiceNo === invNo ? { ...i, status: 'SETTLED' } : i));
+  const handleSettleReceivable = async (invNo: string, customer: string, amount: number) => {
+    if (!onSettleInvoice) {
+      setSettleToast('Settlement requires a verified, saved backend record.');
+      return;
     }
-    setSettleToast(`Invoice #${invNo} (${customer} - ₹${amount.toLocaleString('en-IN')}) marked SETTLED in ledger.`);
+    const paymentReference = window.prompt('Enter the verified bank/UPI payment reference for this invoice:')?.trim();
+    if (!paymentReference) return;
+    const saved = await onSettleInvoice(invNo, paymentReference);
+    setSettleToast(saved
+      ? `Invoice #${invNo} (${customer} - ₹${amount.toLocaleString('en-IN')}) marked SETTLED with a recorded payment reference; gateway confirmation not implied.`
+      : `Could not settle invoice #${invNo}; please check the actual payment evidence.`);
     setTimeout(() => setSettleToast(null), 4000);
   };
 
@@ -168,7 +172,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400 uppercase font-mono">MTD GST Liability (Net Output)</span>
           <div className="text-xl font-bold text-purple-400 mt-1">{formattedGst}</div>
-          <div className="text-xs text-slate-400 mt-1">GSTR-1 & GSTR-3B Auto-Reconciled</div>
+          <div className="text-xs text-slate-400 mt-1">Tax reconciliation requires verified filing data</div>
         </div>
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
           <span className="text-xs text-slate-400 uppercase font-mono">Projected 30-Day Net Cash Flow</span>
@@ -422,7 +426,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
 
               <div className="p-3 bg-purple-950/20 border border-purple-800/40 rounded-xl text-purple-300 text-[11px] space-y-1">
                 <span className="font-bold block">Automated Compliance Pipeline:</span>
-                <span>• Digital signature using NIC e-invoice sandbox token</span>
+                <span>• Government IRN signing unavailable until a real provider adapter is connected</span>
                 <span className="block">• Auto-calculation of 18% HSN/SAC GST liability (GSTR-1 schedule)</span>
               </div>
 
