@@ -209,6 +209,7 @@ try {
 
   result = await post('/api/invoices', { customer: 'Test Client', amount: 472, status: 'ACTIVE' }, cookie);
   verify('Invoice draft saved', () => assert.equal(result.response.status, 201));
+  const invoiceNo = result.body.data.invoiceNo;
   result = await post('/api/invoices', {
     customer: 'CI Forgery Test', amount: 100,
     status: 'SETTLED', paymentReference: 'FAKE-BANK-REFERENCE',
@@ -225,7 +226,6 @@ try {
   });
   result = await post('/api/invoices', { customer: 'CI Negative', amount: -50 }, cookie);
   verify('Client cannot record negative receivable amount', () => assert.equal(result.response.status, 400));
-  const invoiceNo = result.body.data.invoiceNo;
   result = await patch(`/api/invoices/${invoiceNo}/settle`, {}, cookie);
   verify('Invoice settlement without evidence rejected', () => assert.equal(result.response.status, 400));
   result = await patch(`/api/invoices/${invoiceNo}/settle`, { paymentReference: 'BANK-CI-12345' }, cookie);
