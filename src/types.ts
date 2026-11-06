@@ -403,7 +403,7 @@ export interface RMAClaim {
   oemBrand: string;
   oemCaseNumber: string;
   faultSymptom: string;
-  warrantyStatus: 'ACTIVE_WARRANTY' | 'OUT_OF_WARRANTY' | 'EXTENDED_CARE';
+  warrantyStatus: 'ACTIVE_WARRANTY' | 'OUT_OF_WARRANTY' | 'EXTENDED_CARE' | 'UNVERIFIED';
   courierTracking: string;
   courierPartner: string;
   stage: 'FAULT_LOGGED' | 'OEM_APPROVED' | 'IN_TRANSIT' | 'SERVICE_CENTER' | 'REPLACED_RETURN' | 'TESTED_CLOSED';
@@ -451,6 +451,8 @@ export interface MarketplaceDispute {
   providerRebuttal: string;
   aiMediationVerdict: string;
   status: 'UNDER_REVIEW' | 'AWAITING_EVIDENCE' | 'RESOLVED_REFUND' | 'RESOLVED_RELEASED' | 'RESOLVED_REWORK' | 'UNDER_ARBITRATION' | string;
+  resolutionDecision?: 'RELEASE_RECOMMENDED' | 'REFUND_RECOMMENDED' | 'REWORK_RECOMMENDED';
+  decisionRecordedAt?: string;
   createdAt: string;
 }
 

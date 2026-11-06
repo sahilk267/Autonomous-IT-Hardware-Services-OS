@@ -31,3 +31,5 @@ jobs:
         run: npm test
       - name: Production-mode HTTP smoke test (throwaway DB)
         run: npm run smoke
+      - name: Multi-role API access smoke test (throwaway DB)
+        run: npm run smoke:roles

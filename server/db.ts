@@ -775,6 +775,15 @@ export class PersistentStore {
     });
   }
 
+  public markKnowledgeArticleSolved(id: string): KnowledgeArticle | null {
+    return this.commit((draft) => {
+      const item = draft.knowledgeArticles.find(a => a.id === id);
+      if (!item) return null;
+      item.solvedCount = Math.max(0, item.solvedCount || 0) + 1;
+      return item;
+    });
+  }
+
   public addCRMOpportunity(opp: CRMOpportunity): CRMOpportunity {
     return this.commit((draft) => {
       draft.crmOpportunities = [opp, ...draft.crmOpportunities];

@@ -163,6 +163,87 @@ try {
   result = await post('/api/telegram/webhook', { update_id: 1 });
   verify('Unconfigured webhook rejects unauthenticated updates', () => assert.equal(result.response.status, 503));
 
+
+  // Phase 2: typed RMA lifecycle, KB, CRM and dispute APIs must genuinely persist.
+  result = await post('/api/assets', {
+    assetTag: 'CI-ASSET-001', name: 'CI Test Router', brand: 'Cisco',
+    serialNumber: 'CI-SERIAL-001', model: 'Test', purchaseCost: 1000
+  }, cookie);
+  verify('Real asset registered for RMA', () => assert.equal(result.response.status, 201));
+
+  result = await post('/api/rma', {
+    assetTag: 'CI-ASSET-001', faultSymptom: 'WAN interface fails intermittently',
+    status: 'OEM_APPROVED', warrantyStatus: 'ACTIVE_WARRANTY',
+    oemCaseNumber: 'FAKE-NOT-ACCEPTED', courierTracking: 'FAKE-AWB'
+  }, cookie);
+  verify('RMA is created without fabricated OEM/warranty/courier evidence', () => {
+    assert.equal(result.response.status, 201);
+    assert.equal(result.body.data.stage, 'FAULT_LOGGED');
+    assert.equal(result.body.data.warrantyStatus, 'UNVERIFIED');
+    assert.equal(result.body.data.oemCaseNumber, '');
+    assert.equal(result.body.data.courierTracking, '');
+  });
+  const rmaId = result.body.data.id;
+  result = await patch(`/api/rma/${rmaId}`, { stage: 'OEM_APPROVED' }, cookie);
+  verify('RMA OEM approval without verified case is rejected', () => assert.equal(result.response.status, 400));
+  result = await patch(`/api/rma/${rmaId}`, { stage: 'OEM_APPROVED', oemCaseNumber: 'CI-CASE-001' }, cookie);
+  verify('RMA OEM approval with case persists', () => assert.equal(result.body.data.oemCaseNumber, 'CI-CASE-001'));
+  result = await patch(`/api/rma/${rmaId}`, { stage: 'IN_TRANSIT' }, cookie);
+  verify('RMA courier stage without AWB rejected', () => assert.equal(result.response.status, 400));
+
+  result = await post('/api/knowledge', {
+    title: 'Real verified network reset SOP',
+    summary: 'Validated steps for the CI test router',
+    selfServiceSteps: ['Check physical connectivity', 'Verify route table']
+  }, cookie);
+  verify('Knowledge article creates using actual UI fields', () => assert.equal(result.response.status, 201));
+  const kbId = result.body.data.id;
+  result = await post(`/api/knowledge/${kbId}/solve`, {}, cookie);
+  verify('KB self-resolution count persists', () => assert.equal(result.body.data.solvedCount, 1));
+  result = await patch(`/api/knowledge/${kbId}`, { solvedCount: 999 }, cookie);
+  verify('Client cannot forge KB solved count', () => assert.equal(result.body.data.solvedCount, 1));
+
+  result = await post('/api/crm', { title: 'Data Center Refresh', clientName: 'CI Customer', value: 78000, winProbability: 99 }, cookie);
+  verify('CRM create cannot fabricate win probability', () => {
+    assert.equal(result.response.status, 201);
+    assert.equal(result.body.data.stage, 'LEAD');
+    assert.equal(result.body.data.winProbability, 0);
+  });
+  const crmId = result.body.data.id;
+  result = await patch(`/api/crm/${crmId}`, { stage: 'WON' }, cookie);
+  verify('CRM cannot skip stages', () => assert.equal(result.response.status, 400));
+  result = await patch(`/api/crm/${crmId}`, { stage: 'QUALIFIED' }, cookie);
+  verify('CRM next stage persists', () => assert.equal(result.body.data.stage, 'QUALIFIED'));
+
+  result = await post('/api/projects', { title: 'CI Network Installation', clientName: 'CI Customer', projectCode: 'CI-PROJ-01' }, cookie);
+  verify('Real project created for dispute', () => assert.equal(result.response.status, 201));
+  const projectId = result.body.data.id;
+  result = await post('/api/disputes', {
+    projectId, reason: 'Documented delivery disagreement', customerClaim: 'Router delivery disputed',
+    disputedAmount: 1500, escrowHeld: 1500, status: 'RESOLVED_RELEASED'
+  }, cookie);
+  verify('Dispute starts pending with no fictional escrow held', () => {
+    assert.equal(result.response.status, 201);
+    assert.equal(result.body.data.escrowHeld, 0);
+    assert.equal(result.body.data.status, 'UNDER_ARBITRATION');
+  });
+  const disputeId = result.body.data.id;
+  result = await patch(`/api/disputes/${disputeId}`, { status: 'RESOLVED_REFUND' }, cookie);
+  verify('Direct escrow refund status forbidden', () => assert.equal(result.response.status, 400));
+  result = await patch(`/api/disputes/${disputeId}`, { resolutionDecision: 'REFUND_RECOMMENDED' }, cookie);
+  verify('Dispute internal recommendation is persisted without paying money', () => {
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.data.resolutionDecision, 'REFUND_RECOMMENDED');
+    assert.equal(result.body.data.status, 'UNDER_ARBITRATION');
+  });
+  result = await request('/api/state', {}, cookie);
+  verify('All four new business collections appear in persisted server state', () => {
+    assert.equal(result.body.data.rmaClaims.length, 1);
+    assert.equal(result.body.data.knowledgeArticles.length, 1);
+    assert.equal(result.body.data.crmOpportunities.length, 1);
+    assert.equal(result.body.data.marketplaceDisputes.length, 1);
+  });
+
   verify('Isolated DB was used', () => assert.ok(fs.existsSync(dbFile)));
   console.log('API SMOKE SUMMARY: ' + passed + '/' + passed + ' PASSED');
 } finally {

@@ -35,6 +35,12 @@ interface ProjectMarketplaceProps {
   projects: Project[];
   proposals: Proposal[];
   providers: ProviderProfile[];
+  crmOpportunities: CRMOpportunity[];
+  marketplaceDisputes: MarketplaceDispute[];
+  onCreateCRM: (opp: Partial<CRMOpportunity>) => Promise<CRMOpportunity | null>;
+  onAdvanceCRM: (id: string, stage: CRMOpportunity['stage']) => Promise<CRMOpportunity | null>;
+  onCreateDispute: (claim: { projectId: string; reason: string; customerClaim: string; disputedAmount: number }) => Promise<MarketplaceDispute | null>;
+  onRecordDisputeDecision: (id: string, decision: NonNullable<MarketplaceDispute['resolutionDecision']>) => Promise<MarketplaceDispute | null>;
   onReleaseMilestone: (projectId: string, milestoneId: string) => void;
   onAcceptProposal: (projectId: string, proposalId: string) => void;
   onCreateProject: (newProject: Partial<Project>) => void;
@@ -47,6 +53,12 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   projects,
   proposals,
   providers,
+  crmOpportunities,
+  marketplaceDisputes,
+  onCreateCRM,
+  onAdvanceCRM,
+  onCreateDispute,
+  onRecordDisputeDecision,
   onReleaseMilestone,
   onAcceptProposal,
   onCreateProject,
@@ -58,7 +70,6 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
 
   // CRM Pipeline State - starts empty
-  const [crmOpportunities, setCrmOpportunities] = useState<CRMOpportunity[]>([]);
   const [showNewOppModal, setShowNewOppModal] = useState(false);
   const [newOppClient, setNewOppClient] = useState('');
   const [newOppTitle, setNewOppTitle] = useState('');
@@ -66,8 +77,12 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   const [newOppProvider, setNewOppProvider] = useState('');
 
   // Dispute State - starts empty
-  const [marketplaceDisputes, setMarketplaceDisputes] = useState<MarketplaceDispute[]>([]);
   const [selectedDisputeId, setSelectedDisputeId] = useState<string>('');
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [disputeProjectId, setDisputeProjectId] = useState('');
+  const [disputeReason, setDisputeReason] = useState('');
+  const [disputeClaim, setDisputeClaim] = useState('');
+  const [disputeAmount, setDisputeAmount] = useState('');
   const [arbitrationResolutionNote, setArbitrationResolutionNote] = useState('');
   const [mpNotice, setMpNotice] = useState<string | null>(null);
 
@@ -157,7 +172,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newClient, setNewClient] = useState('');
-  const [newBudget, setNewBudget] = useState('500000');
+  const [newBudget, setNewBudget] = useState('');
   const [newCategory, setNewCategory] = useState<Project['category']>('Cloud Migration');
   const [newScope, setNewScope] = useState('');
 
@@ -1140,7 +1155,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
                         {opp.stage !== 'WON' && (
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               const nextStageMap: Record<CRMOpportunity['stage'], CRMOpportunity['stage']> = {
                                 LEAD: 'QUALIFIED',
                                 QUALIFIED: 'TECHNICAL_SCOPING',
@@ -1149,7 +1164,13 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                                 NEGOTIATION: 'WON',
                                 WON: 'WON'
                               };
-                              setCrmOpportunities(prev => prev.map(o => o.id === opp.id ? { ...o, stage: nextStageMap[o.stage] } : o));
+                              const nextStage = nextStageMap[opp.stage];
+                              if (!nextStage) {
+                                setMpNotice('This legacy CRM stage cannot be advanced automatically.');
+                                return;
+                              }
+                              const saved = await onAdvanceCRM(opp.id, nextStage);
+                              if (saved) setMpNotice(`CRM ${saved.title} moved to ${saved.stage} and persisted.`);
                             }}
                             className="w-full py-1 rounded bg-slate-900 hover:bg-slate-800 text-[10px] text-indigo-300 font-semibold border border-slate-800 transition cursor-pointer"
                           >
@@ -1221,29 +1242,23 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
-                      if (!newOppTitle || !newOppClient) {
-                        setMpNotice("Please fill in the deal title and client name.");
+                    onClick={async () => {
+                      if (!newOppTitle.trim() || !newOppClient.trim() || !Number.isFinite(newOppValue) || newOppValue < 0) {
+                        setMpNotice('Enter the real client, deal title and valid amount.');
                         return;
                       }
-                      const newOpp: CRMOpportunity = {
-                        id: `crm-${Date.now()}`,
-                        clientName: newOppClient,
-                        contactPerson: 'Lead Coordinator',
-                        title: newOppTitle,
-                        stage: 'LEAD',
-                        value: newOppValue,
-                        winProbability: 30,
-                        expectedCloseDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                        assignedEngineer: 'Pre-Sales Solutions Specialist',
-                        category: 'Enterprise Infrastructure'
-                      };
-                      setCrmOpportunities([newOpp, ...crmOpportunities]);
+                      const saved = await onCreateCRM({
+                        clientName: newOppClient.trim(), title: newOppTitle.trim(), value: newOppValue
+                      });
+                      if (!saved) {
+                        setMpNotice('CRM opportunity not saved. Please review server validation.');
+                        return;
+                      }
                       setShowNewOppModal(false);
                       setNewOppTitle('');
                       setNewOppClient('');
                       setNewOppValue(0);
-                      setMpNotice(`CRM Opportunity "${newOpp.title}" created.`);
+                      setMpNotice(`CRM Opportunity "${saved.title}" saved to the server.`);
                     }}
                     className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold cursor-pointer shadow"
                   >
@@ -1266,7 +1281,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                 Marketplace Escrow Dispute & Arbitration Center
               </h3>
               <p className="text-xs text-slate-400">
-                Impartial tripartite dispute adjudication. Holds milestone escrow in cryptographic custody while reviewing telemetry, benchmark reports, and client test logs.
+                Record project disputes and internal recommendations. This app does not hold escrow or process refunds.
               </p>
             </div>
 
@@ -1277,6 +1292,62 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
             </div>
           </div>
 
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={projects.length === 0}
+              onClick={() => { setDisputeProjectId(projects[0]?.id || ''); setShowDisputeModal(true); }}
+              className="px-3 py-2 rounded-lg bg-amber-700 text-white text-xs disabled:opacity-40"
+            >Record Project Dispute</button>
+            {projects.length === 0 && <span className="text-xs text-slate-500">Create a real project first</span>}
+          </div>
+          {showDisputeModal && (
+            <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4">
+              <form
+                onSubmit={async e => {
+                  e.preventDefault();
+                  const amount = Number(disputeAmount);
+                  if (!disputeProjectId || !disputeReason.trim() || !disputeClaim.trim() ||
+                      !Number.isFinite(amount) || amount <= 0) {
+                    setMpNotice('Project, actual reason, customer statement and positive disputed amount required.');
+                    return;
+                  }
+                  const saved = await onCreateDispute({
+                    projectId: disputeProjectId, reason: disputeReason.trim(),
+                    customerClaim: disputeClaim.trim(), disputedAmount: amount
+                  });
+                  if (!saved) { setMpNotice('Dispute not recorded.'); return; }
+                  setSelectedDisputeId(saved.id);
+                  setShowDisputeModal(false);
+                  setDisputeReason(''); setDisputeClaim(''); setDisputeAmount('');
+                  setMpNotice(`Dispute ${saved.disputeNumber} recorded. No escrow funds held or moved.`);
+                }}
+                className="w-full max-w-lg bg-slate-900 border border-amber-900 rounded-xl p-6 space-y-4"
+              >
+                <h3 className="text-white font-bold">New Internal Dispute Record</h3>
+                <label className="block text-xs text-slate-300">Existing project</label>
+                <select required value={disputeProjectId} onChange={e => setDisputeProjectId(e.target.value)}
+                  className="w-full bg-slate-950 text-white p-2 border border-slate-700 rounded">
+                  {projects.map(project => <option key={project.id} value={project.id}>{project.projectCode} — {project.title}</option>)}
+                </select>
+                <label className="block text-xs text-slate-300">Reason</label>
+                <input required value={disputeReason} onChange={e => setDisputeReason(e.target.value)}
+                  className="w-full bg-slate-950 text-white p-2 border border-slate-700 rounded" />
+                <label className="block text-xs text-slate-300">Customer statement</label>
+                <textarea required value={disputeClaim} onChange={e => setDisputeClaim(e.target.value)}
+                  className="w-full bg-slate-950 text-white p-2 border border-slate-700 rounded" rows={3} />
+                <label className="block text-xs text-slate-300">Amount in dispute (₹), not escrow held</label>
+                <input type="number" min={0.01} step="0.01" required value={disputeAmount}
+                  onChange={e => setDisputeAmount(e.target.value)}
+                  className="w-full bg-slate-950 text-white p-2 border border-slate-700 rounded" />
+                <div className="flex gap-3 justify-end">
+                  <button type="button" onClick={() => setShowDisputeModal(false)} className="px-3 py-2 text-slate-300">Cancel</button>
+                  <button type="submit" className="px-3 py-2 bg-amber-700 text-white rounded">Save Dispute</button>
+                </div>
+              </form>
+            </div>
+          )}
+
           {/* Master-Detail Disputes */}
           {marketplaceDisputes.length === 0 ? (
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 space-y-4">
@@ -1286,7 +1357,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
               <div>
                 <h3 className="text-base font-bold text-white">No Active Escrow Disputes</h3>
                 <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-                  All enterprise project milestones and escrow releases are executing smoothly. No cases currently pending arbitration or mediation.
+                  No dispute records have been filed in this workspace. No escrow status is inferred.
                 </p>
               </div>
             </div>
@@ -1321,7 +1392,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
                     <h4 className="font-semibold text-xs text-white my-1">{dispute.projectTitle}</h4>
                     <p className="text-[11px] text-slate-400 font-mono">
-                      Escrow Held: <strong className="text-emerald-400">₹{dispute.escrowHeld.toLocaleString()}</strong>
+                      Disputed amount: <strong className="text-amber-400">₹{dispute.disputedAmount.toLocaleString()}</strong>
                     </p>
                     <div className="text-[10px] text-slate-500 mt-2 flex justify-between">
                       <span>Customer: {dispute.customerName}</span>
@@ -1357,9 +1428,9 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                       </div>
 
                       <div className="text-right">
-                        <span className="text-[10px] text-slate-500 uppercase font-mono block">Disputed Escrow Fund</span>
+                        <span className="text-[10px] text-slate-500 uppercase font-mono block">Disputed Amount (not held in escrow)</span>
                         <div className="text-2xl font-bold font-mono text-emerald-400">
-                          ₹{activeDispute.escrowHeld.toLocaleString()}
+                          ₹{activeDispute.disputedAmount.toLocaleString()}
                         </div>
                       </div>
                     </div>
@@ -1397,7 +1468,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                     <div className="p-4 rounded-xl bg-slate-950 border border-indigo-900/60 space-y-2">
                       <span className="text-xs font-bold text-indigo-300 uppercase font-mono flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                        AI Telemetry Forensic Mediation Verdict
+                        Mediation Notes (only if recorded)
                       </span>
                       <p className="text-xs text-slate-300 leading-relaxed">
                         {activeDispute.aiMediationVerdict}
@@ -1409,7 +1480,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                       <div className="p-4 rounded-xl bg-emerald-950/80 border border-emerald-700 text-emerald-200 text-xs space-y-1">
                         <div className="font-bold flex items-center gap-1.5 text-emerald-300">
                           <CheckCircle2 className="w-4 h-4" />
-                          <span>Arbitration Decision Rendered & Escrow Executed</span>
+                          <span>Historical dispute status (verify external payment records)</span>
                         </div>
                         <p className="text-emerald-400/90 text-[11px]">
                           <strong>Ruling Status:</strong> {activeDispute.status}
@@ -1418,47 +1489,38 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                     ) : (
                       <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
                         <span className="text-xs font-bold text-white uppercase font-mono block">
-                          Executive Arbitration Decision & Escrow Disposition:
+                          Record Internal Recommendation (no money movement):
                         </span>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                           <button
-                            onClick={() => {
-                              setMarketplaceDisputes(prev => prev.map(d => d.id === activeDispute.id ? {
-                                ...d,
-                                status: 'RESOLVED_RELEASED'
-                              } : d));
-                              setMpNotice(`Arbitration Ruling executed: Full escrow released to ${activeDispute.providerName}.`);
+                            onClick={async () => {
+                              const saved = await onRecordDisputeDecision(activeDispute.id, 'RELEASE_RECOMMENDED');
+                              if (saved) setMpNotice('Provider release recommendation recorded; no funds transferred.');
                             }}
                             className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition cursor-pointer text-center"
                           >
-                            Release Escrow to Provider
+                            Recommend Release (no payment)
                           </button>
 
                           <button
-                            onClick={() => {
-                              setMarketplaceDisputes(prev => prev.map(d => d.id === activeDispute.id ? {
-                                ...d,
-                                status: 'RESOLVED_REFUND'
-                              } : d));
-                              setMpNotice(`Arbitration Ruling executed: Full refund returned to ${activeDispute.customerName}.`);
+                            onClick={async () => {
+                              const saved = await onRecordDisputeDecision(activeDispute.id, 'REFUND_RECOMMENDED');
+                              if (saved) setMpNotice('Refund recommendation recorded; no money returned.');
                             }}
                             className="p-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition cursor-pointer text-center"
                           >
-                            Full Refund to Client
+                            Recommend Refund (no payment)
                           </button>
 
                           <button
-                            onClick={() => {
-                              setMarketplaceDisputes(prev => prev.map(d => d.id === activeDispute.id ? {
-                                ...d,
-                                status: 'RESOLVED_REWORK'
-                              } : d));
-                              setMpNotice(`Mandatory rework order issued to provider with escrow extension.`);
+                            onClick={async () => {
+                              const saved = await onRecordDisputeDecision(activeDispute.id, 'REWORK_RECOMMENDED');
+                              if (saved) setMpNotice('Rework recommendation recorded; provider not contacted.');
                             }}
                             className="p-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition cursor-pointer text-center"
                           >
-                            Mandate Provider Rework
+                            Recommend Provider Rework
                           </button>
                         </div>
                       </div>

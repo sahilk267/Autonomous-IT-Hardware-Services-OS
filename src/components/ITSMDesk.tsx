@@ -27,6 +27,9 @@ interface ITSMDeskProps {
   tickets: ITSMTicket[];
   endpoints: EndpointHealth[];
   cmdbNodes: CMDBNode[];
+  knowledgeArticles: KnowledgeArticle[];
+  onCreateKnowledgeArticle: (article: Partial<KnowledgeArticle>) => Promise<KnowledgeArticle | null>;
+  onMarkKnowledgeSolved: (id: string) => Promise<KnowledgeArticle | null>;
   onResolveTicket: (ticketId: string) => void;
   onRemoteFix: (endpointId: string, actionName: string) => void;
   onCreateTicket?: (newTicket: Partial<ITSMTicket> & { description?: string; department?: string }) => void;
@@ -38,6 +41,9 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
   tickets,
   endpoints,
   cmdbNodes,
+  knowledgeArticles: kbArticles,
+  onCreateKnowledgeArticle,
+  onMarkKnowledgeSolved,
   onResolveTicket,
   onRemoteFix,
   onCreateTicket,
@@ -94,11 +100,10 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
   const selectedTicket = tickets.find(t => t.id === selectedTicketId) || tickets[0] || null;
 
   // Knowledge Base & RAG state
-  const [kbArticles, setKbArticles] = useState<KnowledgeArticle[]>([]);
   const [kbSearchTerm, setKbSearchTerm] = useState('');
   const [selectedKbCat, setSelectedKbCat] = useState<string>('ALL');
   const [selectedArticleId, setSelectedArticleId] = useState<string>('');
-  const [resolvedKbCount, setResolvedKbCount] = useState<number>(0);
+  const resolvedKbCount = kbArticles.reduce((count, article) => count + (article.solvedCount || 0), 0);
   const [copiedStepIndex, setCopiedStepIndex] = useState<number | null>(null);
   const [solvedBanner, setSolvedBanner] = useState<string | null>(null);
 
@@ -721,8 +726,8 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow">
               <span className="text-xs text-slate-400 font-medium">Self-Service Deflection Rate</span>
               <div className="text-2xl font-bold text-emerald-400 mt-1 flex items-baseline gap-2">
-                <span>{kbArticles.length === 0 ? '0.0%' : '42.8%'}</span>
-                <span className="text-xs text-emerald-500 font-normal">{kbArticles.length === 0 ? 'Baseline' : '↑ 6.4% MoM'}</span>
+                <span>N/A</span>
+                <span className="text-xs text-emerald-500 font-normal">No measured deflection data</span>
               </div>
               <p className="text-[11px] text-slate-500 mt-1">Issues solved before raising ticket</p>
             </div>
@@ -739,10 +744,10 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow">
               <span className="text-xs text-slate-400 font-medium">Mean Time to Self-Resolve</span>
               <div className="text-2xl font-bold text-amber-300 mt-1 flex items-baseline gap-2">
-                <span>2.4 min</span>
+                <span>N/A</span>
                 <span className="text-xs text-slate-400 font-normal">avg</span>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">vs 3.8 hrs human response SLA</p>
+              <p className="text-[11px] text-slate-500 mt-1">No measured resolution-duration telemetry</p>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow">
@@ -819,27 +824,23 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 </p>
               </div>
               <button
-                onClick={() => {
-                  const newArticle: KnowledgeArticle = {
-                    id: `sop-${Date.now()}`,
-                    title: 'New Enterprise IT SOP Runbook',
-                    category: 'Network & VPN',
-                    readTime: '3 min read',
-                    views: 1,
-                    solvedCount: 0,
-                    tags: ['SOP', 'Operations', 'Internal'],
-                    summary: 'Standard operating procedure for incident troubleshooting and resolution.',
-                    symptoms: ['Document observed symptoms, event log errors, or failure indicators.'],
-                    selfServiceSteps: [
-                      'Verify physical layer and network IP configuration.',
-                      'Check endpoint event logs for correlating error codes.',
-                      'Restart target service daemon and verify port binding.'
-                    ]
-                  };
-                  setKbArticles([newArticle]);
-                  setSelectedArticleId(newArticle.id);
-                  setResolvedKbCount(0);
-                }}
+                onClick={async () => {
+                    const title = window.prompt('Knowledge article title (actual validated SOP):')?.trim();
+                    if (!title) return;
+                    const summary = window.prompt('Write a factual summary or issue description:')?.trim();
+                    if (!summary) return;
+                    const stepsText = window.prompt('Enter verified troubleshooting steps (one per line):')?.trim();
+                    const steps = stepsText?.split(/\r?\n/).map(line => line.trim()).filter(Boolean) || [];
+                    if (!steps.length) return;
+                    const saved = await onCreateKnowledgeArticle({
+                      title, summary, category: 'General', selfServiceSteps: steps,
+                      symptoms: [], tags: []
+                    });
+                    if (saved) {
+                      setSelectedArticleId(saved.id);
+                      setSolvedBanner('Knowledge article saved to the server.');
+                    }
+                  }}
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer shadow-lg inline-flex items-center gap-2 transition"
               >
                 <Plus className="w-4 h-4" />
@@ -990,10 +991,9 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
 
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => {
-                            setResolvedKbCount(prev => prev + 1);
-                            setSolvedBanner(`"${activeArt.title}" marked as resolved`);
-                            setKbArticles(prev => prev.map(a => a.id === activeArt.id ? { ...a, solvedCount: a.solvedCount + 1 } : a));
+                          onClick={async () => {
+                            const saved = await onMarkKnowledgeSolved(activeArt.id);
+                            if (saved) setSolvedBanner(`"${saved.title}" self-resolution acknowledged and saved.`);
                           }}
                           className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow transition cursor-pointer flex items-center gap-1.5"
                         >

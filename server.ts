@@ -101,6 +101,16 @@ function requireRole(...roles: UserRole[]) {
   };
 }
 
+const ROLE_READ_COLLECTIONS: Record<UserRole, readonly string[]> = {
+  BUSINESS_OWNER: ['products','leads','quotes','telegramMessages','suppliers','rfqs','tickets','endpoints','jobs','assets','licenses','amcs','projects','proposals','providers','events','invoices','workflows','connectors','rmaClaims','knowledgeArticles','crmOpportunities','marketplaceDisputes','inventoryTransactions'],
+  SALES_MANAGER: ['products','leads','quotes','projects','proposals','crmOpportunities','knowledgeArticles'],
+  PROCUREMENT_LEAD: ['products','suppliers','rfqs','quotes','projects','assets','inventoryTransactions'],
+  ENTERPRISE_IT_HEAD: ['tickets','endpoints','jobs','assets','licenses','amcs','projects','proposals','rmaClaims','knowledgeArticles'],
+  FIELD_ENGINEER: ['products','tickets','endpoints','jobs','assets','rmaClaims','knowledgeArticles']
+};
+// Collection-level isolation within the current single-tenant instance only.
+// This does not implement per-customer / multi-tenant row-level authorization.
+
 // Helper for Gemini initialization using modern @google/genai SDK
 function getGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -326,15 +336,17 @@ app.post('/api/tenant', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) =
 app.get('/api/state', requireAuth, (req, res) => {
   try {
     const rawState = dbStore.getState();
-    const safeUsers = rawState.users.map(({ passwordHash, salt, ...u }) => u);
-    res.json({
-      success: true,
-      data: {
-        ...rawState,
-        users: safeUsers,
-        sessions: undefined
-      }
-    });
+    const actor = (req as any).user as { userId: string; role: UserRole };
+    const allowed = new Set(ROLE_READ_COLLECTIONS[actor.role] || []);
+    const safeUsers = rawState.users
+      .filter(u => actor.role === 'BUSINESS_OWNER' || u.id === actor.userId)
+      .map(({ passwordHash, salt, ...u }) => u);
+    const safeState: Record<string, unknown> = { ...rawState, users: safeUsers };
+    delete safeState.sessions;
+    for (const [key, value] of Object.entries(safeState)) {
+      if (Array.isArray(value) && key !== 'users' && !allowed.has(key)) safeState[key] = [];
+    }
+    res.json({ success: true, data: safeState });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -365,7 +377,7 @@ app.post('/api/state/reset', requireAuth, requireRole('BUSINESS_OWNER'), (req, r
 });
 
 // Products CRUD (Protected)
-app.get('/api/products', requireAuth, (req, res) => {
+app.get('/api/products', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'PROCUREMENT_LEAD', 'FIELD_ENGINEER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().products });
 });
 
@@ -423,7 +435,7 @@ app.delete('/api/products/:id', requireAuth, requireRole('BUSINESS_OWNER', 'PROC
 });
 
 // Suppliers CRUD (Protected)
-app.get('/api/suppliers', requireAuth, (req, res) => {
+app.get('/api/suppliers', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'PROCUREMENT_LEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().suppliers });
 });
 
@@ -444,7 +456,7 @@ app.post('/api/suppliers', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREME
 });
 
 // RFQs CRUD (Protected)
-app.get('/api/rfqs', requireAuth, (req, res) => {
+app.get('/api/rfqs', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().rfqs });
 });
 
@@ -522,7 +534,7 @@ app.post('/api/rfqs/:id/dispatch-po', requireAuth, requireRole('BUSINESS_OWNER',
 });
 
 // Quotations CRUD (Protected, P3.2 Server-side Recalculation)
-app.get('/api/quotes', requireAuth, (req, res) => {
+app.get('/api/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'PROCUREMENT_LEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().quotes });
 });
 
@@ -658,7 +670,7 @@ app.patch('/api/quotes/:id/reject', requireAuth, requireRole('BUSINESS_OWNER'), 
 });
 
 // Invoices CRUD (Protected)
-app.get('/api/invoices', requireAuth, (req, res) => {
+app.get('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().invoices });
 });
 
@@ -724,11 +736,11 @@ app.patch('/api/invoices/:invoiceNo/settle', requireAuth, requireRole('BUSINESS_
 });
 
 // Tickets CRUD (Protected)
-app.get('/api/tickets', requireAuth, (req, res) => {
+app.get('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().tickets });
 });
 
-app.post('/api/tickets', requireAuth, (req, res) => {
+app.post('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
     const ticket = req.body;
     if (!ticket || !ticket.title) {
@@ -760,7 +772,7 @@ app.post('/api/tickets', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/tickets/:id', requireAuth, (req, res) => {
+app.patch('/api/tickets/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
     const updated = dbStore.updateTicket(req.params.id, req.body);
     if (!updated) {
@@ -773,7 +785,7 @@ app.patch('/api/tickets/:id', requireAuth, (req, res) => {
 });
 
 // Endpoints CRUD (Protected)
-app.get('/api/endpoints', requireAuth, (req, res) => {
+app.get('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().endpoints });
 });
 
@@ -816,7 +828,7 @@ app.post('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRIS
 });
 
 // Field Jobs & P3.1 Inventory Consumption (Protected)
-app.get('/api/jobs', requireAuth, (req, res) => {
+app.get('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().jobs });
 });
 
@@ -852,7 +864,7 @@ app.post('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_
   }
 });
 
-app.patch('/api/jobs/:id', requireAuth, (req, res) => {
+app.patch('/api/jobs/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
     const updated = dbStore.updateJob(req.params.id, req.body);
     if (!updated) {
@@ -865,7 +877,7 @@ app.patch('/api/jobs/:id', requireAuth, (req, res) => {
 });
 
 // P3.1 Strict Inventory Consumption
-app.post('/api/jobs/:id/consume-part', requireAuth, (req, res) => {
+app.post('/api/jobs/:id/consume-part', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
     const { productId, quantity } = req.body || {};
     if (typeof productId !== 'string' || !productId.trim()) {
@@ -882,11 +894,11 @@ app.post('/api/jobs/:id/consume-part', requireAuth, (req, res) => {
 });
 
 // Assets CRUD (Protected)
-app.get('/api/assets', requireAuth, (req, res) => {
+app.get('/api/assets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER', 'PROCUREMENT_LEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().assets });
 });
 
-app.post('/api/assets', requireAuth, (req, res) => {
+app.post('/api/assets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const asset = req.body;
     if (!asset || !asset.name) {
@@ -916,7 +928,7 @@ app.post('/api/assets', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/assets/:id', requireAuth, (req, res) => {
+app.patch('/api/assets/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const updated = dbStore.updateAsset(req.params.id, req.body);
     if (!updated) {
@@ -929,11 +941,11 @@ app.patch('/api/assets/:id', requireAuth, (req, res) => {
 });
 
 // Software Licenses CRUD (Protected)
-app.get('/api/licenses', requireAuth, (req, res) => {
+app.get('/api/licenses', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().licenses });
 });
 
-app.post('/api/licenses', requireAuth, (req, res) => {
+app.post('/api/licenses', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const lic = req.body;
     if (!lic || !lic.softwareName) {
@@ -949,7 +961,7 @@ app.post('/api/licenses', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/licenses/:id/reclaim', requireAuth, (req, res) => {
+app.patch('/api/licenses/:id/reclaim', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const reclaimed = dbStore.reclaimLicense(req.params.id);
     if (!reclaimed) {
@@ -975,11 +987,11 @@ app.patch('/api/licenses/:id/reclaim', requireAuth, (req, res) => {
 });
 
 // AMC Contracts CRUD (Protected)
-app.get('/api/amcs', requireAuth, (req, res) => {
+app.get('/api/amcs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().amcs });
 });
 
-app.post('/api/amcs', requireAuth, (req, res) => {
+app.post('/api/amcs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const amc = req.body;
     if (!amc || !amc.clientName) {
@@ -998,11 +1010,11 @@ app.post('/api/amcs', requireAuth, (req, res) => {
 });
 
 // Projects & Proposals CRUD (Protected)
-app.get('/api/projects', requireAuth, (req, res) => {
+app.get('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'PROCUREMENT_LEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().projects });
 });
 
-app.post('/api/projects', requireAuth, (req, res) => {
+app.post('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const proj = req.body;
     if (!proj || !proj.title) {
@@ -1022,7 +1034,7 @@ app.post('/api/projects', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/projects/:id', requireAuth, (req, res) => {
+app.patch('/api/projects/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const updated = dbStore.updateProject(req.params.id, req.body);
     if (!updated) {
@@ -1046,11 +1058,11 @@ app.patch('/api/projects/:id/milestones/:milestoneId', requireAuth, requireRole(
   }
 });
 
-app.get('/api/proposals', requireAuth, (req, res) => {
+app.get('/api/proposals', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().proposals });
 });
 
-app.post('/api/proposals', requireAuth, (req, res) => {
+app.post('/api/proposals', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const proposal = req.body;
     if (!proposal || !proposal.providerName || !proposal.projectId) {
@@ -1073,7 +1085,7 @@ app.post('/api/proposals', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/proposals/:id/accept', requireAuth, (req, res) => {
+app.patch('/api/proposals/:id/accept', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const prop = dbStore.getState().proposals.find(p => p.id === req.params.id);
     if (!prop) {
@@ -1089,146 +1101,200 @@ app.patch('/api/proposals/:id/accept', requireAuth, (req, res) => {
   }
 });
 
-// P3.4 Missing Collections: RMA, Knowledge Base, CRM, Disputes
-app.get('/api/rma', requireAuth, (req, res) => {
+
+/**
+ * Persistent business collections: validate input against the actual TS types.
+ * Client-created IDs, settlement statuses and verification claims are ignored.
+ * No operation here can move money, contact OEMs or confirm courier dispatch.
+ */
+const rmaStages = ['FAULT_LOGGED', 'OEM_APPROVED', 'IN_TRANSIT', 'SERVICE_CENTER', 'REPLACED_RETURN', 'TESTED_CLOSED'] as const;
+const crmStages = ['LEAD', 'QUALIFIED', 'TECHNICAL_SCOPING', 'PROPOSAL_SENT', 'NEGOTIATION', 'WON'] as const;
+const disputeDecisions = ['RELEASE_RECOMMENDED', 'REFUND_RECOMMENDED', 'REWORK_RECOMMENDED'] as const;
+const stringField = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+const stringArray = (value: unknown): string[] | null =>
+  Array.isArray(value) && value.every(item => typeof item === 'string' && item.trim())
+    ? value.map(item => (item as string).trim())
+    : null;
+
+app.get('/api/rma', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().rmaClaims });
 });
-
-app.post('/api/rma', requireAuth, (req, res) => {
+app.post('/api/rma', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
-    const claim = req.body;
-    if (!claim || !claim.assetName || !claim.faultDescription) {
-      return res.status(400).json({ success: false, error: 'assetName and faultDescription are required' });
-    }
+    const assetTag = stringField(req.body?.assetTag);
+    const faultSymptom = stringField(req.body?.faultSymptom);
+    const asset = dbStore.getState().assets.find(a => a.assetTag === assetTag);
+    if (!asset || !faultSymptom) return res.status(400).json({ success: false, error: 'A registered asset tag and actual fault symptom are required.' });
+    const identifier = crypto.randomUUID();
     const created = dbStore.addRMAClaim({
-      ...claim,
-      id: claim.id || `rma-${crypto.randomUUID()}`,
-      status: 'FAULT_LOGGED',
+      id: 'rma-' + identifier,
+      rmaNumber: 'RMA-' + identifier.slice(0, 10).toUpperCase(),
+      assetId: asset.id, assetTag: asset.assetTag, assetName: asset.name,
+      serialNumber: asset.serialNumber || '', oemBrand: asset.brand || '',
+      oemCaseNumber: '', faultSymptom, warrantyStatus: 'UNVERIFIED',
+      courierTracking: '', courierPartner: '', stage: 'FAULT_LOGGED',
       createdAt: new Date().toISOString()
     });
-    res.status(201).json({ success: true, data: created });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    return res.status(201).json({ success: true, data: created });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
-
-app.patch('/api/rma/:id', requireAuth, (req, res) => {
+app.patch('/api/rma/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const updated = dbStore.updateRMAClaim(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'RMA claim not found' });
+    const current = dbStore.getState().rmaClaims.find(c => c.id === req.params.id);
+    if (!current) return res.status(404).json({ success: false, error: 'RMA claim not found.' });
+    const stage = req.body?.stage;
+    const index = rmaStages.indexOf(current.stage);
+    if (typeof stage !== 'string' || stage !== rmaStages[index + 1]) {
+      return res.status(400).json({ success: false, error: 'Only the immediate next RMA stage may be recorded.' });
     }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    const updates: Partial<typeof current> = { stage: stage as typeof current.stage };
+    if (stage === 'OEM_APPROVED') {
+      const caseNumber = stringField(req.body?.oemCaseNumber);
+      if (!caseNumber) return res.status(400).json({ success: false, error: 'Actual OEM case number required. Approval is not automatic.' });
+      updates.oemCaseNumber = caseNumber;
+    }
+    if (stage === 'IN_TRANSIT') {
+      const courier = stringField(req.body?.courierPartner), tracking = stringField(req.body?.courierTracking);
+      if (!courier || !tracking) return res.status(400).json({ success: false, error: 'Actual courier name and AWB required.' });
+      updates.courierPartner = courier;
+      updates.courierTracking = tracking;
+    }
+    if (stage === 'TESTED_CLOSED') updates.resolvedAt = new Date().toISOString();
+    const updated = dbStore.updateRMAClaim(req.params.id, updates);
+    return res.json({ success: true, data: updated });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
 
-app.get('/api/knowledge', requireAuth, (req, res) => {
+app.get('/api/knowledge', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().knowledgeArticles });
 });
-
-app.post('/api/knowledge', requireAuth, (req, res) => {
+app.post('/api/knowledge', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const article = req.body;
-    if (!article || !article.title || !article.content) {
-      return res.status(400).json({ success: false, error: 'title and content are required' });
+    const title = stringField(req.body?.title), summary = stringField(req.body?.summary);
+    const steps = stringArray(req.body?.selfServiceSteps);
+    if (!title || !summary || !steps?.length) {
+      return res.status(400).json({ success: false, error: 'Title, summary and at least one validated SOP step are required.' });
     }
     const created = dbStore.addKnowledgeArticle({
-      ...article,
-      id: article.id || `kb-${crypto.randomUUID()}`,
-      views: 0,
-      helpfulCount: 0,
-      tags: article.tags || [],
-      lastUpdated: new Date().toISOString()
+      id: 'kb-' + crypto.randomUUID(), title, summary,
+      category: stringField(req.body?.category) || 'General',
+      readTime: 'Not measured', views: 0, solvedCount: 0,
+      tags: stringArray(req.body?.tags) || [],
+      symptoms: stringArray(req.body?.symptoms) || [],
+      selfServiceSteps: steps
     });
-    res.status(201).json({ success: true, data: created });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    return res.status(201).json({ success: true, data: created });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
-
-app.patch('/api/knowledge/:id', requireAuth, (req, res) => {
+app.patch('/api/knowledge/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const updated = dbStore.updateKnowledgeArticle(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Knowledge article not found' });
+    const current = dbStore.getState().knowledgeArticles.find(a => a.id === req.params.id);
+    if (!current) return res.status(404).json({ success: false, error: 'Knowledge article not found.' });
+    const updates: Partial<typeof current> = {};
+    if (req.body?.title !== undefined) {
+      const title = stringField(req.body.title);
+      if (!title) return res.status(400).json({ success: false, error: 'Article title required.' });
+      updates.title = title;
     }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    if (req.body?.summary !== undefined) {
+      const summary = stringField(req.body.summary);
+      if (!summary) return res.status(400).json({ success: false, error: 'Article summary required.' });
+      updates.summary = summary;
+    }
+    if (req.body?.selfServiceSteps !== undefined) {
+      const steps = stringArray(req.body.selfServiceSteps);
+      if (!steps?.length) return res.status(400).json({ success: false, error: 'At least one valid SOP step required.' });
+      updates.selfServiceSteps = steps;
+    }
+    if (req.body?.category !== undefined) updates.category = stringField(req.body.category);
+    const updated = dbStore.updateKnowledgeArticle(req.params.id, updates);
+    return res.json({ success: true, data: updated });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
+});
+// Self-resolution acknowledgement is atomic and not a client-supplied arbitrary count.
+app.post('/api/knowledge/:id/solve', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER', 'SALES_MANAGER'), (req, res) => {
+  try {
+    const updated = dbStore.markKnowledgeArticleSolved(req.params.id);
+    if (!updated) return res.status(404).json({ success: false, error: 'Knowledge article not found.' });
+    return res.json({ success: true, data: updated });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
 
-app.get('/api/crm', requireAuth, (req, res) => {
+app.get('/api/crm', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().crmOpportunities });
 });
-
-app.post('/api/crm', requireAuth, (req, res) => {
+app.post('/api/crm', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
-    const opp = req.body;
-    if (!opp || !opp.clientName || !opp.title) {
-      return res.status(400).json({ success: false, error: 'clientName and title are required' });
+    const title = stringField(req.body?.title), clientName = stringField(req.body?.clientName);
+    const value = Number(req.body?.value);
+    if (!title || !clientName || !Number.isFinite(value) || value < 0) {
+      return res.status(400).json({ success: false, error: 'Real client, opportunity title and valid deal value required.' });
     }
     const created = dbStore.addCRMOpportunity({
-      ...opp,
-      id: opp.id || `crm-${crypto.randomUUID()}`,
-      createdAt: new Date().toISOString()
+      id: 'crm-' + crypto.randomUUID(), title, clientName, value,
+      stage: 'LEAD', winProbability: 0,
+      contactPerson: stringField(req.body?.contactPerson),
+      expectedCloseDate: stringField(req.body?.expectedCloseDate),
+      assignedEngineer: '', category: stringField(req.body?.category)
     });
-    res.status(201).json({ success: true, data: created });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    return res.status(201).json({ success: true, data: created });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
-
-app.patch('/api/crm/:id', requireAuth, (req, res) => {
+app.patch('/api/crm/:id', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
-    const updated = dbStore.updateCRMOpportunity(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'CRM opportunity not found' });
+    const current = dbStore.getState().crmOpportunities.find(o => o.id === req.params.id);
+    if (!current) return res.status(404).json({ success: false, error: 'CRM opportunity not found.' });
+    const next = stringField(req.body?.stage);
+    const idx = crmStages.indexOf(current.stage as typeof crmStages[number]);
+    if (idx === -1 || next !== crmStages[idx + 1]) {
+      return res.status(400).json({ success: false, error: 'CRM stage can advance only one step at a time.' });
     }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    const updated = dbStore.updateCRMOpportunity(req.params.id, { stage: next });
+    return res.json({ success: true, data: updated });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
 
-app.get('/api/disputes', requireAuth, (req, res) => {
+app.get('/api/disputes', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().marketplaceDisputes });
 });
-
 app.post('/api/disputes', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const dispute = req.body;
-    if (!dispute || !dispute.reason || !dispute.projectTitle) {
-      return res.status(400).json({ success: false, error: 'reason and projectTitle are required' });
+    const projectId = stringField(req.body?.projectId), reason = stringField(req.body?.reason);
+    const customerClaim = stringField(req.body?.customerClaim);
+    const disputedAmount = Number(req.body?.disputedAmount);
+    const project = dbStore.getState().projects.find(p => p.id === projectId);
+    if (!project || !reason || !customerClaim || !Number.isFinite(disputedAmount) || disputedAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'Existing project, reason, customer statement and positive amount are required.' });
     }
+    const id = crypto.randomUUID();
     const created = dbStore.addMarketplaceDispute({
-      ...dispute,
-      id: dispute.id || `dsp-${crypto.randomUUID()}`,
-      status: 'UNDER_ARBITRATION',
-      createdAt: new Date().toISOString()
+      id: 'dsp-' + id, disputeNumber: 'DSP-' + id.slice(0, 10).toUpperCase(),
+      projectId: project.id, projectTitle: project.title, customerName: project.clientName,
+      providerName: '', disputedAmount, escrowHeld: 0,
+      reason, customerClaim, providerRebuttal: '', aiMediationVerdict: '',
+      status: 'UNDER_ARBITRATION', createdAt: new Date().toISOString()
     });
-    res.status(201).json({ success: true, data: created });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    return res.status(201).json({ success: true, data: created });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
-
 app.patch('/api/disputes/:id', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const updated = dbStore.updateMarketplaceDispute(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Dispute not found' });
+    const current = dbStore.getState().marketplaceDisputes.find(d => d.id === req.params.id);
+    if (!current) return res.status(404).json({ success: false, error: 'Dispute not found.' });
+    const decision = stringField(req.body?.resolutionDecision);
+    if (!disputeDecisions.some(d => d === decision)) {
+      return res.status(400).json({ success: false, error: 'Only an internal recommendation can be recorded; no payout/refund adapter exists.' });
     }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    const updated = dbStore.updateMarketplaceDispute(req.params.id, {
+      resolutionDecision: decision as typeof disputeDecisions[number],
+      decisionRecordedAt: new Date().toISOString()
+    });
+    return res.json({ success: true, data: updated, note: 'Internal recommendation only. No escrow transfer or refund executed.' });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
 
 // Workflows CRUD (Protected)
-app.get('/api/workflows', requireAuth, (req, res) => {
+app.get('/api/workflows', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().workflows });
 });
 
@@ -1272,11 +1338,11 @@ app.post('/api/workflows/:id/execute', requireAuth, requireRole('BUSINESS_OWNER'
   });
 });
 
-app.get('/api/connectors', requireAuth, (req, res) => {
+app.get('/api/connectors', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().connectors });
 });
 
-app.get('/api/integrations/status', (req, res) => {
+app.get('/api/integrations/status', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({
     gemini: !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY',
     telegram: !!process.env.TELEGRAM_BOT_TOKEN,
@@ -1287,11 +1353,11 @@ app.get('/api/integrations/status', (req, res) => {
 });
 
 // Authoritative Audit Events (Protected - P1.5 Server-side Agent Assignment)
-app.get('/api/events', requireAuth, (req, res) => {
+app.get('/api/events', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().events });
 });
 
-app.post('/api/events', requireAuth, (req, res) => {
+app.post('/api/events', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   return res.status(403).json({ success: false, error: 'Authoritative audit events are emitted only by server business operations.' });
   /* Legacy client-generated audit event support intentionally disabled.
   try {
@@ -1420,7 +1486,7 @@ app.post('/api/telegram/webhook', (req, res) => {
 });
 
 // Payments: Honest, zero-mock integration status (Rejects fake payments)
-app.post('/api/payments/create-order', requireAuth, (req, res) => {
+app.post('/api/payments/create-order', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   const hasGateway = !!process.env.RAZORPAY_KEY_ID && !!process.env.RAZORPAY_KEY_SECRET;
   if (!hasGateway) {
     return res.status(503).json({
@@ -1431,7 +1497,7 @@ app.post('/api/payments/create-order', requireAuth, (req, res) => {
   res.status(501).json({ success: false, error: 'Payment provider adapter is not implemented yet. Payment transactions cannot be processed.' });
 });
 
-app.post('/api/payments/verify', requireAuth, (req, res) => {
+app.post('/api/payments/verify', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   const hasGateway = !!process.env.RAZORPAY_KEY_ID && !!process.env.RAZORPAY_KEY_SECRET;
   if (!hasGateway) {
     return res.status(503).json({
@@ -1443,7 +1509,7 @@ app.post('/api/payments/verify', requireAuth, (req, res) => {
 });
 
 // GST: Honest, zero-mock IRN generation (Rejects fake IRN generation)
-app.post('/api/gst/generate-irn', requireAuth, (req, res) => {
+app.post('/api/gst/generate-irn', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   const hasGstCredentials = !!process.env.GST_API_KEY && !!process.env.GST_SELLER_GSTIN;
   if (!hasGstCredentials) {
     return res.status(503).json({
@@ -1455,7 +1521,7 @@ app.post('/api/gst/generate-irn', requireAuth, (req, res) => {
 });
 
 // Real AI BOM & Solution Builder (Protected)
-app.post('/api/ai/bom-builder', requireAuth, async (req, res) => {
+app.post('/api/ai/bom-builder', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), async (req, res) => {
   const { requirement, budget, officeSize, preference } = req.body;
   const gemini = getGeminiClient();
 
@@ -1534,7 +1600,7 @@ The JSON must follow this exact structure:
 });
 
 // Real AI Telegram Command & Natural Language Interface (Protected)
-app.post('/api/ai/telegram-command', requireAuth, async (req, res) => {
+app.post('/api/ai/telegram-command', requireAuth, requireRole('BUSINESS_OWNER'), async (req, res) => {
   const { command } = req.body;
   const state = dbStore.getState();
 
@@ -1639,7 +1705,7 @@ Instructions:
 });
 
 // Real AI Copilot Endpoint (Executive Dashboard, Protected)
-app.post('/api/ai/copilot', requireAuth, async (req, res) => {
+app.post('/api/ai/copilot', requireAuth, requireRole('BUSINESS_OWNER'), async (req, res) => {
   const { query } = req.body;
   const gemini = getGeminiClient();
   const state = dbStore.getState();
@@ -1691,7 +1757,7 @@ Provide a strict, factual, professional answer in JSON format:
 });
 
 // Real AI IT Diagnosis & Problem Solver (Protected)
-app.post('/api/ai/diagnosis', requireAuth, async (req, res) => {
+app.post('/api/ai/diagnosis', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), async (req, res) => {
   const { symptom, deviceType, urgency } = req.body;
   const gemini = getGeminiClient();
 

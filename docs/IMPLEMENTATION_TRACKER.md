@@ -14,7 +14,7 @@
 | BOOT-02 | P0 | Production first-admin setup protected with server-provisioned one-time token | Implemented | Deploy test pending | Configure `APEX_INITIAL_SETUP_TOKEN` |
 | SEC-01 | P1 | Production secure session cookie, no token in login JSON | Implemented | HTTP integration test pending | Login/logout, CSRF scenarios |
 | SEC-02 | P1 | Basic browser Origin checks for writes | Implemented | Proxy/Hostinger test pending | Test forwarded host behavior |
-| SEC-03 | P1 | Sensitive write routes require owner/operational roles | Partially implemented | Permission-matrix test pending | Role-scoped data reads and remaining writes |
+| SEC-03 | P1 | RBAC on 48 sensitive API routes + role-scoped state collection filtering | Phase 2 code staged | CI multi-role HTTP test pending | True per-user/tenant row isolation and endpoint ownership |
 | SEC-04 | P1 | Block browser-generated authoritative audit events | Implemented | End-to-end test pending | Replace all remaining client audit producers |
 | SEC-05 | P1 | Telegram webhook fails closed without allowed user + chat | Implemented | Telegram live webhook pending | Replay IDs, outbound API, delivery receipts |
 | DATA-01 | P0 | Existing `commit()` clone-before-write semantics retained | Already present at baseline | Disk-failure test pending | Durable backups & concurrent writes |
@@ -27,7 +27,7 @@
 | CI-01 | P4 | GitHub Actions typecheck/build/15 isolated tests | **Verified** | [Run 42257640364: green](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42257640364) | Expand regression suite |
 | CI-02 | P4 | Real production-mode Express HTTP smoke suite (21 checks, temporary DB) | **Verified** | [Run 42257640364: 21/21 PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42257640364) | Browser, role matrix, live provider tests |
 | DOC-01 | P4 | Implementation report + tracker | Added | Reviewed with code | Keep synchronized per commit |
-| PERSIST-01 | P3 | RMA/CRM/KB/disputes UI wired to server CRUD | **Pending** | — | UI persistence wiring |
+| PERSIST-01 | P3 | RMA, CRM, KB and disputes connect to server CRUD and reload state | Phase 2 code staged | API + UI regression pending | Browser acceptance and permissions |
 | INT-01 | P4 | Verified Razorpay/Cashfree transactions | **Pending / 501** | — | Real provider implementation |
 | GST-01 | P4 | Verified NIC IRP / GST filing adapter | **Pending / 501** | — | Real provider implementation |
 | RMM-01 | P4 | Authenticated real endpoint agent telemetry | **Pending** | — | Enrollment and ingestion |
@@ -37,6 +37,17 @@
 | TAX-01 | P3 | Accurate per-HSN/SAC GST + discount allocation | **Pending** | — | Server-side tax rules |
 | AUDIT-01 | P1 | Tamper-evident immutable audit and event/data atomicity | **Pending** | — | Central auditable transaction boundary |
 | MULTI-01 | P4 | Actual tenant isolation and scalable durable DB | **Pending** | — | Dedicated persistent DB migration plan |
+
+## Phase 2 — 7 November 2026
+
+Phase 2 changes are staged on the existing draft PR and **must be verified through GitHub Actions** before changing status to PASS.
+
+- Role-based collection-level reads and route-level permissions (still **single tenant**, not per-user ownership/tenant isolation).
+- RMA: real registered assets only; `FAULT_LOGGED` initial status; verified OEM case/AWB needed for stage progression.
+- Knowledge Base: validate title/summary/verified steps; persist creation and atomic self-resolution acknowledgments.
+- CRM: real client/opportunity values; server-side stage transitions; no fabricated win probabilities or staff names.
+- Disputes: create from genuine projects; save internal recommendations only, not pretend escrow transfers.
+- CI: expanded HTTP persistence checks and separate multi-role access smoke suite. See [Phase 2 report](PHASE_2_IMPLEMENTATION_2026-11-07.md).
 
 ## Rules for subsequent work
 

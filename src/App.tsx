@@ -39,7 +39,11 @@ import {
   AMCContract,
   AutomationWorkflow,
   IntegrationConnector,
-  InvoiceRecord
+  InvoiceRecord,
+  RMAClaim,
+  KnowledgeArticle,
+  CRMOpportunity,
+  MarketplaceDispute
 } from './types';
 
 const defaultTenant: TenantInfo = {
@@ -81,6 +85,10 @@ export default function App() {
   const [workflows, setWorkflows] = useState<AutomationWorkflow[]>([]);
   const [connectors, setConnectors] = useState<IntegrationConnector[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
+  const [rmaClaims, setRMAClaims] = useState<RMAClaim[]>([]);
+  const [knowledgeArticles, setKnowledgeArticles] = useState<KnowledgeArticle[]>([]);
+  const [crmOpportunities, setCRMOpportunities] = useState<CRMOpportunity[]>([]);
+  const [marketplaceDisputes, setMarketplaceDisputes] = useState<MarketplaceDispute[]>([]);
 
   const [isThinking, setIsThinking] = useState(false);
   const [isTelegramConfigured, setIsTelegramConfigured] = useState(false);
@@ -127,6 +135,14 @@ export default function App() {
         if (s.invoices) setInvoices(s.invoices);
         if (s.workflows) setWorkflows(s.workflows);
         if (s.connectors) setConnectors(s.connectors);
+        setRMAClaims(s.rmaClaims || []);
+        setKnowledgeArticles(s.knowledgeArticles || []);
+        setCRMOpportunities(s.crmOpportunities || []);
+        setMarketplaceDisputes(s.marketplaceDisputes || []);
+        fetch('/api/integrations/status')
+          .then(r => r.ok ? r.json() : null)
+          .then(status => setIsTelegramConfigured(Boolean(status?.telegram)))
+          .catch(() => setIsTelegramConfigured(false));
       }
     } catch (err) {
       console.warn('Could not sync persistent state from server:', err);
@@ -160,12 +176,6 @@ export default function App() {
       })
       .catch(() => setIsAuthModalOpen(true));
 
-    fetch('/api/integrations/status')
-      .then(res => res.json())
-      .then(status => {
-        setIsTelegramConfigured(!!status.telegram);
-      })
-      .catch(() => setIsTelegramConfigured(false));
   }, []);
 
   const handleLoginSuccess = (user: any) => {
@@ -183,6 +193,15 @@ export default function App() {
       console.error('Logout error:', err);
     }
     setCurrentUser(null);
+    // Remove cached confidential operational data from the previous session.
+    setQuotes([]); setLeads([]); setInvoices([]); setSuppliers([]);
+    setRfqs([]); setTickets([]); setEndpoints([]); setJobs([]);
+    setAssets([]); setLicenses([]); setAMCs([]); setProjects([]);
+    setProposals([]); setProviders([]); setEvents([]); setProducts([]);
+    setTelegramMessages([]); setWorkflows([]); setConnectors([]);
+    setIsTelegramConfigured(false);
+    setRMAClaims([]); setKnowledgeArticles([]);
+    setCRMOpportunities([]); setMarketplaceDisputes([]);
     setIsAuthModalOpen(true);
     showToast('Logged out of Apex OS.');
   };
@@ -233,6 +252,10 @@ export default function App() {
         setWorkflows(s.workflows || []);
         setInvoices(s.invoices || []);
         setEvents(s.events || []);
+        setRMAClaims(s.rmaClaims || []);
+        setKnowledgeArticles(s.knowledgeArticles || []);
+        setCRMOpportunities(s.crmOpportunities || []);
+        setMarketplaceDisputes(s.marketplaceDisputes || []);
         showToast('Clean Slate Active: All business records initialized to 0.');
       }
     } catch (err) {
@@ -339,7 +362,7 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success && data.data) {
-        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber.includes(quoteId) ? data.data : q));
+        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber === quoteId ? data.data : q));
         
         // Update Telegram message approval status
         setTelegramMessages(prev => prev.map(m => {
@@ -369,7 +392,7 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success && data.data) {
-        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber.includes(quoteId) ? data.data : q));
+        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber === quoteId ? data.data : q));
         showToast(`Quotation #${data.data.quoteNumber} rejected.`);
       }
     } catch (err) {
@@ -674,9 +697,9 @@ export default function App() {
       return;
     }
     if (type === 'JOINER') {
-      showToast(`JML Joiner initialized: Provisioning profile recorded for ${employeeName}.`);
+      showToast(`JML request for ${employeeName} is a preview. Microsoft/Entra provisioning has NOT occurred.`);
     } else {
-      showToast(`JML Leaver initialized: Revocation & asset recovery recorded for ${employeeName}.`);
+      showToast(`JML request for ${employeeName} is a preview. Microsoft/Entra access has NOT been revoked.`);
     }
   };
   const handleUpdateAssetStatus = async (assetId: string, status: AssetItem['status']) => {
@@ -748,6 +771,72 @@ export default function App() {
     } catch (err) {
       console.error('Add AMC failed:', err);
     }
+  };
+
+  // Phase 2: CRUD operations return a confirmed backend record before changing UI.
+  const saveBusinessRecord = async <T,>(
+    url: string, method: 'POST' | 'PATCH', payload: object
+  ): Promise<T | null> => {
+    try {
+      const response = await fetch(url, {
+        method, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const parsed = await response.json();
+      if (!response.ok || !parsed.success || !parsed.data) {
+        showToast(parsed.error || 'Could not persist this operation.');
+        return null;
+      }
+      return parsed.data as T;
+    } catch (error) {
+      console.error('Persistent business operation failed:', error);
+      showToast('Network error: record has not been saved.');
+      return null;
+    }
+  };
+
+  const handleCreateRMA = async (claim: Pick<RMAClaim, 'assetTag' | 'faultSymptom'>): Promise<RMAClaim | null> => {
+    const saved = await saveBusinessRecord<RMAClaim>('/api/rma', 'POST', claim);
+    if (saved) setRMAClaims(prev => [saved, ...prev]);
+    return saved;
+  };
+  const handleUpdateRMA = async (id: string, changes: Partial<RMAClaim>): Promise<RMAClaim | null> => {
+    const saved = await saveBusinessRecord<RMAClaim>(`/api/rma/${encodeURIComponent(id)}`, 'PATCH', changes);
+    if (saved) setRMAClaims(prev => prev.map(item => item.id === id ? saved : item));
+    return saved;
+  };
+
+  const handleCreateKnowledge = async (article: Partial<KnowledgeArticle>): Promise<KnowledgeArticle | null> => {
+    const saved = await saveBusinessRecord<KnowledgeArticle>('/api/knowledge', 'POST', article);
+    if (saved) setKnowledgeArticles(prev => [saved, ...prev]);
+    return saved;
+  };
+  const handleKnowledgeSolved = async (id: string): Promise<KnowledgeArticle | null> => {
+    const saved = await saveBusinessRecord<KnowledgeArticle>(`/api/knowledge/${encodeURIComponent(id)}/solve`, 'POST', {});
+    if (saved) setKnowledgeArticles(prev => prev.map(a => a.id === id ? saved : a));
+    return saved;
+  };
+
+  const handleCreateCRM = async (opportunity: Partial<CRMOpportunity>): Promise<CRMOpportunity | null> => {
+    const saved = await saveBusinessRecord<CRMOpportunity>('/api/crm', 'POST', opportunity);
+    if (saved) setCRMOpportunities(prev => [saved, ...prev]);
+    return saved;
+  };
+  const handleAdvanceCRM = async (id: string, stage: CRMOpportunity['stage']): Promise<CRMOpportunity | null> => {
+    const saved = await saveBusinessRecord<CRMOpportunity>(`/api/crm/${encodeURIComponent(id)}`, 'PATCH', { stage });
+    if (saved) setCRMOpportunities(prev => prev.map(o => o.id === id ? saved : o));
+    return saved;
+  };
+
+  const handleCreateDispute = async (claim: { projectId: string; reason: string; customerClaim: string; disputedAmount: number }): Promise<MarketplaceDispute | null> => {
+    const saved = await saveBusinessRecord<MarketplaceDispute>('/api/disputes', 'POST', claim);
+    if (saved) setMarketplaceDisputes(prev => [saved, ...prev]);
+    return saved;
+  };
+  const handleDisputeDecision = async (id: string, resolutionDecision: NonNullable<MarketplaceDispute['resolutionDecision']>): Promise<MarketplaceDispute | null> => {
+    const saved = await saveBusinessRecord<MarketplaceDispute>(`/api/disputes/${encodeURIComponent(id)}`, 'PATCH', { resolutionDecision });
+    if (saved) setMarketplaceDisputes(prev => prev.map(d => d.id === id ? saved : d));
+    return saved;
   };
 
   // Handler: Add Proposal
@@ -948,6 +1037,9 @@ export default function App() {
             onRemoteFix={handleRemoteFix}
             onCreateTicket={handleCreateTicket}
             onAddEndpoint={handleAddEndpoint}
+            knowledgeArticles={knowledgeArticles}
+            onCreateKnowledgeArticle={handleCreateKnowledge}
+            onMarkKnowledgeSolved={handleKnowledgeSolved}
           />
         )}
 
@@ -961,6 +1053,12 @@ export default function App() {
             onCreateProject={handleCreateProject}
             onRequestDiagnosticBooking={handleRequestDiagnosticBooking}
             onAddProposal={handleAddProposal}
+            crmOpportunities={crmOpportunities}
+            marketplaceDisputes={marketplaceDisputes}
+            onCreateCRM={handleCreateCRM}
+            onAdvanceCRM={handleAdvanceCRM}
+            onCreateDispute={handleCreateDispute}
+            onRecordDisputeDecision={handleDisputeDecision}
           />
         )}
 
@@ -985,6 +1083,9 @@ export default function App() {
             onExecuteJML={handleExecuteJML}
             onAddAsset={handleAddAsset}
             onAddAMC={handleAddAMC}
+            rmaClaims={rmaClaims}
+            onCreateRMA={handleCreateRMA}
+            onUpdateRMA={handleUpdateRMA}
           />
         )}
 
