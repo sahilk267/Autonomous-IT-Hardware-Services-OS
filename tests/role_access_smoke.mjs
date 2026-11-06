@@ -54,19 +54,24 @@ const port = await getPort(), base = 'http://127.0.0.1:' + port;
 const child = spawn(process.execPath, ['dist/server.cjs'], {
   env: {
     ...process.env, NODE_ENV: 'production', PORT: String(port),
-    APEX_DATA_FILE: dbFile, APEX_ALLOW_PRODUCTION_RESET: 'false'
+    APEX_DATA_FILE: dbFile, APEX_ALLOW_PRODUCTION_RESET: 'false',
+    TELEGRAM_WEBHOOK_SECRET: 'ci-only-webhook-secret',
+    TELEGRAM_AUTHORIZED_USER_ID: '101',
+    TELEGRAM_AUTHORIZED_CHAT_ID: '201',
+    TELEGRAM_BOT_TOKEN: ''
   },
   stdio: ['ignore', 'pipe', 'pipe']
 });
 let stdout = '';
 child.stdout.on('data', b => { stdout += b.toString(); });
 child.stderr.on('data', b => { stdout += b.toString(); });
-async function api(endpoint, { method = 'GET', body = undefined, cookie = '' } = {}) {
+async function api(endpoint, { method = 'GET', body = undefined, cookie = '', extraHeaders = {} } = {}) {
   const response = await fetch(base + endpoint, {
     method,
     headers: {
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(cookie ? { cookie } : {})
+      ...(cookie ? { cookie } : {}),
+      ...extraHeaders
     },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
@@ -129,6 +134,36 @@ try {
     assert.equal(r.data.data.users.length, 5);
     assert.equal(r.data.data.crmOpportunities.length, 2);
   });
+  // Official Telegram webhook replay handling with an isolated, authorized test fixture.
+  const telegramUpdate = {
+    update_id: 90001,
+    message: { from: { id: 101, first_name: 'Test Owner' }, chat: { id: 201 }, text: '/pending' }
+  };
+  const extraHeaders = { 'x-telegram-bot-api-secret-token': 'ci-only-webhook-secret' };
+  r = await api('/api/telegram/webhook', { method: 'POST', body: telegramUpdate, extraHeaders });
+  check('Authorized Telegram webhook update records once', () => {
+    assert.equal(r.status, 200);
+    assert.equal(r.data.handled, 'message');
+  });
+  r = await api('/api/telegram/webhook', { method: 'POST', body: telegramUpdate, extraHeaders });
+  check('Replayed Telegram update ID is ignored', () => {
+    assert.equal(r.status, 200);
+    assert.equal(r.data.handled, 'duplicate_ignored');
+  });
+  r = await api('/api/telegram/webhook', {
+    method: 'POST', extraHeaders,
+    body: { update_id: 90002, message: { from: { id: 102 }, chat: { id: 201 }, text: '/pending' } }
+  });
+  check('Telegram webhook from unauthorized sender is rejected', () => assert.equal(r.status, 403));
+  r = await api('/api/state', { cookie: sessions.owner });
+  check('Webhook replay does not duplicate stored command records', () => {
+    assert.equal(r.status, 200);
+    assert.equal(r.data.data.telegramMessages.length, 1);
+    assert.ok(!('processedTelegramUpdateIds' in r.data.data));
+  });
+  r = await api('/api/telegram/send', { method: 'POST', cookie: sessions.field, body: { text: 'Do not send' } });
+  check('Field engineer cannot invoke external Telegram send', () => assert.equal(r.status, 403));
+
   console.log('ROLE API SUMMARY: ' + tests + '/' + tests + ' PASSED');
 } finally {
   child.kill('SIGTERM');

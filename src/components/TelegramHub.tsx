@@ -12,6 +12,7 @@ import { TelegramMessage, Quotation } from '../types';
 interface TelegramHubProps {
   messages: TelegramMessage[];
   onSendMessage: (text: string) => Promise<void>;
+  onSendTelegramMessage: (text: string) => Promise<boolean>;
   onApproveQuote: (quoteId: string) => void;
   onRejectQuote: (quoteId: string, reason: string) => void;
   quotations: Quotation[];
@@ -22,6 +23,7 @@ interface TelegramHubProps {
 export const TelegramHub: React.FC<TelegramHubProps> = ({
   messages,
   onSendMessage,
+  onSendTelegramMessage,
   onApproveQuote,
   onRejectQuote,
   quotations,
@@ -70,12 +72,12 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
                     ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
                     : 'bg-amber-950 text-amber-300 border-amber-800'
                 }`}>
-                  {isTelegramConfigured ? 'LIVE BOT CONNECTED' : 'NOT CONFIGURED'}
+                  {isTelegramConfigured ? 'BOT CONFIGURED (UNVERIFIED)' : 'NOT CONFIGURED'}
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
                 {isTelegramConfigured 
-                  ? 'Real-time webhook active. Authorizes quotation exceptions and pushes notifications.'
+                  ? 'Bot token and authorized chat are configured; webhook health and delivery are not yet verified.'
                   : 'Telegram bot integration is not configured. Add TELEGRAM_BOT_TOKEN to .env for external mobile webhook sync.'}
               </p>
             </div>
@@ -108,13 +110,13 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
                 <span className="text-[10px] bg-sky-500/20 text-sky-300 px-1.5 py-0.2 rounded font-normal">bot</span>
               </h3>
               <p className="text-[11px] text-slate-400">
-                {isTelegramConfigured ? 'online • live webhook listening' : 'local console interface • external bot unconfigured'}
+                {isTelegramConfigured ? 'credentials present • live delivery not verified' : 'local console interface • external bot unconfigured'}
               </p>
             </div>
           </div>
 
           <div className="text-xs text-slate-400 flex items-center gap-2">
-            <span>Webhook Status: {isTelegramConfigured ? 'Encrypted' : 'Standby'}</span>
+            <span>Webhook: {isTelegramConfigured ? 'Configured (not verified)' : 'Not configured'}</span>
             <span className={`w-2 h-2 rounded-full ${isTelegramConfigured ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}></span>
           </div>
         </div>
@@ -188,7 +190,7 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
                     )}
 
                     <div className={`text-[10px] text-right mt-1.5 flex items-center justify-end gap-1 ${isOwner ? 'text-sky-200/70' : 'text-slate-500'}`}>
-                      <span>{isTelegramConfigured ? 'Telegram Delivery Verified' : 'Local In-App Console'}</span>
+                      <span>{msg.deliveryStatus === 'ACCEPTED_BY_TELEGRAM_API' ? 'Accepted by Telegram API (no read receipt)' : 'Local in-app only'}</span>
                       <span>•</span>
                       <span>{msg.timestamp}</span>
                     </div>
@@ -208,7 +210,7 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Bar */}
+        {/* Input Bar: default send is in-app AI command; separate button is external Telegram delivery */}
         <div className="p-3 bg-[#17212b] border-t border-[#1f2936]">
           {/* Quick Command Chips */}
           <div className="flex gap-2 mb-2 overflow-x-auto pb-1 scrollbar-none">
@@ -231,6 +233,15 @@ export const TelegramHub: React.FC<TelegramHubProps> = ({
               placeholder="Type an owner command (e.g. /dashboard, /pending, /stock)..."
               className="flex-1 bg-[#242f3d] border border-slate-700 text-white rounded-xl px-4 py-2.5 text-xs placeholder-slate-500 focus:outline-none focus:border-sky-500"
             />
+            <button
+              type="button"
+              disabled={!isTelegramConfigured || isThinking || !inputText.trim()}
+              onClick={async () => {
+                const accepted = await onSendTelegramMessage(inputText.trim());
+                if (accepted) setInputText('');
+              }}
+              className="px-3 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-700 disabled:opacity-40 text-white text-xs font-semibold"
+            >Send to Telegram</button>
             <button
               type="submit"
               disabled={isThinking || !inputText.trim()}

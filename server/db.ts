@@ -68,6 +68,7 @@ export interface AppStoreState {
   leads: Lead[];
   quotes: Quotation[];
   telegramMessages: TelegramMessage[];
+  processedTelegramUpdateIds: number[];
   suppliers: SupplierInfo[];
   rfqs: RFQItem[];
   tickets: ITSMTicket[];
@@ -199,6 +200,7 @@ export function getInitialCleanState(): AppStoreState {
     leads: [],
     quotes: [],
     telegramMessages: [],
+    processedTelegramUpdateIds: [],
     suppliers: [],
     rfqs: [],
     tickets: [],
@@ -526,6 +528,19 @@ export class PersistentStore {
     });
   }
 
+  // Keep a bounded durable replay ledger for Telegram update IDs.
+  public markTelegramUpdateProcessed(updateId: number): boolean {
+    if (!Number.isSafeInteger(updateId) || updateId < 0) {
+      throw new Error('Telegram update_id must be a positive safe integer.');
+    }
+    if (this.state.processedTelegramUpdateIds.includes(updateId)) return false;
+    return this.commit((draft) => {
+      if (draft.processedTelegramUpdateIds.includes(updateId)) return false;
+      draft.processedTelegramUpdateIds = [...draft.processedTelegramUpdateIds, updateId].slice(-2048);
+      return true;
+    });
+  }
+
   // RFQs
   public addRFQ(rfq: RFQItem): RFQItem {
     return this.commit((draft) => {
@@ -546,11 +561,38 @@ export class PersistentStore {
     });
   }
 
-  public dispatchPO(rfqId: string, supplierId: string): RFQItem | null {
+  // Prepare an internal purchase order; no vendor email or portal submission occurs.
+  // All supplier amounts come from the actual recorded quote, never caller input.
+  public preparePO(rfqId: string, supplierId: string, preparedBy: string): RFQItem | null {
     return this.commit((draft) => {
       const rfq = draft.rfqs.find(r => r.id === rfqId);
       if (!rfq) return null;
-      rfq.status = 'PO_DISPATCHED';
+      if (rfq.status === 'PO_PREPARED' || rfq.status === 'PO_DISPATCHED') {
+        throw new Error('Purchase order is already prepared or previously recorded dispatched.');
+      }
+      if (!Number.isSafeInteger(rfq.requiredQty) || rfq.requiredQty <= 0) {
+        throw new Error('RFQ quantity must be a positive integer.');
+      }
+      const supplierQuote = rfq.supplierQuotes.find(q => q.supplierId === supplierId);
+      if (!supplierQuote) throw new Error('Supplier must have an actual quotation recorded for this RFQ.');
+      if (!Number.isFinite(supplierQuote.unitCost) || supplierQuote.unitCost < 0) {
+        throw new Error('Supplier quote must have a valid non-negative unit cost.');
+      }
+      const amount = Math.round(rfq.requiredQty * supplierQuote.unitCost * 100) / 100;
+      if (!Number.isSafeInteger(Math.round(amount * 100))) throw new Error('Purchase order value exceeds safe numeric limits.');
+      const id = crypto.randomUUID();
+      rfq.preparedPO = {
+        poReference: 'PO-DRAFT-' + id.slice(0, 12).toUpperCase(),
+        supplierId,
+        supplierName: supplierQuote.supplierName,
+        qty: rfq.requiredQty,
+        unitCost: supplierQuote.unitCost,
+        amount,
+        preparedAt: new Date().toISOString(),
+        preparedBy,
+        deliveryStatus: 'NOT_SENT'
+      };
+      rfq.status = 'PO_PREPARED';
       return rfq;
     });
   }

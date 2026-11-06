@@ -317,6 +317,7 @@ app.get('/api/state', requireAuth, (req, res) => {
       .map(({ passwordHash, salt, ...u }) => u);
     const safeState: Record<string, unknown> = { ...rawState, users: safeUsers };
     delete safeState.sessions;
+    delete safeState.processedTelegramUpdateIds;
     for (const [key, value] of Object.entries(safeState)) {
       if (Array.isArray(value) && key !== 'users' && !allowed.has(key)) safeState[key] = [];
     }
@@ -481,29 +482,27 @@ app.post('/api/rfqs/:id/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'PRO
   }
 });
 
+// Legacy route path retained for existing UI; only PREPARES a PO.
 app.post('/api/rfqs/:id/dispatch-po', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const { supplierId } = req.body;
-    const updated = dbStore.dispatchPO(req.params.id, supplierId);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'RFQ not found' });
-    }
-
+    const supplierId = typeof req.body?.supplierId === 'string' ? req.body.supplierId.trim() : '';
+    if (!supplierId) return res.status(400).json({ success: false, error: 'An actual quoted supplierId is required.' });
+    const updated = dbStore.preparePO(req.params.id, supplierId, (req as any).user.username);
+    if (!updated) return res.status(404).json({ success: false, error: 'RFQ not found.' });
     dbStore.addEvent({
       id: `evt-${crypto.randomUUID()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'PurchaseOrderDispatched',
-      agent: (req as any).user?.username || 'Procurement',
-      summary: `Dispatched Purchase Order for RFQ #${req.params.id} to supplier ID ${supplierId}.`,
-      autonomousActionTaken: 'Updated RFQ status to PO_DISPATCHED in procurement ledger.',
+      timestamp: new Date().toISOString(),
+      eventType: 'PurchaseOrderPreparedInternally',
+      agent: (req as any).user.username,
+      summary: `Internal PO ${updated.preparedPO?.poReference} prepared for ${updated.preparedPO?.supplierName}; not sent.`,
+      autonomousActionTaken: 'Recorded supplier selection and PO preparation in internal ledger only.',
       humanApprovalRequired: false,
       approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
+      confidenceScore: 1
     });
-
-    res.json({ success: true, data: updated });
+    return res.json({ success: true, data: updated, delivery: 'NOT_SENT' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(400).json({ success: false, error: err.message });
   }
 });
 
@@ -521,78 +520,124 @@ app.post('/api/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGE
     const items = Array.isArray(quote.items) ? quote.items : [];
     const services = Array.isArray(quote.services) ? quote.services : [];
     if (items.length + services.length === 0) {
-      return res.status(400).json({ success: false, error: 'Quotation must contain at least one line item or service.' });
+      return res.status(400).json({ success: false, error: 'Quotation requires an item or service.' });
     }
+    const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+    const catalog = dbStore.getState().products;
+    const taxLines: { lineId: string; gross: number; hsnOrSac: string; rate: number | null }[] = [];
     let subtotal = 0;
     let totalCost = 0;
-    for (const item of items) {
-      const qty = Number(item.qty);
-      const purchaseCost = Number(item.purchaseCost);
-      const sellingPrice = Number(item.sellingPrice);
+    for (const [i, item] of items.entries()) {
+      const qty = item.qty, selling = item.sellingPrice, requestedCost = item.purchaseCost;
       if (!Number.isSafeInteger(qty) || qty <= 0 ||
-          !Number.isFinite(purchaseCost) || purchaseCost < 0 ||
-          !Number.isFinite(sellingPrice) || sellingPrice < 0) {
-        return res.status(400).json({ success: false, error: 'Invalid item quantity, cost or selling price.' });
+          !Number.isFinite(selling) || selling < 0 ||
+          !Number.isFinite(requestedCost) || requestedCost < 0) {
+        return res.status(400).json({ success: false, error: 'Invalid quantity, selling price or cost.' });
       }
-      subtotal += qty * sellingPrice;
-      totalCost += qty * purchaseCost;
-    }
-    for (const service of services) {
-      const price = Number(service.price);
-      if (!Number.isFinite(price) || price < 0) {
-        return res.status(400).json({ success: false, error: 'Service price must be a non-negative number.' });
+      const registered = item.productId ? catalog.find(p => p.id === item.productId) : undefined;
+      if (item.productId && !registered) {
+        return res.status(400).json({ success: false, error: 'Referenced catalog productId not found.' });
       }
-      subtotal += price;
+      const cost = registered ? registered.purchaseCost : requestedCost;
+      if (!Number.isFinite(cost) || cost < 0) {
+        return res.status(400).json({ success: false, error: 'Product cost is invalid.' });
+      }
+      const rate = registered?.gstPercent ?? item.gstPercent;
+      if (rate != null && rate !== -1 && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+        return res.status(400).json({ success: false, error: 'Invalid product tax rate; verify HSN classification.' });
+      }
+      const gross = round2(qty * selling);
+      subtotal += gross;
+      totalCost += qty * cost;
+      taxLines.push({
+        lineId: typeof item.id === 'string' && item.id ? item.id : 'item-' + i,
+        gross,
+        hsnOrSac: String(registered?.hsn ?? item.hsn ?? '').trim(),
+        rate: rate == null || rate === -1 ? null : rate
+      });
     }
-    const discountAmount = Number(quote.discountAmount ?? 0);
+    for (const [i, service] of services.entries()) {
+      if (!Number.isFinite(service.price) || service.price < 0) {
+        return res.status(400).json({ success: false, error: 'Service price must be non-negative.' });
+      }
+      const rate = service.gstPercent;
+      if (rate != null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+        return res.status(400).json({ success: false, error: 'Invalid service tax rate; verify SAC classification.' });
+      }
+      const gross = round2(service.price);
+      subtotal += gross;
+      taxLines.push({
+        lineId: typeof service.id === 'string' && service.id ? service.id : 'service-' + i,
+        gross,
+        hsnOrSac: String(service.sac || '').trim(),
+        rate: rate == null || rate === -1 ? null : rate
+      });
+    }
+    subtotal = round2(subtotal);
+    const discountAmount = quote.discountAmount == null ? 0 : quote.discountAmount;
     if (!Number.isFinite(subtotal) || subtotal <= 0 ||
         !Number.isFinite(discountAmount) || discountAmount < 0 || discountAmount >= subtotal) {
-      return res.status(400).json({ success: false, error: 'Subtotal must be positive and discount must be below subtotal.' });
+      return res.status(400).json({ success: false, error: 'Subtotal must be positive; discount must be less than subtotal.' });
     }
-    const netSubtotal = subtotal - discountAmount;
-    const marginPercent = Math.round(((netSubtotal - totalCost) / netSubtotal) * 1000) / 10;
-
-    // Interim 18% estimate only. Verified HSN/SAC tax computation and filing remain pending.
-    const gstAmount = Math.round(netSubtotal * 0.18);
-    const totalAmount = netSubtotal + gstAmount;
+    const netSubtotal = round2(subtotal - discountAmount);
+    const marginPercent = round2(((netSubtotal - totalCost) / netSubtotal) * 100);
+    const taxClassificationComplete = taxLines.every(line => line.hsnOrSac && line.rate !== null);
+    const taxStatus = taxClassificationComplete ? 'ESTIMATED_UNVERIFIED' : 'PENDING_CLASSIFICATION';
+    let gstAmount = 0;
+    let breakdown: { lineId: string; taxableAmount: number; taxRatePercent: number; taxAmount: number }[] = [];
+    if (taxClassificationComplete) {
+      let allocated = 0;
+      breakdown = taxLines.map((line, i) => {
+        // Allocate the quotation discount proportionally; the final line absorbs any rounding residual.
+        const taxableAmount = i === taxLines.length - 1
+          ? round2(netSubtotal - allocated)
+          : round2(line.gross - discountAmount * line.gross / subtotal);
+        allocated = round2(allocated + taxableAmount);
+        const taxRatePercent = line.rate as number;
+        const taxAmount = round2(taxableAmount * taxRatePercent / 100);
+        gstAmount = round2(gstAmount + taxAmount);
+        return { lineId: line.lineId, taxableAmount, taxRatePercent, taxAmount };
+      });
+    }
+    // If classification is missing, totalAmount EXCLUDES unknown GST, not an asserted final invoice total.
+    const totalAmount = round2(netSubtotal + gstAmount);
     const isException = marginPercent < 12;
     const created = dbStore.addQuote({
       ...quote,
       id: `quote-${crypto.randomUUID()}`,
       quoteNumber: `QT-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
       customerName: quote.customerName.trim(),
-      items,
-      services,
-      subtotal,
-      discountAmount,
-      marginPercent,
-      gstAmount,
-      totalAmount,
+      items, services, subtotal, discountAmount,
+      marginPercent, gstAmount, totalAmount, grandTotal: totalAmount,
+      taxStatus, taxBreakdown: breakdown,
       status: isException ? 'PENDING_OWNER_APPROVAL' : 'DRAFT',
       createdDate: new Date().toISOString().slice(0, 10),
-      validUntil: quote.validUntil || new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
-      paymentTerms: typeof quote.paymentTerms === 'string' ? quote.paymentTerms : '',
+      validUntil: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      paymentTerms: typeof quote.paymentTerms === 'string' ? quote.paymentTerms : ''
     });
     dbStore.addEvent({
-      id: `evt-${crypto.randomUUID()}`,
-      timestamp: new Date().toISOString(),
+      id: `evt-${crypto.randomUUID()}`, timestamp: new Date().toISOString(),
       eventType: isException ? 'MarginThresholdBreach' : 'QuotationDraftCreated',
-      agent: (req as any).user?.username || 'Pricing Engine',
-      summary: `Quote ${created.quoteNumber} saved as ${created.status}; customer dispatch not verified.`,
-      autonomousActionTaken: 'Calculated a provisional quotation draft in the local ledger.',
+      agent: (req as any).user.username,
+      summary: `Quote ${created.quoteNumber} saved as ${created.status}; GST: ${taxStatus}; not sent to customer.`,
+      autonomousActionTaken: 'Draft estimate calculated in ledger. Tax classification and provider filing not verified.',
       humanApprovalRequired: isException,
       approvalStatus: isException ? 'PENDING_TELEGRAM' : 'AUTO_APPROVED',
-      confidenceScore: 1,
+      confidenceScore: 1
     });
-    res.status(201).json({ success: true, data: created });
+    return res.status(201).json({ success: true, data: created });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
 app.patch('/api/quotes/:id/approve', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const actor = (req as any).user?.username || 'Business Owner';
+    const targetQuote = dbStore.getState().quotes.find(q => q.id === req.params.id || q.quoteNumber === req.params.id);
+    if (targetQuote?.taxStatus === 'PENDING_CLASSIFICATION') {
+      return res.status(409).json({ success: false, error: 'Owner approval blocked: quote requires HSN/SAC classification and tax rates before approval.' });
+    }
     const approved = dbStore.approveQuote(req.params.id, actor);
     if (!approved) {
       return res.status(404).json({ success: false, error: 'Quotation not found' });
@@ -1319,7 +1364,7 @@ app.get('/api/connectors', requireAuth, requireRole('BUSINESS_OWNER'), (req, res
 app.get('/api/integrations/status', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({
     gemini: !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY',
-    telegram: !!process.env.TELEGRAM_BOT_TOKEN,
+    telegram: !!process.env.TELEGRAM_BOT_TOKEN && !!process.env.TELEGRAM_AUTHORIZED_CHAT_ID,
     m365: !!process.env.M365_CLIENT_ID,
     payments: !!process.env.RAZORPAY_KEY_ID,
     gst: !!process.env.GST_API_KEY
@@ -1358,6 +1403,53 @@ app.post('/api/events', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) =
   */
 });
 
+// Live Telegram outbound: only a successful official Bot API response is delivery evidence.
+// A provider-accepted message is not proof that a person read it.
+app.post('/api/telegram/send', requireAuth, requireRole('BUSINESS_OWNER'), async (req, res) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_AUTHORIZED_CHAT_ID;
+  if (!token || !chatId) {
+    return res.status(503).json({ success: false, error: 'Telegram bot token and authorized chat ID are not configured.' });
+  }
+  if (!/^\d+:[A-Za-z0-9_-]{10,}$/.test(token)) {
+    return res.status(503).json({ success: false, error: 'Telegram bot token format is invalid.' });
+  }
+  const content = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (!content || content.length > 4096) {
+    return res.status(400).json({ success: false, error: 'Telegram message must contain 1–4096 characters.' });
+  }
+  try {
+    const result = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: content }),
+      signal: AbortSignal.timeout(8000)
+    });
+    const reply: any = await result.json();
+    if (!result.ok || reply?.ok !== true || !Number.isSafeInteger(reply?.result?.message_id)) {
+      return res.status(502).json({ success: false, error: 'Telegram API did not confirm message acceptance. No delivery was recorded.' });
+    }
+    try {
+      const message = dbStore.addTelegramMessage({
+        id: 'tlg-api-' + crypto.randomUUID(),
+        sender: 'owner', text: content, timestamp: new Date().toISOString(),
+        deliveryStatus: 'ACCEPTED_BY_TELEGRAM_API',
+        telegramMessageId: reply.result.message_id
+      });
+      return res.json({ success: true, data: message, providerAccepted: true });
+    } catch (persistError) {
+      console.error('Telegram API accepted message but local ledger write failed:', persistError);
+      return res.status(500).json({
+        success: false, providerAccepted: true,
+        error: 'Telegram API accepted this message but local persistence failed. Check Telegram before retrying to avoid duplicate sends.'
+      });
+    }
+  } catch (err: any) {
+    console.error('Telegram outbound unavailable:', err?.message || 'provider error');
+    return res.status(502).json({ success: false, error: 'Telegram delivery not confirmed. Check provider connectivity and logs before retrying.' });
+  }
+});
+
 // Telegram Live Webhook (P1.4 Verified webhook secret & exact quote match)
 app.post('/api/telegram/webhook', (req, res) => {
   try {
@@ -1380,6 +1472,17 @@ app.post('/api/telegram/webhook', (req, res) => {
     const authorizedUser = process.env.TELEGRAM_AUTHORIZED_USER_ID;
     if (!authorizedUser || !authorizedChat) {
       return res.status(503).json({ success: false, error: 'Explicit Telegram authorized user and chat IDs must be configured.' });
+    }
+    if (!Number.isSafeInteger(update.update_id) || update.update_id < 0) {
+      return res.status(400).json({ success: false, error: 'Valid Telegram update_id required for replay protection.' });
+    }
+    const telegramUser = update.callback_query?.from || update.message?.from;
+    const telegramChat = update.callback_query?.message?.chat || update.message?.chat;
+    if (String(telegramUser?.id) !== String(authorizedUser) || String(telegramChat?.id) !== String(authorizedChat)) {
+      return res.status(403).json({ success: false, error: 'Telegram update sender/chat not authorized.' });
+    }
+    if (!dbStore.markTelegramUpdateProcessed(update.update_id)) {
+      return res.json({ success: true, handled: 'duplicate_ignored', updateId: update.update_id });
     }
 
     if (update.callback_query) {

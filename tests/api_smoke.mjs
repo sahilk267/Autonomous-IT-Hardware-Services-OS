@@ -143,13 +143,69 @@ try {
     services: [{ name: 'Install', price: 50 }],
     discountAmount: 50
   }, cookie);
-  verify('Quote uses discountAmount and includes service revenue', () => {
+  verify('Unclassified quote is saved as pending-tax draft, without assumed 18% GST', () => {
     assert.equal(result.response.status, 201);
     assert.equal(result.body.data.subtotal, 450);
     assert.equal(result.body.data.discountAmount, 50);
-    assert.equal(result.body.data.totalAmount, 472);
+    assert.equal(result.body.data.taxStatus, 'PENDING_CLASSIFICATION');
+    assert.equal(result.body.data.gstAmount, 0);
+    assert.equal(result.body.data.totalAmount, 400); // pre-tax amount, not a final invoice
     assert.equal(result.body.data.status, 'DRAFT');
   });
+
+  // Phase 3: explicit line tax rates and proportional discount allocation.
+  result = await post('/api/quotes', {
+    customerName: 'Mixed Tax CI Customer', solutionName: 'Hardware + Installation',
+    items: [{ qty: 2, purchaseCost: 100, sellingPrice: 200, hsn: '8471', gstPercent: 18 }],
+    services: [{ id: 'service-1', name: 'Installation', price: 50, sac: '9987', gstPercent: 5 }],
+    discountAmount: 50, gstAmount: 999999, totalAmount: 1
+  }, cookie);
+  verify('Quote tax uses explicit line rates and allocates the discount', () => {
+    assert.equal(result.response.status, 201);
+    assert.equal(result.body.data.taxStatus, 'ESTIMATED_UNVERIFIED');
+    assert.equal(result.body.data.gstAmount, 66.22);
+    assert.equal(result.body.data.totalAmount, 466.22);
+    assert.equal(result.body.data.taxBreakdown.length, 2);
+    assert.equal(result.body.data.taxBreakdown[0].taxableAmount, 355.56);
+    assert.equal(result.body.data.taxBreakdown[1].taxableAmount, 44.44);
+  });
+  result = await post('/api/quotes', {
+    customerName: 'Invalid Tax CI Customer',
+    items: [{ qty: 1, purchaseCost: 10, sellingPrice: 100, hsn: '8471', gstPercent: 999 }],
+    services: [], discountAmount: 0
+  }, cookie);
+  verify('Quote rejects invalid declared GST rate rather than hardcoding 18%', () => {
+    assert.equal(result.response.status, 400);
+  });
+
+  // Phase 3: PO preparation is a real internal ledger record, not an external dispatch.
+  result = await post('/api/rfqs', { productName: 'CI SSD', requiredQty: 3, urgency: 'MEDIUM', status: 'PO_DISPATCHED' }, cookie);
+  verify('RFQ is created OPEN despite attempted client status forging', () => assert.equal(result.body.data.status, 'OPEN'));
+  const rfqId = result.body.data.id;
+  result = await post(`/api/rfqs/${rfqId}/dispatch-po`, { supplierId: 'unknown' }, cookie);
+  verify('PO preparation rejects unquoted supplier', () => assert.equal(result.response.status, 400));
+  result = await post(`/api/rfqs/${rfqId}/quotes`, {
+    supplierId: 'supplier-ci', supplierName: 'Real Quote Recorded in CI',
+    unitCost: 150, leadTimeDays: 5, inStock: true
+  }, cookie);
+  verify('Supplier quotation can be recorded', () => assert.equal(result.response.status, 200));
+  result = await post(`/api/rfqs/${rfqId}/dispatch-po`, { supplierId: 'supplier-ci' }, cookie);
+  verify('Selected supplier PO is prepared, price server-derived, NEVER marked dispatched', () => {
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.data.status, 'PO_PREPARED');
+    assert.equal(result.body.delivery, 'NOT_SENT');
+    assert.equal(result.body.data.preparedPO.amount, 450);
+    assert.equal(result.body.data.preparedPO.deliveryStatus, 'NOT_SENT');
+    assert.ok(result.body.data.preparedPO.poReference.startsWith('PO-DRAFT-'));
+  });
+  result = await post(`/api/rfqs/${rfqId}/dispatch-po`, { supplierId: 'supplier-ci' }, cookie);
+  verify('Duplicate PO preparation cannot silently overwrite selection', () => assert.equal(result.response.status, 400));
+  result = await request('/api/rfqs', {}, cookie);
+  verify('PO preparation persists after independent API fetch', () =>
+    assert.equal(result.body.data.find(row => row.id === rfqId).status, 'PO_PREPARED'));
+
+  result = await post('/api/telegram/send', { text: 'CI text that must NOT be sent' }, cookie);
+  verify('Outbound Telegram requires real configured provider and never simulates delivery', () => assert.equal(result.response.status, 503));
 
   result = await post('/api/invoices', { customer: 'Test Client', amount: 472, status: 'ACTIVE' }, cookie);
   verify('Invoice draft saved', () => assert.equal(result.response.status, 201));

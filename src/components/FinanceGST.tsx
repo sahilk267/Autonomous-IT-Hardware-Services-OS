@@ -47,6 +47,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
 }) => {
   const [selectedState, setSelectedState] = useState<'INTRA_STATE' | 'INTER_STATE'>('INTRA_STATE');
   const [invoiceAmount, setInvoiceAmount] = useState('');
+  const [manualGstRate, setManualGstRate] = useState('');
   const [localInvoices, setLocalInvoices] = useState<InvoiceItem[]>([]);
   const [showAddInvoiceModal, setShowAddInvoiceModal] = useState(false);
   const [newCustName, setNewCustName] = useState('');
@@ -59,13 +60,18 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
   const settledInvoices = allInvoices.filter(i => i.status === 'SETTLED');
   const activePayables: { vendor: string; poNo: string; amount: number; terms: string }[] = [];
 
-  const parsedAmount = parseInt(invoiceAmount, 10) || 0;
-  const taxableBase = Math.round(parsedAmount / 1.18);
+  const parsedAmount = Number(invoiceAmount);
+  const rate = manualGstRate.trim() === '' ? null : Number(manualGstRate);
+  const validTaxPreview = Number.isFinite(parsedAmount) && parsedAmount > 0 &&
+    rate !== null && Number.isFinite(rate) && rate >= 0 && rate <= 100;
+  const taxRate = validTaxPreview ? (rate as number) : 0;
+  const taxableBase = validTaxPreview ? Math.round(parsedAmount / (1 + taxRate / 100) * 100) / 100 : 0;
   const isIntra = selectedState === 'INTRA_STATE';
-  const cgst = isIntra ? Math.round(taxableBase * 0.09) : 0;
-  const sgst = isIntra ? Math.round(taxableBase * 0.09) : 0;
-  const igst = !isIntra ? Math.round(taxableBase * 0.18) : 0;
-  const totalTax = cgst + sgst + igst;
+  const totalTax = validTaxPreview ? Math.round((parsedAmount - taxableBase) * 100) / 100 : 0;
+  const cgst = isIntra ? Math.round(totalTax / 2 * 100) / 100 : 0;
+  const sgst = isIntra ? Math.round((totalTax - cgst) * 100) / 100 : 0;
+  const igst = !isIntra ? totalTax : 0;
+  const showMoney = (amount: number) => validTaxPreview ? `₹${amount.toLocaleString('en-IN')}` : 'Not calculated';
 
   const handleAddInvoiceSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -112,7 +118,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
   const overdueReceivables = activeReceivables.filter(r => r.status === 'OVERDUE').reduce((acc, r) => acc + r.amount, 0);
   const totalPayables = activePayables.reduce((acc, p) => acc + p.amount, 0);
   const netProjectedCash = totalReceivables - totalPayables;
-  const mtdGst = Math.round(totalReceivables * 0.18 / 1.18);
+  // GST liability requires actual outward tax invoices, credits and input-tax records.
 
   const formattedReceivables = activeReceivables.length === 0
     ? '₹0.00'
@@ -139,16 +145,12 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
             Finance, Indian GST Compliance & Cash Flow Engine
           </h1>
           <p className="text-sm text-slate-400">
-            GSTIN-validated e-invoicing, CGST/SGST/IGST tax reconciliation, credit risk assessment, and 30-day cash forecasting.
+            Internal receivables ledger and manual tax estimate only. No GST filing, e-invoice certification or verified cash forecast.
           </p>
         </div>
 
         <div className="text-xs bg-slate-900 border border-slate-800 px-3 py-2 rounded-xl text-slate-300 font-mono">
-          E-Invoice Portal: {tenant.isConfigured && tenant.gstin ? (
-            <span className="text-emerald-400 font-bold">NIC Configured ({tenant.gstin.slice(0, 5)}...) ✓</span>
-          ) : (
-            <span className="text-amber-400 font-bold">NIC Gateway Unconfigured</span>
-          )}
+          NIC / IRP E-Invoice Adapter: <span className="text-amber-400 font-bold">NOT IMPLEMENTED</span>
         </div>
       </div>
 
@@ -192,10 +194,10 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
             <div>
               <h2 className="text-base font-bold text-white flex items-center gap-2">
                 <FileCheck className="w-4 h-4 text-purple-400" />
-                GST Compliant B2B Tax Invoice & E-Invoice Simulator
+                GST Estimation Preview (Not a Tax Invoice)
               </h2>
               <p className="text-xs text-slate-400">
-                Determines Place of Supply (POS) and calculates CGST/SGST (same state) or IGST (interstate).
+                Uses a manually entered, unverified GST rate. Confirm HSN/SAC and place of supply with your tax advisor.
               </p>
             </div>
             
@@ -206,7 +208,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
             <div>
-              <label className="text-slate-400 block mb-1 font-semibold">Total Gross Invoice Amount (₹)</label>
+              <label className="text-slate-400 block mb-1 font-semibold">Gross amount including assumed GST (₹)</label>
               <input
                 type="number"
                 value={invoiceAmount}
@@ -226,7 +228,7 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
                       : 'bg-slate-950 text-slate-400 border-slate-800'
                   }`}
                 >
-                  Intra-State (Maharashtra)
+                  Intra-State (same state)
                 </button>
                 <button
                   onClick={() => setSelectedState('INTER_STATE')}
@@ -242,39 +244,49 @@ export const FinanceGST: React.FC<FinanceGSTProps> = ({
             </div>
           </div>
 
+          <div className="text-xs">
+            <label className="block font-semibold text-slate-300 mb-1">Manually verified rate (%) — required for preview</label>
+            <input type="number" min="0" max="100" step="0.01"
+              value={manualGstRate}
+              onChange={e => setManualGstRate(e.target.value)}
+              placeholder="Enter rate based on actual HSN/SAC"
+              className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2.5"
+            />
+            <p className="text-amber-400 mt-2">This calculator does not determine legal tax rates or issue tax invoices. Leave blank if classification is unknown.</p>
+          </div>
           {/* Tax Breakdown Matrix */}
           <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
             <div className="flex justify-between text-slate-400">
               <span>Taxable Value (Excl. Tax):</span>
-              <span className="font-mono font-bold text-white">₹{taxableBase.toLocaleString('en-IN')}</span>
+              <span className="font-mono font-bold text-white">{showMoney(taxableBase)}</span>
             </div>
 
             {isIntra ? (
               <>
                 <div className="flex justify-between text-slate-400">
-                  <span>Central GST (CGST @ 9%):</span>
-                  <span className="font-mono text-purple-300">₹{cgst.toLocaleString('en-IN')}</span>
+                  <span>Central GST (CGST @ {taxRate / 2}%):</span>
+                  <span className="font-mono text-purple-300">{showMoney(cgst)}</span>
                 </div>
                 <div className="flex justify-between text-slate-400">
-                  <span>State GST (SGST @ 9%):</span>
-                  <span className="font-mono text-purple-300">₹{sgst.toLocaleString('en-IN')}</span>
+                  <span>State GST (SGST @ {taxRate / 2}%):</span>
+                  <span className="font-mono text-purple-300">{showMoney(sgst)}</span>
                 </div>
               </>
             ) : (
               <div className="flex justify-between text-slate-400">
-                <span>Integrated GST (IGST @ 18%):</span>
-                <span className="font-mono text-purple-300 font-bold">₹{igst.toLocaleString('en-IN')}</span>
+                <span>Integrated GST (IGST @ {taxRate}%):</span>
+                <span className="font-mono text-purple-300 font-bold">{showMoney(igst)}</span>
               </div>
             )}
 
             <div className="flex justify-between text-slate-400 pt-2 border-t border-slate-800">
               <span>Total Goods & Service Tax:</span>
-              <span className="font-mono font-bold text-white">₹{totalTax.toLocaleString('en-IN')}</span>
+              <span className="font-mono font-bold text-white">{showMoney(totalTax)}</span>
             </div>
 
             <div className="flex justify-between text-base font-bold text-white pt-2 border-t border-slate-800">
-              <span>Final Invoice Total:</span>
-              <span className="font-mono text-emerald-400">₹{(taxableBase + totalTax).toLocaleString('en-IN')}</span>
+              <span>Gross Amount (Preview Only):</span>
+              <span className="font-mono text-emerald-400">{showMoney(taxableBase + totalTax)}</span>
             </div>
           </div>
 

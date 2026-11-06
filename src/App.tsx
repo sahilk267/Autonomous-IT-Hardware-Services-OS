@@ -322,7 +322,8 @@ export default function App() {
       id: `msg-${Date.now()}`,
       sender: 'owner',
       text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      deliveryStatus: 'LOCAL_ONLY'
     };
 
     setTelegramMessages(prev => [...prev, ownerMsg]);
@@ -336,14 +337,19 @@ export default function App() {
       });
 
       const data = await response.json();
-      const botText = data.text || 'Command processed.';
+      if (!response.ok || !data.success || typeof data.text !== 'string') {
+        showToast(data.error || 'Local AI command failed; no external Telegram message was sent.');
+        return;
+      }
+      const botText = data.text;
 
       const botReply: TelegramMessage = {
         id: `msg-bot-${Date.now()}`,
         sender: 'bot',
         text: botText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        suggestedActions: data.actions
+        suggestedActions: data.actions,
+        deliveryStatus: 'LOCAL_ONLY'
       };
 
       setTelegramMessages(prev => [...prev, botReply]);
@@ -351,6 +357,30 @@ export default function App() {
       console.error('Error in telegram command handler:', err);
     } finally {
       setIsThinking(false);
+    }
+  };
+
+  // Separate from the in-app AI console: only the provider-confirmed API path
+  // can claim a Telegram message was accepted externally.
+  const handleSendExternalTelegram = async (text: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/telegram/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.providerAccepted || !data.data) {
+        showToast(data.error || 'Telegram delivery not confirmed.');
+        return false;
+      }
+      setTelegramMessages(prev => [...prev, data.data]);
+      showToast('Telegram API accepted the message. Human read receipt is not available.');
+      return true;
+    } catch (error) {
+      console.error('Telegram outbound request failed:', error);
+      showToast('Telegram delivery not confirmed. Check connection before retrying.');
+      return false;
     }
   };
 
@@ -366,7 +396,7 @@ export default function App() {
         
         // Update Telegram message approval status
         setTelegramMessages(prev => prev.map(m => {
-          if (m.approvalData && (m.approvalData.referenceId === quoteId || m.approvalData.referenceId.includes(quoteId))) {
+          if (m.approvalData && (m.approvalData.referenceId === quoteId)) {
             return {
               ...m,
               approvalData: { ...m.approvalData, status: 'APPROVED' }
@@ -402,6 +432,14 @@ export default function App() {
 
   // Handle Quotation Generation from BOM Builder
   const handleGenerateQuote = async (solution: BOMSolution, customerName: string, customerGstin: string, discount: number) => {
+    if (!customerName?.trim()) {
+      showToast('Real customer name is required before creating a quotation draft.');
+      return;
+    }
+    if (solution.items.length + solution.servicesIncluded.length === 0) {
+      showToast('Quote must contain an actual hardware or service line.');
+      return;
+    }
     const totalCost = solution.items.reduce((acc, i) => acc + (i.purchaseCost * i.qty), 0);
     const grossItems = solution.items.reduce((acc, i) => acc + (i.sellingPrice * i.qty), 0);
     const servicesTotal = solution.servicesIncluded.reduce((acc, s) => acc + s.price, 0);
@@ -414,7 +452,7 @@ export default function App() {
     const newQuote: Quotation = {
       id: `quote-${Date.now()}`,
       quoteNumber: `QT-${Date.now().toString().slice(-6)}`,
-      customerName: customerName || 'Enterprise Client',
+      customerName: customerName.trim(),
       customerGstin: customerGstin || '',
       customerState: tenant.state,
       solutionName: solution.solutionName,
@@ -423,8 +461,9 @@ export default function App() {
       subtotal,
       discountAmount: discount,
       marginPercent: parseFloat(marginPercent.toFixed(1)),
-      gstAmount: Math.round(netSubtotal * 0.18),
-      totalAmount: Math.round(netSubtotal * 1.18),
+      gstAmount: 0,
+      totalAmount: netSubtotal,
+      taxStatus: 'PENDING_CLASSIFICATION',
       status: isException ? 'PENDING_OWNER_APPROVAL' : 'DRAFT',
       approvalReason: isException ? `Margin ${marginPercent.toFixed(1)}% is below 12.0% floor policy.` : undefined,
       createdDate: new Date().toISOString().split('T')[0],
@@ -439,7 +478,7 @@ export default function App() {
         body: JSON.stringify(newQuote)
       });
       const data = await res.json();
-      if (data.success && data.data) {
+      if (res.ok && data.success && data.data) {
         setQuotes(prev => [data.data, ...prev]);
 
         if (isException) {
@@ -448,7 +487,7 @@ export default function App() {
             sender: 'bot',
             text: `🚨 *APPROVAL REQUIRED: Quote #${data.data.quoteNumber}*\n\n` +
               `• *Customer:* ${data.data.customerName}\n` +
-              `• *Order Value:* ₹${data.data.totalAmount.toLocaleString('en-IN')}\n` +
+              `• *Draft Amount (GST classification pending if applicable):* ₹${data.data.totalAmount.toLocaleString('en-IN')}\n` +
               `• *Margin:* *${data.data.marginPercent}%* (Floor: 12.0%)\n` +
               `• *Autonomous Action:* Placed on hold. Awaiting Owner decision.`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -465,15 +504,17 @@ export default function App() {
           showToast(`Quote #${data.data.quoteNumber} added to the in-app approval queue. Telegram delivery not verified.`);
           setActiveTab('telegram');
         } else {
-          showToast(`Quotation #${data.data.quoteNumber} generated at ${data.data.marginPercent}% margin.`);
+          showToast(`Quote #${data.data.quoteNumber} saved as draft; GST status: ${data.data.taxStatus}. Not sent.`);
         }
+      } else {
+        showToast(data.error || 'Quotation draft could not be saved.');
       }
     } catch (err) {
       console.error('Sync quote failed:', err);
     }
   };
 
-  // Handle PO Dispatch in RFQ
+  // Prepare internal PO from RFQ; no external supplier notification
   const handleDispatchPO = async (rfqId: string, supplierId: string) => {
     try {
       const res = await fetch(`/api/rfqs/${rfqId}/dispatch-po`, {
@@ -482,9 +523,11 @@ export default function App() {
         body: JSON.stringify({ supplierId })
       });
       const data = await res.json();
-      if (data.success && data.data) {
+      if (res.ok && data.success && data.data) {
         setRfqs(prev => prev.map(r => r.id === rfqId ? data.data : r));
-        showToast(`PO dispatched for RFQ #${rfqId}.`);
+        showToast(`PO draft ${data.data.preparedPO?.poReference} saved internally. Supplier has NOT been contacted.`);
+      } else {
+        showToast(data.error || 'PO preparation failed; no supplier contacted.');
       }
     } catch (err) {
       console.error('Dispatch PO failed:', err);
@@ -1001,6 +1044,7 @@ export default function App() {
           <TelegramHub
             messages={telegramMessages}
             onSendMessage={handleSendMessage}
+            onSendTelegramMessage={handleSendExternalTelegram}
             onApproveQuote={handleApproveQuote}
             onRejectQuote={handleRejectQuote}
             quotations={quotes}
@@ -1125,7 +1169,7 @@ export default function App() {
       <footer className="bg-slate-900/90 border-t border-slate-800 text-xs text-slate-500 py-4 px-6 text-center">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <div>
-            <span className="font-semibold text-slate-400">Apex Autonomous IT OS</span> • Multi-Tenant Enterprise Architecture • GSTIN: {tenant.gstin || 'Not Configured'}
+            <span className="font-semibold text-slate-400">Apex Autonomous IT OS</span> • Single-tenant prototype (multi-tenant isolation pending) • GSTIN: {tenant.gstin || 'Not Configured'}
           </div>
           <div className="flex items-center gap-3">
             <span>Verified Server Persistence Active</span>

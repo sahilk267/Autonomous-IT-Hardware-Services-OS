@@ -16,11 +16,11 @@
 | SEC-02 | P1 | Basic browser Origin checks for writes | Implemented | Proxy/Hostinger test pending | Test forwarded host behavior |
 | SEC-03 | P1 | RBAC on 48 API routes + role-scoped state collection filtering | **CI verified** | [16/16 role HTTP tests pass](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Per-user/tenant row isolation, ownership & comprehensive threat modeling |
 | SEC-04 | P1 | Block browser-generated authoritative audit events | Implemented | End-to-end test pending | Replace all remaining client audit producers |
-| SEC-05 | P1 | Telegram webhook fails closed without allowed user + chat | Implemented | Telegram live webhook pending | Replay IDs, outbound API, delivery receipts |
+| SEC-05 | P1 | Telegram webhook validates sender/chat, uses durable update-id replay ledger | Phase 3 coded; CI pending | Security fixture test | Live Telegram callback acceptance & retention review |
 | DATA-01 | P0 | Existing `commit()` clone-before-write semantics retained | Already present at baseline | Disk-failure test pending | Durable backups & concurrent writes |
 | INV-01 | P1 | Exact productId & safe quantity for stock consumption, server cost only | Implemented | UI/API test pending | Stock integration workflow |
 | FIN-01 | P1 | Invoice settlement requires verified reference; duplicate blocked | Implemented | Bank evidence authenticity pending | Reconciliation and authorized finance workflow |
-| QUOTE-01 | P1 | Frontend/backend discount, subtotal, margin and quote state harmonized | Implemented | API regression pending | Replace **provisional** tax assumptions |
+| QUOTE-01 | P1 | Server recalculates discount-adjusted pricing and per-line GST estimates | Phase 3 coded; CI pending | Mixed rate + missing tax tests | Verify HSN/SAC; actual tax filings not implemented |
 | PROJ-01 | P3 | Project milestone completion persisted via API | Implemented | Reload test pending | Guard financial escrow claims |
 | FIELD-01 | P3 | Diagnosis no longer silently creates fake customer/site/parts | Implemented | UI test pending | Explicit booking form |
 | WORK-01 | P3 | Missing workflow execute route responds honestly with 501 | Implemented (fail closed) | API smoke pending | Actual audited action dispatcher |
@@ -33,9 +33,9 @@
 | GST-01 | P4 | Verified NIC IRP / GST filing adapter | **Pending / 501** | — | Real provider implementation |
 | RMM-01 | P4 | Authenticated real endpoint agent telemetry | **Pending** | — | Enrollment and ingestion |
 | MS-01 | P4 | Microsoft Graph provisioning/licensing | **Pending** | — | Credentialed adapter and tests |
-| TLG-01 | P4 | Real Telegram message delivery and callback replay store | **Pending** | — | Bot token and authorized IDs |
-| PO-01 | P3 | Genuine purchase order dispatch with delivery proof | **Pending** | — | Supplier integration or verifiable manual evidence |
-| TAX-01 | P3 | Accurate per-HSN/SAC GST + discount allocation | **Pending** | — | Server-side tax rules |
+| TLG-01 | P4 | Real Bot API sendMessage adapter + durable callback replay; local vs external UI status | Phase 3 coded; CI pending | HTTP fail-closed & replay tests | Live provider acceptance / webhook registration unverified |
+| PO-01 | P3 | Exact-supplier priced internal PO preparation, status PO_PREPARED/NOT_SENT | Phase 3 coded; CI pending | API tests incl duplicates | **External supplier dispatch still pending** |
+| TAX-01 | P3 | Per-line declared rates and proportional discount allocation; missing rates = PENDING_CLASSIFICATION | Phase 3 coded; CI pending | Mixed rate / classification HTTP checks | Actual statutory validation and NIC/IRP filing pending |
 | AUDIT-01 | P1 | Tamper-evident immutable audit and event/data atomicity | **Pending** | — | Central auditable transaction boundary |
 | MULTI-01 | P4 | Actual tenant isolation and scalable durable DB | **Pending** | — | Dedicated persistent DB migration plan |
 
@@ -49,6 +49,17 @@ Phase 2 implementation was pushed as commit `c714f7f5a7bd2206af6a055a589e5fddd27
 - CRM: real client/opportunity values; server-side stage transitions; no fabricated win probabilities or staff names.
 - Disputes: create from genuine projects; save internal recommendations only, not pretend escrow transfers.
 - CI: expanded HTTP persistence checks and separate multi-role access smoke suite. See [Phase 2 report](PHASE_2_IMPLEMENTATION_2026-11-07.md).
+
+## Phase 3 — 7 November 2026
+
+Phase 3 code is staged in the same draft PR, **not deployed**. CI verification pending at time of this document update.
+
+- `PO_PREPARED` records supplier quotation, quantity and cost as an internal ledger draft. Legacy `/dispatch-po` route is retained for backwards-compatible UI but **never actually sends the PO**.
+- Quote taxes are no longer blanket 18%. Tax is an **unverified estimate** using explicit per-line GST rate and HSN/SAC, with proportional discount allocation. Missing classification sets `PENDING_CLASSIFICATION` and quote total excludes unknown GST; it is **not a final payable invoice**.
+- Finance tax preview requires manual rate entry; NIC/IRP adapter remains not implemented.
+- Live Telegram outbound endpoint calls official sendMessage and records acceptance only after a positive provider response. No credentials are present in CI, so **external delivery has not been verified**.
+- Telegram webhook now stores update IDs for duplicate protection. Retention is bounded; long-term anti-replay and provider integration testing remain pending.
+- See [Phase 3 report](PHASE_3_IMPLEMENTATION_2026-11-07.md).
 
 ## Rules for subsequent work
 
