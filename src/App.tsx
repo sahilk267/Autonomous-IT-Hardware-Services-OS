@@ -263,21 +263,25 @@ export default function App() {
     }
   };
 
-  // Invoice Handlers
-  const handleAddInvoice = async (inv: InvoiceRecord) => {
+  // Internal receivable draft creation; a tax invoice is not issued here.
+  const handleAddInvoice = async (inv: InvoiceRecord): Promise<boolean> => {
     try {
       const res = await fetch('/api/invoices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(inv)
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setInvoices(prev => [data.data, ...prev]);
-        showToast(`Invoice ${data.data.invoiceNo} saved in ledger.`);
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Receivables ledger could not save this draft.');
+        return false;
       }
+      setInvoices(prev => [data.data, ...prev]);
+      showToast(`Receivable draft ${data.data.invoiceNo} recorded. No GST IRN was issued.`);
+      return true;
     } catch (err) {
-      console.error('Sync invoice failed:', err);
+      console.error('Sync receivable draft failed:', err);
+      showToast('Network error; receivables record has not been confirmed.');
+      return false;
     }
   };
 
@@ -1056,6 +1060,7 @@ export default function App() {
         {activeTab === 'bom' && (
           <BOMBuilder
             products={products}
+            tenant={tenant}
             onGenerateQuote={handleGenerateQuote}
             onRequestTelegramApproval={handleGenerateQuote as any}
           />

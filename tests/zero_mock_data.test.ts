@@ -394,6 +394,17 @@ async function runTestSuite() {
       }
     });
 
+    // Phase 3: guard against invented tax registrations and banking details on printable drafts.
+    await test('BOM quotation draft contains no fabricated GST, bank or 18% tax assumptions', async () => {
+      const p = path.join(process.cwd(), 'src', 'components', 'BOMBuilder.tsx');
+      const content = fs.readFileSync(p, 'utf8');
+      assert.strictEqual(content.includes('27AAACA9823P1Z9'), false);
+      assert.strictEqual(content.includes('HDFC0000060'), false);
+      assert.strictEqual(content.includes('Math.round(netSubtotal * 0.18)'), false);
+      assert.strictEqual(content.includes('Math.round(netSubtotal * 1.18)'), false);
+      assert.ok(content.includes('NOT A TAX INVOICE'));
+    });
+
     // 12. Codebase audit: zero window.alert calls
     await test('Zero window.alert calls exist in source code', async () => {
       const srcDir = path.join(process.cwd(), 'src');

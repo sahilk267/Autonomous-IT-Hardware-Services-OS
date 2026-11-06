@@ -20,6 +20,7 @@
 | DATA-01 | P0 | Existing `commit()` clone-before-write semantics retained | Already present at baseline | Disk-failure test pending | Durable backups & concurrent writes |
 | INV-01 | P1 | Exact productId & safe quantity for stock consumption, server cost only | Implemented | UI/API test pending | Stock integration workflow |
 | FIN-01 | P1 | Invoice settlement requires verified reference; duplicate blocked | Implemented | Bank evidence authenticity pending | Reconciliation and authorized finance workflow |
+| FIN-02 | P1 | Receivable creation rejects forged SETTLED status, bank reference and invoice IDs | Phase 3 code added | CI regression pending | Real tax invoicing and reconciliation remain pending |
 | QUOTE-01 | P1 | Server recalculates discount-adjusted pricing and per-line GST estimates | Phase 3 coded; CI verified | Mixed rate + missing tax tests | Verify HSN/SAC; actual tax filings not implemented |
 | PROJ-01 | P3 | Project milestone completion persisted via API | Implemented | Reload test pending | Guard financial escrow claims |
 | FIELD-01 | P3 | Diagnosis no longer silently creates fake customer/site/parts | Implemented | UI test pending | Explicit booking form |
@@ -50,6 +51,12 @@ Phase 2 implementation was pushed as commit `c714f7f5a7bd2206af6a055a589e5fddd27
 - CRM: real client/opportunity values; server-side stage transitions; no fabricated win probabilities or staff names.
 - Disputes: create from genuine projects; save internal recommendations only, not pretend escrow transfers.
 - CI: expanded HTTP persistence checks and separate multi-role access smoke suite. See [Phase 2 report](PHASE_2_IMPLEMENTATION_2026-11-07.md).
+
+## Phase 3 follow-up — draft safety checks
+
+- Printable BOM is a clearly marked draft without fabricated GSTIN, bank account, seller registration or fixed 18% calculation.
+- Internal receivable creation never trusts client-forged `SETTLED` status or payment references.
+- Pending independent CI rerun and browser acceptance; see [Phase 3 report](PHASE_3_IMPLEMENTATION_2026-11-07.md).
 
 ## Phase 3 — 7 November 2026
 

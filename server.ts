@@ -693,35 +693,39 @@ app.get('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) 
   res.json({ success: true, data: dbStore.getState().invoices });
 });
 
+// A receivables ledger entry is NOT a government-issued GST tax invoice.
 app.post('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const inv = req.body;
-    if (!inv || !inv.customer || !inv.amount) {
-      return res.status(400).json({ success: false, error: 'Customer and amount are required' });
+    const customer = typeof req.body?.customer === 'string' ? req.body.customer.trim() : '';
+    const amount = req.body?.amount;
+    const dueInDays = req.body?.dueInDays ?? 30;
+    if (!customer || typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 ||
+        !Number.isSafeInteger(dueInDays) || dueInDays < 0 || dueInDays > 365) {
+      return res.status(400).json({ success: false, error: 'Real customer, positive finite amount and valid due days (0–365) required.' });
     }
+    const id = crypto.randomUUID();
     const created = dbStore.addInvoice({
-      ...inv,
-      id: inv.id || `inv-${crypto.randomUUID()}`,
-      invoiceNo: inv.invoiceNo || `INV-${Date.now().toString().slice(-6)}`,
-      createdAt: inv.createdAt || new Date().toISOString().split('T')[0],
-      status: inv.status || 'ACTIVE'
+      id: 'inv-' + id,
+      invoiceNo: 'INV-DRAFT-' + id.slice(0, 12).toUpperCase(),
+      customer, amount, dueInDays,
+      gstin: typeof req.body?.gstin === 'string' ? req.body.gstin.trim() : '',
+      tenantId: dbStore.getState().tenant.id,
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString().slice(0, 10)
     });
-
     dbStore.addEvent({
-      id: `evt-${crypto.randomUUID()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'InvoiceCreated',
-      agent: (req as any).user?.username || 'Billing',
-      summary: `Created invoice ${created.invoiceNo} for ${created.customer} (Amount: ₹${created.amount.toLocaleString('en-IN')}).`,
-      autonomousActionTaken: 'Saved invoice in receivables ledger.',
+      id: `evt-${crypto.randomUUID()}`, timestamp: new Date().toISOString(),
+      eventType: 'ReceivablesDraftRecorded',
+      agent: (req as any).user.username,
+      summary: `Created internal receivable draft ${created.invoiceNo} for ${created.customer} (₹${created.amount.toLocaleString('en-IN')}).`,
+      autonomousActionTaken: 'Saved internal receivable only; no NIC IRN or settlement was generated.',
       humanApprovalRequired: false,
       approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
+      confidenceScore: 1
     });
-
-    res.status(201).json({ success: true, data: created });
+    return res.status(201).json({ success: true, data: created, taxInvoiceIssued: false });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

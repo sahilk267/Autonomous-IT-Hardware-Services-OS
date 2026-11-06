@@ -25,6 +25,13 @@
 - The UI now offers a distinct `Send to Telegram` action; normal AI commands remain local-only.
 - Webhooks require authorized chat/user, secret header, valid `update_id` and a durable, bounded replay ledger. The test suite does not access real Telegram.
 
+### Additional safety cleanup — printable BOM and receivables
+
+- Printable BOM draft no longer contains a fabricated seller legal name, GSTIN, address, customer address, vendor bank account, false 48-hour SLA, fixed warranty terms, HSN/SAC classifications, blanket 18% GST or a pretend issued quotation number.
+- Seller information comes from explicit tenant configuration; otherwise it is labelled unverified. The PDF preview is marked **DRAFT — NOT A TAX INVOICE** and totals exclude GST until confirmed server-side classification.
+- Invoice creation API now ignores client-forged `SETTLED` status, forged bank references, dates and IDs. Only valid positive receivables are accepted and persisted as internally issued draft records.
+- Finance modal now waits for confirmed backend saving, and cannot claim receipt of a government IRN.
+
 ## Acceptance and tests
 
 Run `npm run lint`, `npm run build`, `npm test`, `npm run smoke` and `npm run smoke:roles` in GitHub Actions. HTTP tests use throwaway database files.
