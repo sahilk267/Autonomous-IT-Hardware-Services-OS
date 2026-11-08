@@ -33,3 +33,5 @@ jobs:
         run: npm run smoke
       - name: Multi-role API access smoke test (throwaway DB)
         run: npm run smoke:roles
+      - name: Production data-path and offline backup smoke test
+        run: npm run smoke:data

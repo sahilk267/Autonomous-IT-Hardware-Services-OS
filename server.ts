@@ -213,7 +213,7 @@ app.post('/api/auth/login', (req, res) => {
       return res.status(400).json({ success: false, error: 'Username and password are required.' });
     }
     const user = dbStore.getUserByUsername(username);
-    if (!user || !user.salt || !user.passwordHash) {
+    if (!user || !user.salt || !user.passwordHash || user.disabledAt) {
       return res.status(401).json({ success: false, error: 'Invalid username or password.' });
     }
     const isValid = verifyPassword(password, user.salt, user.passwordHash);
@@ -268,6 +268,92 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
   }
   setSessionCookie(res, '', true);
   res.json({ success: true, message: 'Logged out successfully.' });
+});
+
+// Phase 4: local-only staff directory and credential lifecycle.
+// This is not Microsoft Entra/SSO provisioning and does not confer cross-tenant access.
+const STAFF_ROLES: readonly UserRole[] = [
+  'SALES_MANAGER', 'PROCUREMENT_LEAD', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'
+];
+const publicAccount = (user: {
+  id: string; username: string; name: string; email: string; role: UserRole;
+  tenantId: string; createdAt: string; disabledAt?: string; passwordChangedAt?: string;
+}) => ({
+  id: user.id, username: user.username, name: user.name, email: user.email,
+  role: user.role, tenantId: user.tenantId, createdAt: user.createdAt,
+  disabledAt: user.disabledAt, passwordChangedAt: user.passwordChangedAt
+});
+const validLocalPassword = (value: unknown): value is string =>
+  typeof value === 'string' && value.length >= 12 && value.length <= 128;
+
+app.get('/api/admin/staff', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  res.json({ success: true, data: dbStore.getUsers().map(publicAccount) });
+});
+
+app.post('/api/admin/staff', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const { username, name, email, role, temporaryPassword } = req.body || {};
+  if (typeof username !== 'string' || !/^[a-zA-Z0-9_-]{3,40}$/.test(username) ||
+      typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 120 ||
+      typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.length > 254 ||
+      !STAFF_ROLES.includes(role) || !validLocalPassword(temporaryPassword)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Valid username (3–40), name, email, non-owner role and temporary password (12–128 characters) required.'
+    });
+  }
+  try {
+    const { salt, hash } = hashPassword(temporaryPassword);
+    const user = dbStore.addStaffUser({
+      id: 'usr-' + crypto.randomUUID(),
+      username: username.trim(), name: name.trim(), email: email.trim(),
+      role: role as UserRole, tenantId: dbStore.getState().tenant.id,
+      createdAt: new Date().toISOString(), salt, passwordHash: hash
+    }, (req as any).user.username);
+    return res.status(201).json({ success: true, data: publicAccount(user), externalProvisioning: false });
+  } catch (err: any) {
+    const duplicate = String(err?.message || '').includes('already in use');
+    return res.status(duplicate ? 409 : 500).json({ success: false, error: duplicate ? 'Username or email already exists.' : 'Account could not be saved.' });
+  }
+});
+
+app.patch('/api/admin/staff/:id/disable', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const actor = (req as any).user;
+  if (req.params.id === actor.userId) {
+    return res.status(403).json({ success: false, error: 'You cannot disable your own account.' });
+  }
+  try {
+    const account = dbStore.disableStaffUser(req.params.id, actor.username);
+    if (!account) return res.status(404).json({ success: false, error: 'Staff account not found.' });
+    return res.json({ success: true, data: publicAccount(account), externalDeprovisioning: false });
+  } catch (err: any) {
+    if (String(err?.message || '').includes('Business owner')) {
+      return res.status(403).json({ success: false, error: 'The business owner cannot be disabled through this API.' });
+    }
+    return res.status(500).json({ success: false, error: 'Unable to disable staff account.' });
+  }
+});
+
+app.post('/api/auth/change-password', requireAuth, (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  const actor = (req as any).user;
+  const account = dbStore.getUserById(actor.userId);
+  if (!account || !account.passwordHash || !account.salt) {
+    return res.status(401).json({ success: false, error: 'Account not available.' });
+  }
+  if (!validLocalPassword(newPassword) || typeof currentPassword !== 'string' || currentPassword === newPassword) {
+    return res.status(400).json({ success: false, error: 'Enter current password and a different new password (12–128 characters).' });
+  }
+  if (!verifyPassword(currentPassword, account.salt, account.passwordHash)) {
+    return res.status(403).json({ success: false, error: 'Current password is incorrect.' });
+  }
+  try {
+    const { salt, hash } = hashPassword(newPassword);
+    dbStore.rotateUserPassword(actor.userId, salt, hash);
+    setSessionCookie(res, '', true);
+    return res.json({ success: true, reauthenticationRequired: true, message: 'Password changed. All sessions revoked; sign in again.' });
+  } catch {
+    return res.status(500).json({ success: false, error: 'Password rotation failed; old password was not intentionally changed.' });
+  }
 });
 
 app.get('/api/tenant', requireAuth, (req, res) => {

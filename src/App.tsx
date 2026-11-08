@@ -15,6 +15,7 @@ import { IntegrationsHub } from './components/IntegrationsHub';
 import { ExecutiveDashboard } from './components/ExecutiveDashboard';
 import { ResetModal } from './components/ResetModal';
 import { AuthModal } from './components/AuthModal';
+import { StaffAccessPanel } from './components/StaffAccessPanel';
 
 import {
   UserRole,
@@ -1135,6 +1136,13 @@ export default function App() {
             rmaClaims={rmaClaims}
             onCreateRMA={handleCreateRMA}
             onUpdateRMA={handleUpdateRMA}
+          />
+        )}
+
+        {activeTab === 'staff' && currentUser && (
+          <StaffAccessPanel
+            isOwner={currentUser.role === 'BUSINESS_OWNER'}
+            onReauthRequired={handleLogout}
           />
         )}
 

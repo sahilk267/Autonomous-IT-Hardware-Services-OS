@@ -1,5 +1,23 @@
 # Deployment Data Safety & First Administrator Setup
 
+## Phase 4 deployment guard (breaking, fail-closed)
+
+Production server startup now **refuses** to run if `APEX_DATA_FILE` is absent, blank or points inside the application checkout (including `data/app-store.json`). This prevents deployments from accidentally using the repository-tracked starter database. Existing production instances using the old default path will **not start** after upgrading until an authorized operator explicitly migrates the data. This is intentional: the server refuses rather than overwriting it.
+
+**Migration procedure (maintenance window):**
+1. Stop Apex OS and all writers; locate the currently deployed `data/app-store.json`. Never replace it with repository content.
+2. Create a private directory OUTSIDE the application checkout/web root, accessible only to the server/operator account.
+3. Run the offline snapshot tool with absolute paths:
+   `node scripts/backup_data.mjs --source /OLD/DEPLOYED/data/app-store.json --out /PRIVATE/BACKUPS/apex-before-migration.json`.
+4. Verify that the command printed SHA256 and that the backup exists with `0600` permissions. Verify its JSON and record counts offline. Store a separate copy in secured backup storage.
+5. Manually copy the **deployed populated** JSON file into the new private runtime directory, preserving ownership, mode and file content; don't copy the checked-in starter.
+6. Set `APEX_DATA_FILE=/PRIVATE/RUNTIME/app-store.json` as a production environment variable. Point to the new copy; verify exact SHA256 against the original before starting the service.
+7. Start one instance, log in, check real customers/invoices/users and verify session/logout. Keep the old copy and backup until recovery is proven.
+8. Confirm the new private path is outside `public_html`, static `dist`, Git checkout and all CI checkout roots. Never upload the backup into Git or send it through chat.
+
+**Operational constraints:** The backup tool requires an operator-provided existing source path and target outside the checkout. It uses exclusive create (will never overwrite an existing snapshot), SHA256 digest, and private file permissions. It is an **offline file copy**, not a live database snapshot, automatic recovery or encrypted offsite backup; service writes must be stopped.
+
+
 Apex OS currently persists runtime data in `data/app-store.json` and that filename is also tracked in the source repository. This is an operational risk that must be resolved with a controlled deployment migration.
 
 ## For new empty installs

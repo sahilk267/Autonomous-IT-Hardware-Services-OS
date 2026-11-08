@@ -164,6 +164,98 @@ try {
   r = await api('/api/telegram/send', { method: 'POST', cookie: sessions.field, body: { text: 'Do not send' } });
   check('Field engineer cannot invoke external Telegram send', () => assert.equal(r.status, 403));
 
+  // Phase 4 local staff lifecycle and password revocation. All identities are disposable.
+  r = await api('/api/admin/staff', { cookie: sessions.sales });
+  check('Non-owner cannot list private staff identities', () => assert.equal(r.status, 403));
+  r = await api('/api/admin/staff', { cookie: sessions.owner });
+  check('Owner can list staff without password hashes or salts', () => {
+    assert.equal(r.status, 200);
+    assert.equal(r.data.data.length, 5);
+    assert.ok(r.data.data.every(u => !('passwordHash' in u) && !('salt' in u)));
+  });
+  const staffInput = {
+    username: 'phase4field', name: 'Phase Four Field', email: 'phase4field@example.invalid',
+    role: 'FIELD_ENGINEER', temporaryPassword: 'Phase4TemporaryPassword!2026',
+    id: 'injected-id', tenantId: 'injected-tenant', disabledAt: '2020-01-01'
+  };
+  r = await api('/api/admin/staff', { method: 'POST', cookie: sessions.sales, body: staffInput });
+  check('Sales manager cannot create a staff account', () => assert.equal(r.status, 403));
+  r = await api('/api/admin/staff', {
+    method: 'POST', cookie: sessions.owner,
+    body: { ...staffInput, role: 'BUSINESS_OWNER' }
+  });
+  check('Owner-only staff API rejects creating another owner role', () => assert.equal(r.status, 400));
+  r = await api('/api/admin/staff', { method: 'POST', cookie: sessions.owner, body: staffInput });
+  check('Owner creates real local staff with authoritative ID and tenant', () => {
+    assert.equal(r.status, 201);
+    assert.equal(r.data.data.role, 'FIELD_ENGINEER');
+    assert.notEqual(r.data.data.id, 'injected-id');
+    assert.equal(r.data.data.tenantId, starter.tenant.id);
+    assert.ok(!r.data.data.disabledAt);
+    assert.ok(!('passwordHash' in r.data.data));
+    assert.ok(!('temporaryPassword' in r.data.data));
+    assert.equal(r.data.externalProvisioning, false);
+  });
+  const newStaffId = r.data.data.id;
+  r = await api('/api/admin/staff', { method: 'POST', cookie: sessions.owner, body: staffInput });
+  check('Duplicate staff username/email is rejected', () => assert.equal(r.status, 409));
+  r = await api('/api/auth/login', {
+    method: 'POST', body: { username: 'phase4field', password: staffInput.temporaryPassword }
+  });
+  check('New staff account can sign in using actual password', () => assert.equal(r.status, 200));
+  const newStaffCookie = r.cookie.split(';')[0];
+  r = await api(`/api/admin/staff/${newStaffId}/disable`, { method: 'PATCH', cookie: sessions.owner });
+  check('Owner disables staff and reports external deprovisioning as false', () => {
+    assert.equal(r.status, 200);
+    assert.ok(r.data.data.disabledAt);
+    assert.equal(r.data.externalDeprovisioning, false);
+  });
+  r = await api('/api/state', { cookie: newStaffCookie });
+  check('Disabled staff existing session is revoked', () => assert.equal(r.status, 401));
+  r = await api('/api/auth/login', {
+    method: 'POST', body: { username: 'phase4field', password: staffInput.temporaryPassword }
+  });
+  check('Disabled staff cannot log in again', () => assert.equal(r.status, 401));
+  r = await api('/api/admin/staff/ci-owner/disable', { method: 'PATCH', cookie: sessions.owner });
+  check('Owner cannot disable their own business-owner identity', () => assert.equal(r.status, 403));
+  r = await api('/api/auth/change-password', {
+    method: 'POST', cookie: sessions.field,
+    body: { currentPassword: 'wrong-password', newPassword: 'Phase4NewPassword!2026' }
+  });
+  check('Password rotation requires correct current password', () => assert.equal(r.status, 403));
+  r = await api('/api/auth/change-password', {
+    method: 'POST', cookie: sessions.field,
+    body: { currentPassword: password, newPassword: 'short' }
+  });
+  check('Weak replacement password is rejected', () => assert.equal(r.status, 400));
+  r = await api('/api/auth/change-password', {
+    method: 'POST', cookie: sessions.field,
+    body: { currentPassword: password, newPassword: 'Phase4NewPassword!2026' }
+  });
+  check('Valid password rotation revokes all sessions and clears browser cookie', () => {
+    assert.equal(r.status, 200);
+    assert.equal(r.data.reauthenticationRequired, true);
+    assert.match(r.cookie, /Max-Age=0/);
+  });
+  r = await api('/api/state', { cookie: sessions.field });
+  check('Old session cannot read private data after password rotation', () => assert.equal(r.status, 401));
+  r = await api('/api/auth/login', {
+    method: 'POST', body: { username: 'field', password }
+  });
+  check('Old password cannot authenticate after rotation', () => assert.equal(r.status, 401));
+  r = await api('/api/auth/login', {
+    method: 'POST', body: { username: 'field', password: 'Phase4NewPassword!2026' }
+  });
+  check('New password can authenticate after rotation', () => assert.equal(r.status, 200));
+  r = await api('/api/state', { cookie: sessions.owner });
+  check('Staff audit events and account disable persist atomically', () => {
+    assert.equal(r.status, 200);
+    assert.ok(r.data.data.events.some(e => e.eventType === 'StaffAccountCreated'));
+    assert.ok(r.data.data.events.some(e => e.eventType === 'StaffAccountDisabled'));
+    assert.ok(r.data.data.events.some(e => e.eventType === 'PasswordChanged'));
+    assert.ok(r.data.data.users.find(u => u.id === newStaffId)?.disabledAt);
+  });
+
   console.log('ROLE API SUMMARY: ' + tests + '/' + tests + ' PASSED');
 } finally {
   child.kill('SIGTERM');

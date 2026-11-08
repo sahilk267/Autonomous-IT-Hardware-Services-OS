@@ -20,6 +20,8 @@ export interface UserAccount {
   role: UserRole;
   tenantId: string;
   createdAt: string;
+  disabledAt?: string;
+  passwordChangedAt?: string;
 }
 
 export interface TenantInfo {

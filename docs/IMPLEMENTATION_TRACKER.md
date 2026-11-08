@@ -40,6 +40,10 @@
 | TAX-01 | P3 | Per-line declared rates and proportional discount allocation; missing rates = PENDING_CLASSIFICATION | Phase 3 coded; CI verified | Mixed rate / classification HTTP checks | Actual statutory validation and NIC/IRP filing pending |
 | AUDIT-01 | P1 | Tamper-evident immutable audit and event/data atomicity | **Pending** | — | Central auditable transaction boundary |
 | MULTI-01 | P4 | Actual tenant isolation and scalable durable DB | **Pending** | — | Dedicated persistent DB migration plan |
+| AUTH-04 | P1 | Owner-only local staff creation / deactivation, all-session revocation and password rotation | Phase 4 code staged | CI HTTP role tests pending | MFA, invite expiry, initial password change enforcement, full external identity JML |
+| DATA-04 | P0 | Production startup refuses implicit/in-checkout tracked JSON database | Phase 4 code staged | CI preflight pending | Maintenance-window migration to private absolute APEX_DATA_FILE |
+| BACKUP-04 | P1 | Operator-only offline backup with exclusive create, SHA256 and 0600 | Phase 4 code staged | Isolated fixture CI pending | Encryption, offsite retention, tested restore and live database replacement |
+| UI-04 | P2 | Staff Access / Change Password screen with real API feedback | Phase 4 code staged | Browser acceptance pending | Accessibility and role-specific UX testing |
 
 ## Phase 2 — 7 November 2026
 
@@ -51,6 +55,18 @@ Phase 2 implementation was pushed as commit `c714f7f5a7bd2206af6a055a589e5fddd27
 - CRM: real client/opportunity values; server-side stage transitions; no fabricated win probabilities or staff names.
 - Disputes: create from genuine projects; save internal recommendations only, not pretend escrow transfers.
 - CI: expanded HTTP persistence checks and separate multi-role access smoke suite. See [Phase 2 report](PHASE_2_IMPLEMENTATION_2026-11-07.md).
+
+## Phase 4 — 8 November 2026
+
+Implementation underway in the existing draft PR. **No production Hostinger environment modified.** Independent CI evidence will be recorded only after a green run.
+
+- Owner-only **local** staff identity creation and disable, four non-owner roles; passwords are scrypt-hashed and never returned to the browser in API responses.
+- Disabled staff lose all sessions in one DB transaction; `GET /api/state` remains collection-filtered. Every user can change their own password; old sessions are revoked and reauthentication required.
+- Account create, disable and password rotation append server audit events in the same JSON commit as the identity mutation. The underlying JSON store is still **not tamper-evident**.
+- New Account Security & Staff UI. This is **not Microsoft 365/Entra provisioning**, invite email delivery, SSO, MFA or per-object tenant access control.
+- Production `APEX_DATA_FILE` must be explicit and outside application checkout. Existing deployments running from the tracked default path **will refuse startup**, not silently reset business data.
+- Offline backup CLI generates a non-overwriting `0600` snapshot and SHA256 digest only when writes are stopped. It is not an encrypted/offsite automated backup or a verified restore.
+- Deployment migration checklist: [Deployment Data Safety](DEPLOYMENT_DATA_SAFETY.md); [Phase 4 report](PHASE_4_IMPLEMENTATION_2026-11-08.md).
 
 ## Phase 3 follow-up — draft safety checks
 

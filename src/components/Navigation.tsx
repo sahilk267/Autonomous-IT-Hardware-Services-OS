@@ -12,7 +12,8 @@ import {
   Laptop,
   Sliders,
   Network,
-  BarChart3
+  BarChart3,
+  UserCog
 } from 'lucide-react';
 
 export type TabKey = 
@@ -27,7 +28,8 @@ export type TabKey =
   | 'finance' 
   | 'automation' 
   | 'integrations' 
-  | 'events';
+  | 'events'
+  | 'staff';
 
 interface NavigationProps {
   activeTab: TabKey;
@@ -96,6 +98,11 @@ export const Navigation: React.FC<NavigationProps> = ({
       key: 'integrations',
       label: 'Integrations & Connectors',
       icon: <Network className="w-4 h-4 text-blue-400" />
+    },
+    {
+      key: 'staff',
+      label: 'Account Security & Staff',
+      icon: <UserCog className="w-4 h-4 text-emerald-300" />
     },
     {
       key: 'events',

@@ -94,9 +94,21 @@ export interface AppStoreState {
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 // Explicitly isolated database path is required for API smoke tests and deployments.
-const DB_FILE = process.env.APEX_DATA_FILE
-  ? path.resolve(process.env.APEX_DATA_FILE)
+const configuredDataFile = process.env.APEX_DATA_FILE?.trim();
+const DB_FILE = configuredDataFile
+  ? path.resolve(configuredDataFile)
   : path.join(DATA_DIR, 'app-store.json');
+
+// A deployment checkout can overwrite repository-tracked data/app-store.json.
+// Production must use a separately provisioned private location outside this checkout.
+if (process.env.NODE_ENV === 'production') {
+  const checkedPath = fs.existsSync(DB_FILE) ? fs.realpathSync(DB_FILE) : DB_FILE;
+  const relative = path.relative(process.cwd(), checkedPath);
+  const insideCheckout = relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
+  if (!configuredDataFile || insideCheckout) {
+    throw new Error('PRODUCTION DATA SAFETY: set APEX_DATA_FILE to an explicit private absolute path outside the application checkout. Deployment aborted; no data was overwritten.');
+  }
+}
 
 export const defaultConnectors: IntegrationConnector[] = [
   {
@@ -325,7 +337,74 @@ export class PersistentStore {
 
   public addUser(user: ServerUser): ServerUser {
     return this.commit((draft) => {
+      if (draft.users.some(existing => existing.username.toLowerCase() === user.username.toLowerCase())) {
+        throw new Error('Username already exists.');
+      }
+      if (draft.users.some(existing => existing.email.toLowerCase() === user.email.toLowerCase())) {
+        throw new Error('Email address already belongs to another user.');
+      }
       draft.users.push(user);
+      return user;
+    });
+  }
+
+  public addStaffUser(user: ServerUser, actor: string): ServerUser {
+    return this.commit((draft) => {
+      if (draft.users.some(existing =>
+        existing.username.toLowerCase() === user.username.toLowerCase() ||
+        existing.email.toLowerCase() === user.email.toLowerCase())) {
+        throw new Error('Username or email is already in use.');
+      }
+      draft.users.push(user);
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'StaffAccountCreated', agent: actor,
+        summary: 'Created staff account ' + user.username + ' with role ' + user.role + '.',
+        autonomousActionTaken: 'Owner-authorized local identity created; no external provider provisioning.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return user;
+    });
+  }
+
+  // Admin-controlled disable. Never allow removing the business owner via staff API.
+  // Revocation and account state change are written in one atomic file commit.
+  public disableStaffUser(id: string, actor: string): ServerUser | null {
+    return this.commit((draft) => {
+      const user = draft.users.find(item => item.id === id);
+      if (!user) return null;
+      if (user.role === 'BUSINESS_OWNER') {
+        throw new Error('Business owner cannot be disabled through staff management.');
+      }
+      if (!user.disabledAt) user.disabledAt = new Date().toISOString();
+      draft.sessions = draft.sessions.filter(session => session.userId !== id);
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'StaffAccountDisabled', agent: actor,
+        summary: 'Disabled staff account ' + user.username + ' and revoked active sessions.',
+        autonomousActionTaken: 'Local login blocked. External Microsoft/SSO access remains unmanaged.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return user;
+    });
+  }
+
+  // Password rotation revokes all active sessions, including current one.
+  public rotateUserPassword(id: string, newSalt: string, newHash: string): ServerUser | null {
+    return this.commit((draft) => {
+      const user = draft.users.find(item => item.id === id);
+      if (!user || user.disabledAt) return null;
+      user.salt = newSalt;
+      user.passwordHash = newHash;
+      user.passwordChangedAt = new Date().toISOString();
+      draft.sessions = draft.sessions.filter(session => session.userId !== id);
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'PasswordChanged', agent: user.username,
+        summary: 'Password rotated for local account ' + user.username + '; all sessions revoked.',
+        autonomousActionTaken: 'Local credential changed; external SSO credentials unchanged.',
+        humanApprovalRequired: false, approvalStatus: 'AUTO_APPROVED', confidenceScore: 1
+      });
       return user;
     });
   }
@@ -360,7 +439,7 @@ export class PersistentStore {
     }
     // Reject legacy passwordless users and apply the user's current role.
     const user = this.state.users.find(u => u.id === session.userId);
-    if (!user || !user.passwordHash || !user.salt) return null;
+    if (!user || !user.passwordHash || !user.salt || user.disabledAt) return null;
     return { ...session, role: user.role, username: user.username };
   }
 
