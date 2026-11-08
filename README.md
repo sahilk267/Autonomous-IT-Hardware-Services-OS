@@ -1,8 +1,8 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-06): in active implementation, NOT production-certified.** The deployed environment, tenant isolation, payment/GST adapters, external RMM/Microsoft automation, supplier PO transmission and workflow execution are not yet fully verified. The current JSON store is **single-instance**, not a hardened multi-tenant service. See [implementation tracker](docs/IMPLEMENTATION_TRACKER.md), [progress report](docs/IMPLEMENTATION_REPORT_2026-11-06.md), and [data safety instructions](docs/DEPLOYMENT_DATA_SAFETY.md). CI exercises typecheck, build, isolated tests and production-mode HTTP smoke checks; passing CI does not prove third-party integrations.
+> **Current status (2026-11-08): Phases 1–4 in active implementation, NOT production-certified.** Single-tenant JSON store only. Genuine multi-tenancy, verified provider adapters, Hostinger migration, production CSRF threat review, browser E2E tests, MFA and scalable durable storage are **pending**. See [implementation tracker](docs/IMPLEMENTATION_TRACKER.md), [Phase 4 report](docs/PHASE_4_IMPLEMENTATION_2026-11-08.md) and [private data migration instructions](docs/DEPLOYMENT_DATA_SAFETY.md). CI is isolated; passing tests is not a third-party integration acceptance.
 
-Apex is a production-grade, multi-tenant enterprise operating system built for IT hardware distributors, system integrators, managed service providers (MSPs), and IT field service organizations.
+Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
 ---
 
@@ -10,28 +10,28 @@ Apex is a production-grade, multi-tenant enterprise operating system built for I
 
 1. **Strict Zero Mock Data Guarantee**:
    - Zero hardcoded metrics, zero fake transaction records, and zero simulated telemetry.
-   - Initial application startup boots with a clean slate (0 business records across all 12 modules).
-   - Real atomic filesystem persistence (`data/app-store.json`) with automated pre-mutation backups (`data/app-store.backup.json`).
+   - A fresh development install can start empty; any existing deployed customer store must be preserved during upgrades.
+   - Single-process atomic JSON file commits; no automatic pre-mutation backups. Operator-only offline backups via `npm run backup:data` (service must be stopped).
 
 2. **Autonomous IT Operations & Workflows**:
    - **Executive CIO Hub**: Dynamic metrics calculated on real catalog, procurement, and active ledger balances.
    - **ITSM Helpdesk & CMDB**: Autonomous IT ticket lifecycle, hardware asset topology, and endpoint monitoring.
-   - **Procurement & RFQ Engine**: Multi-distributor quotation bidding, automated margin scoring, and purchase order dispatch.
+   - **Procurement & RFQ Engine**: Internal RFQs, manually entered supplier quotes and `PO_PREPARED` records. **No vendor dispatch adapter yet.**
    - **BOM Builder**: Intelligent AI-assisted bill-of-materials sizing powered by Gemini AI.
    - **Field Service & Dispatch**: GPS-tagged engineer dispatch, job status workflows, and atomic inventory spare-part consumption.
    - **Asset & AMC Manager**: Contract tracking, SLA threshold calculation, and automated preventative maintenance alerts.
-   - **Finance & GST Compliance**: Indian GST tax calculation (CGST/SGST/IGST), e-invoicing ledger, and receivable settlement.
-   - **Telegram Owner Hub**: Real mobile notification channel for quotation margin approvals and system status.
-   - **Immutable Audit Bus**: Real-time event bus capturing all administrative, inventory, and financial state transitions.
+   - **Finance / GST Preview**: Unverified per-line GST estimates where HSN/SAC and rates are supplied; internal receivable drafts only. **No government IRN or statutory filing.**
+   - **Telegram Owner Hub**: Local AI command console and optional Bot API send adapter; provider acceptance depends on configuration. No live delivery certified.
+   - **Audit Event Ledger**: Internal server-authored event records; not tamper-evident or legally immutable.
 
 3. **Enterprise Integration Connectors**:
    - Integrations explicitly reflect their operational connection status: `NOT_CONFIGURED` or `CONFIGURED`.
    - Google Gemini AI (`@google/genai` TypeScript SDK) for real AI processing.
    - Unconfigured payment/tax gateways return honest HTTP 503 status codes rather than fabricated transaction IDs.
 
-4. **Production Deployment Ready**:
-   - Optimized for single-instance or shared cPanel/hPanel hosting (including Hostinger Node.js Application Manager).
-   - Bundled CommonJS server (`dist/server.cjs`) supporting dynamic port binding (`PORT = Number(process.env.PORT) || 3000`).
+4. **Production Deployment Prerequisites**:
+   - Single-instance Node runtime. Hostinger integration and production deployment have not been accepted or certified.
+   - Bundled CommonJS server (`dist/server.cjs`) with production `PORT` configuration. **Requires an explicit absolute `APEX_DATA_FILE` outside the checkout in production**.
 
 ---
 
@@ -56,7 +56,10 @@ cp .env.example .env
 | `GEMINI_MODEL` | Gemini Model Alias (Default: `gemini-2.5-flash`) | Gemini API calls |
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token from BotFather | Mobile Telegram Approvals |
 | `RAZORPAY_KEY_ID` | Razorpay API Key ID | Payment Link Generation |
-| `GST_API_KEY` | Indian GST E-Invoicing API Key | E-Invoice NIC IRN Signing |
+| `GST_API_KEY` | Intended GST integration configuration only (adapter pending) | Future statutory filing |
+| `APEX_DATA_FILE` | Absolute writable JSON path **outside app checkout** | REQUIRED for production start |
+| `APEX_INITIAL_SETUP_TOKEN` | One-time randomly generated private token | Required for first owner enrollment |
+| `APEX_ALLOW_PRODUCTION_RESET` | Keep `false` | Disable dangerous production reset |
 
 ### 3. Run Development Server
 ```bash
@@ -70,8 +73,14 @@ npm test
 ```
 
 ### 5. Production Build
+
+**Mandatory before starting:** Complete [production data migration](docs/DEPLOYMENT_DATA_SAFETY.md). No automatic conversion of checked-in `data/app-store.json` is performed.
+
+
 ```bash
 npm run build
+# Production requires APEX_DATA_FILE pointing OUTSIDE the checkout; migrate existing data first.
+# Follow docs/DEPLOYMENT_DATA_SAFETY.md, then configure the private environment.
 npm start
 ```
 

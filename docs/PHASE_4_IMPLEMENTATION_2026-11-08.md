@@ -25,7 +25,13 @@
 
 ## Acceptance criteria
 
-Run `npm run lint`, `npm run build`, `npm test`, `npm run smoke`, `npm run smoke:roles` and `npm run smoke:data`. All write tests must use throwaway files. Validate staff account creation, forbidden role escalation, duplicate identity conflicts, deactivation/revocation, password rotation and backup fail-closed behavior. Record real Actions run results after execution rather than anticipating success.
+Automated gate verified in [run 42499544462](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462): `npm run lint`, `npm run build`, `npm test`, `npm run smoke`, `npm run smoke:roles` and `npm run smoke:data`. All write tests use throwaway files; no live Hostinger, Telegram, Microsoft or NIC credentials used.
+
+## Independently verified CI evidence
+
+[GitHub Actions run #42499544462](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) on the Phase 4 branch passed **TypeScript lint, production build, 16/16 isolated regression, 49/49 HTTP smoke, 39/39 role/identity checks and 9/9 production-data/backup checks**. This test included rejection of unset, tracked and relative production DB paths; recovery/backups were tested only with private disposable fixtures.
+
+**Documentation updated:** [README](../README.md), [Hostinger deployment guide](../HOSTINGER_DEPLOYMENT_GUIDE.md) and [migration checklist](DEPLOYMENT_DATA_SAFETY.md) now describe the **breaking production data-path requirement**. Do not deploy without migrating the actual customer file first.
 
 ## Incomplete / not claimed
 - **Not production-ready**: no true multi-tenancy, per-object ownership isolation, MFA, email invitation verification, SSO/M365 identity sync, account recovery flow, rate-limited login, or password change-at-first-login requirement.

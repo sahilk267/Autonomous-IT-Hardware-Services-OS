@@ -29,6 +29,7 @@
 | CI-02 | P4 | Production-mode Express HTTP smoke suite (38 checks, temp DB) | **Verified** | [Run 42283191813: 38/38 PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Browser, live provider tests |
 | CI-03 | P4 | Five-role HTTP access matrix (16 assertions, temporary seeded fixture) | **Verified** | [Run 42283191813: 16/16 PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Object-level authorization tests |
 | CI-04 | P4 | Phase 3 quote/GST, PO, Telegram and safe invoice/BOM checks | **CI verified** | [Run 42291102641: 16/16 regression, 49/49 API, 21/21 roles](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42291102641) | Browser / real provider acceptance |
+| CI-05 | P4 | Phase 4 identity, role and data-safety suites | **CI verified** | [Run 42499544462: 16/16 regression, 49/49 HTTP, 39/39 roles, 9/9 data](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Browser, migration and live provider acceptance |
 | DOC-01 | P4 | Implementation report + tracker | Added | Reviewed with code | Keep synchronized per commit |
 | PERSIST-01 | P3 | RMA, CRM, KB and disputes connected to typed server APIs and state | **API verified; browser pending** | [38/38 HTTP tests pass](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Browser UX, screen-based save/reload and OEM evidence |
 | INT-01 | P4 | Verified Razorpay/Cashfree transactions | **Pending / 501** | — | Real provider implementation |
@@ -40,10 +41,10 @@
 | TAX-01 | P3 | Per-line declared rates and proportional discount allocation; missing rates = PENDING_CLASSIFICATION | Phase 3 coded; CI verified | Mixed rate / classification HTTP checks | Actual statutory validation and NIC/IRP filing pending |
 | AUDIT-01 | P1 | Tamper-evident immutable audit and event/data atomicity | **Pending** | — | Central auditable transaction boundary |
 | MULTI-01 | P4 | Actual tenant isolation and scalable durable DB | **Pending** | — | Dedicated persistent DB migration plan |
-| AUTH-04 | P1 | Owner-only local staff creation / deactivation, all-session revocation and password rotation | Phase 4 code staged | CI HTTP role tests pending | MFA, invite expiry, initial password change enforcement, full external identity JML |
-| DATA-04 | P0 | Production startup refuses implicit/in-checkout tracked JSON database | Phase 4 code staged | CI preflight pending | Maintenance-window migration to private absolute APEX_DATA_FILE |
-| BACKUP-04 | P1 | Operator-only offline backup with exclusive create, SHA256 and 0600 | Phase 4 code staged | Isolated fixture CI pending | Encryption, offsite retention, tested restore and live database replacement |
-| UI-04 | P2 | Staff Access / Change Password screen with real API feedback | Phase 4 code staged | Browser acceptance pending | Accessibility and role-specific UX testing |
+| AUTH-04 | P1 | Owner-only local staff creation/disable, atomic audit, session revocation and password rotation | **CI verified** | [Phase 4 role suite 39/39](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | MFA, invite expiry, initial password change enforcement, full external identity JML |
+| DATA-04 | P0 | Production rejects absent, relative or checkout-local JSON data path | **CI verified** | [Phase 4 data-safety suite 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Controlled Hostinger migration to private absolute APEX_DATA_FILE |
+| BACKUP-04 | P1 | Operator-only offline backup with exclusive create, SHA256 and 0600 | **CI verified** | [Phase 4 data-safety suite 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Encryption, offsite retention, verified restoration |
+| UI-04 | P2 | Staff Access / Change Password screen with real API callbacks | **Built and typechecked** | Browser acceptance pending | Accessibility and role-specific UX testing |
 
 ## Phase 2 — 7 November 2026
 
@@ -58,7 +59,7 @@ Phase 2 implementation was pushed as commit `c714f7f5a7bd2206af6a055a589e5fddd27
 
 ## Phase 4 — 8 November 2026
 
-Implementation underway in the existing draft PR. **No production Hostinger environment modified.** Independent CI evidence will be recorded only after a green run.
+Implementation pushed to draft PR #1. **No production Hostinger environment modified.** [GitHub Actions run 42499544462](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) confirmed **TypeScript/build PASS, isolated 16/16, HTTP 49/49, role/identity 39/39 and production data-safety 9/9** against temporary stores.
 
 - Owner-only **local** staff identity creation and disable, four non-owner roles; passwords are scrypt-hashed and never returned to the browser in API responses.
 - Disabled staff lose all sessions in one DB transaction; `GET /api/state` remains collection-filtered. Every user can change their own password; old sessions are revoked and reauthentication required.
