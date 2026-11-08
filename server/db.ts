@@ -105,7 +105,7 @@ if (process.env.NODE_ENV === 'production') {
   const checkedPath = fs.existsSync(DB_FILE) ? fs.realpathSync(DB_FILE) : DB_FILE;
   const relative = path.relative(process.cwd(), checkedPath);
   const insideCheckout = relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
-  if (!configuredDataFile || insideCheckout) {
+  if (!configuredDataFile || !path.isAbsolute(configuredDataFile) || insideCheckout) {
     throw new Error('PRODUCTION DATA SAFETY: set APEX_DATA_FILE to an explicit private absolute path outside the application checkout. Deployment aborted; no data was overwritten.');
   }
 }

@@ -40,6 +40,15 @@ try {
   fixture.lastUpdated = 'CI_PRIVATE_FIXTURE';
   writeFileSync(source, JSON.stringify(fixture));
   const sourceBefore = readFileSync(source);
+  const relativeSource = path.relative(process.cwd(), source);
+  const relative = runScript(['dist/server.cjs'], {
+    NODE_ENV: 'production', PORT: '0', APEX_DATA_FILE: relativeSource
+  });
+  check('Production server requires an absolute private data file path', () => {
+    assert.notEqual(relative.status, 0);
+    assert.match(relative.stderr + relative.stdout, /PRODUCTION DATA SAFETY/);
+    assert.deepEqual(readFileSync(source), sourceBefore);
+  });
   const backupDir = path.join(dir, 'private-backups');
   mkdirSync(backupDir, { mode: 0o700 });
   const output = path.join(backupDir, 'apex-snapshot.json');
