@@ -35,6 +35,9 @@ interface AssetAMCManagerProps {
   onUpdateRMA: (id: string, updates: Partial<RMAClaim>) => Promise<RMAClaim | null>;
   onReclaimLicenses: (licenseId: string) => void;
   onUpdateAssetStatus: (assetId: string, status: AssetItem['status']) => void;
+  fieldEngineers: { id: string; name: string; username: string }[];
+  canManageAssignments: boolean;
+  onAssignAsset: (assetId: string, assignedUserId: string | null) => void;
   onExecuteJML: (type: 'JOINER' | 'LEAVER', employeeName: string) => void;
   onAddAsset?: (asset: AssetItem) => void;
   onAddAMC?: (amc: AMCContract) => void;
@@ -50,6 +53,9 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
   onUpdateRMA,
   onReclaimLicenses,
   onUpdateAssetStatus,
+  fieldEngineers,
+  canManageAssignments,
+  onAssignAsset,
   onExecuteJML,
   onAddAsset,
   onAddAMC
@@ -374,6 +380,20 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                       <td className="py-3.5 px-4">
                         <div className="text-slate-200 font-medium">{asset.assignedUser}</div>
                         <div className="text-[10px] text-slate-500">{asset.department}</div>
+                        {canManageAssignments && (
+                          <label className="block mt-1 text-[10px] text-slate-400">
+                            Assigned service engineer
+                            <select aria-label={`Engineer assigned to asset ${asset.assetTag}`}
+                              value={asset.assignedUserId || ''}
+                              onChange={e => onAssignAsset(asset.id, e.target.value || null)}
+                              className="block w-full mt-1 bg-slate-950 border border-slate-700 p-1 rounded text-xs text-white">
+                              <option value="">Unassigned (private)</option>
+                              {fieldEngineers.map(engineer => (
+                                <option key={engineer.id} value={engineer.id}>{engineer.name} ({engineer.username})</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                       </td>
 
                       <td className="py-3.5 px-4 text-slate-300">
@@ -404,7 +424,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {asset.status === 'IN_USE' ? (
+                          {canManageAssignments && (asset.status === 'IN_USE' ? (
                             <button
                               onClick={() => onUpdateAssetStatus(asset.id, 'UNDER_REPAIR')}
                               className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 text-[11px] font-semibold border border-slate-700 cursor-pointer"
@@ -418,7 +438,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                             >
                               Re-allocate
                             </button>
-                          )}
+                          ))}
                         </div>
                       </td>
                     </tr>

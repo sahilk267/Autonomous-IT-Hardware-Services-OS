@@ -44,6 +44,8 @@ interface ProjectMarketplaceProps {
   onReleaseMilestone: (projectId: string, milestoneId: string) => void;
   onAcceptProposal: (projectId: string, proposalId: string) => void;
   onCreateProject: (newProject: Partial<Project>) => void;
+  canManageProjectAccess: boolean;
+  onSetProjectAccess: (projectId: string, userId: string, grant: boolean) => Promise<boolean>;
   onRequestDiagnosticBooking: (diagnosisSummary: string, estimatedCost: number) => void;
   onAddProposal?: (proposal: Partial<Proposal>) => void;
   isCleanSlate?: boolean;
@@ -62,12 +64,37 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   onReleaseMilestone,
   onAcceptProposal,
   onCreateProject,
+  canManageProjectAccess,
+  onSetProjectAccess,
   onRequestDiagnosticBooking,
   onAddProposal
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'PROJECTS' | 'PACKAGES' | 'PROVIDERS' | 'AI_DIAGNOSIS' | 'CRM_PIPELINE' | 'DISPUTES'>('PROJECTS');
   const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
+
+  const [staffOptions, setStaffOptions] = useState<{ id: string; name: string; username: string; role: string; disabledAt?: string }[]>([]);
+  const [chosenStaffId, setChosenStaffId] = useState('');
+  const [accessBusy, setAccessBusy] = useState(false);
+  useEffect(() => {
+    if (!canManageProjectAccess) { setStaffOptions([]); return; }
+    let alive = true;
+    fetch('/api/admin/staff').then(r => r.ok ? r.json() : null).then(payload => {
+      if (alive) setStaffOptions(Array.isArray(payload?.data)
+        ? payload.data.filter((user: any) => ['SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'PROCUREMENT_LEAD'].includes(user.role))
+        : []);
+    }).catch(() => { if (alive) setStaffOptions([]); });
+    return () => { alive = false; };
+  }, [canManageProjectAccess]);
+
+  const editProjectAccess = async (projectId: string, userId: string, grant: boolean) => {
+    setAccessBusy(true);
+    try {
+      if (await onSetProjectAccess(projectId, userId, grant)) setChosenStaffId('');
+    } finally { setAccessBusy(false); }
+  };
+
+
 
   // CRM Pipeline State - starts empty
   const [showNewOppModal, setShowNewOppModal] = useState(false);
@@ -518,6 +545,38 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                       </span>
                     </div>
                   </div>
+
+                  
+                  {canManageProjectAccess && (
+                    <div className="border border-slate-700 rounded-lg bg-slate-950 p-3 space-y-2 text-xs">
+                      <h3 className="text-white font-bold">Internal Staff Project Access</h3>
+                      <p className="text-slate-400">Only local staff IDs are granted. No customer or external provider accounts are created.</p>
+                      <div className="flex gap-2">
+                        <select aria-label="Choose internal project collaborator" value={chosenStaffId}
+                          onChange={e => setChosenStaffId(e.target.value)}
+                          className="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-white">
+                          <option value="">Select staff</option>
+                          {staffOptions.filter(user => !user.disabledAt && user.id !== selectedProject.createdByUserId &&
+                            !(selectedProject.collaboratorUserIds || []).includes(user.id)).map(user => (
+                              <option key={user.id} value={user.id}>{user.name} ({user.role})</option>
+                          ))}
+                        </select>
+                        <button type="button" disabled={!chosenStaffId || accessBusy}
+                          onClick={() => void editProjectAccess(selectedProject.id, chosenStaffId, true)}
+                          className="bg-indigo-700 rounded text-white px-3 disabled:opacity-50">Grant</button>
+                      </div>
+                      {(selectedProject.collaboratorUserIds || []).map(userId => (
+                        <div key={userId} className="flex justify-between gap-3 border-t border-slate-800 pt-2">
+                          <span className="text-slate-300">
+                            {staffOptions.find(u => u.id === userId)?.name || userId}
+                          </span>
+                          <button type="button" disabled={accessBusy}
+                            onClick={() => void editProjectAccess(selectedProject.id, userId, false)}
+                            className="text-rose-300 underline disabled:opacity-50">Revoke</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
                   {/* Scope & Deliverables */}
                   <div className="space-y-3">

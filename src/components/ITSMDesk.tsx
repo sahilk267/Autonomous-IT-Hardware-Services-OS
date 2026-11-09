@@ -34,6 +34,7 @@ interface ITSMDeskProps {
   fieldEngineers: { id: string; name: string; username: string }[];
   canManageAssignments: boolean;
   onAssignTicket: (ticketId: string, assignedUserId: string | null) => void;
+  onAssignEndpoint: (endpointId: string, assignedUserId: string | null) => void;
   onRemoteFix: (endpointId: string, actionName: string) => void;
   onCreateTicket?: (newTicket: Partial<ITSMTicket> & { description?: string; department?: string }) => void;
   onAddEndpoint?: (endpoint: EndpointHealth) => void;
@@ -51,6 +52,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
   fieldEngineers,
   canManageAssignments,
   onAssignTicket,
+  onAssignEndpoint,
   onRemoteFix,
   onCreateTicket,
   onAddEndpoint
@@ -456,6 +458,20 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                       <div>
                         <h4 className="font-bold text-sm text-white">{ep.deviceName}</h4>
                         <span className="text-xs text-slate-400">{ep.assignedUser}</span>
+                        {canManageAssignments && (
+                          <label className="block mt-1 text-[10px] text-slate-400">
+                            Assigned service engineer
+                            <select aria-label={`Engineer assigned to endpoint ${ep.deviceName}`}
+                              value={ep.assignedUserId || ''}
+                              onChange={e => onAssignEndpoint(ep.id, e.target.value || null)}
+                              className="block w-full mt-1 rounded bg-slate-900 border border-slate-700 p-1 text-xs text-white">
+                              <option value="">Unassigned (private)</option>
+                              {fieldEngineers.map(engineer => (
+                                <option key={engineer.id} value={engineer.id}>{engineer.name} ({engineer.username})</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                       </div>
                       <span className="text-[10px] font-mono text-slate-500">{ep.lastSeen}</span>
                     </div>
@@ -533,10 +549,10 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                         onClick={() => {
                           setRemoteSessionDevice(ep);
                           setTerminalOutput([
-                            `Apex RMM Remote Terminal Gateway v4.8 [Secure TLS 1.3 Session #${ep.id.toUpperCase()}]`,
-                            `Connected to endpoint: ${ep.deviceName} (${ep.os})`,
-                            `Assigned User: ${ep.assignedUser} • Consent verified via 2FA token`,
-                            `Type or select any diagnostic command below.`
+                            'Remote terminal is NOT connected. This is a non-executing local preview.',
+                            `Registered device: ${ep.deviceName} (${ep.os})`,
+                            `Assigned user label: ${ep.assignedUser}. Consent has not been verified.`,
+                            'Commands are blocked until a verified RMM agent is integrated.'
                           ]);
                         }}
                         className="py-2 px-2.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 text-xs font-semibold border border-indigo-700/60 transition cursor-pointer flex items-center justify-center gap-1"
@@ -1064,11 +1080,11 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                   <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
                     <span>Remote Terminal & Diagnostic Session: {remoteSessionDevice.deviceName}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
-                      Encrypted TLS 1.3
+                      Not Connected
                     </span>
                   </h3>
                   <span className="text-[11px] text-slate-400">
-                    User: {remoteSessionDevice.assignedUser} • IP: 192.168.10.142 • Consent Token: Verified
+                    User label: {remoteSessionDevice.assignedUser} • No verified IP, consent or active remote session
                   </span>
                 </div>
               </div>
@@ -1077,7 +1093,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 onClick={() => setRemoteSessionDevice(null)}
                 className="text-slate-400 hover:text-white text-xs px-2.5 py-1 rounded-lg bg-slate-800 cursor-pointer"
               >
-                Terminate Session
+                Close Preview
               </button>
             </div>
 

@@ -581,6 +581,44 @@ export default function App() {
     }
   };
 
+
+  const updateServiceAssignment = async (kind: 'assets' | 'endpoints', id: string, assignedUserId: string | null) => {
+    try {
+      const response = await fetch(`/api/${kind}/${encodeURIComponent(id)}/assign`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedUserId })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !result.data) {
+        showToast(result.error || 'Service access assignment was not saved.');
+        return;
+      }
+      if (kind === 'assets') setAssets(old => old.map(a => a.id === id ? result.data : a));
+      else setEndpoints(old => old.map(e => e.id === id ? result.data : e));
+      showToast('Local service assignment saved. No outside messaging or agent enrollment occurred.');
+    } catch { showToast('Service assignment could not be confirmed.'); }
+  };
+
+  const handleSetProjectAccess = async (projectId: string, userId: string, grant: boolean): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/access`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, grant })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !result.data) {
+        showToast(result.error || 'Internal project access was not updated.');
+        return false;
+      }
+      setProjects(old => old.map(p => p.id === projectId ? result.data : p));
+      showToast('Local staff access updated; no external customer or provider access was changed.');
+      return true;
+    } catch {
+      showToast('Project sharing could not be confirmed.');
+      return false;
+    }
+  };
+
   // Handle Ticket Resolution
   const handleResolveTicket = async (ticketId: string) => {
     try {
@@ -1143,6 +1181,7 @@ export default function App() {
             fieldEngineers={fieldEngineers}
             canManageAssignments={currentUser?.role === 'BUSINESS_OWNER' || currentUser?.role === 'ENTERPRISE_IT_HEAD'}
             onAssignTicket={handleAssignTicket}
+            onAssignEndpoint={(id, userId) => void updateServiceAssignment('endpoints', id, userId)}
             onCreateKnowledgeArticle={handleCreateKnowledge}
             onMarkKnowledgeSolved={handleKnowledgeSolved}
           />
@@ -1156,6 +1195,8 @@ export default function App() {
             onReleaseMilestone={handleReleaseMilestone}
             onAcceptProposal={handleAcceptProposal}
             onCreateProject={handleCreateProject}
+            canManageProjectAccess={currentUser?.role === 'BUSINESS_OWNER'}
+            onSetProjectAccess={handleSetProjectAccess}
             onRequestDiagnosticBooking={handleRequestDiagnosticBooking}
             onAddProposal={handleAddProposal}
             crmOpportunities={crmOpportunities}
@@ -1188,6 +1229,9 @@ export default function App() {
             amcs={amcs}
             onReclaimLicenses={handleReclaimLicenses}
             onUpdateAssetStatus={handleUpdateAssetStatus}
+            fieldEngineers={fieldEngineers}
+            canManageAssignments={currentUser?.role === 'BUSINESS_OWNER' || currentUser?.role === 'ENTERPRISE_IT_HEAD'}
+            onAssignAsset={(id, userId) => void updateServiceAssignment('assets', id, userId)}
             onExecuteJML={handleExecuteJML}
             onAddAsset={handleAddAsset}
             onAddAMC={handleAddAMC}
