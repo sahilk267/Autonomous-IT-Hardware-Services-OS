@@ -205,6 +205,8 @@ export interface ITSMTicket {
   requesterName: string;
   requesterDept: string;
   assignedAgent: string;
+  assignedUserId?: string; // stable local staff user id; legacy display name is not authorization
+  reportedByUserId?: string;
   status: 'OPEN' | 'IN_PROGRESS' | 'WAITING_ON_PARTS' | 'RESOLVED';
   slaExpiresAt: string;
   slaPercentUsed: number;
@@ -236,6 +238,7 @@ export interface FieldJob {
   customerName: string;
   address: string;
   technicianName: string;
+  assignedUserId?: string; // required for field engineer visibility and mutations
   technicianPhone: string;
   status: 'SCHEDULED' | 'EN_ROUTE' | 'CHECKED_IN' | 'DIAGNOSING' | 'PARTS_REPLACED' | 'COMPLETED';
   scheduledTime: string;

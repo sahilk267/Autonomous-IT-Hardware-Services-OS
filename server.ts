@@ -6,6 +6,7 @@ import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { dbStore, defaultConnectors, hashPassword, verifyPassword } from './server/db.ts';
 import { UserRole } from './src/types.ts';
+import { loginAttemptLimiter } from './server/login_limit.ts';
 
 const app = express();
 
@@ -30,16 +31,31 @@ app.use(express.json({ limit: '1mb' }));
 // use a separate authenticated integration secret and are not browser sessions.
 app.use('/api', (req, res, next) => {
   if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  // Fetch Metadata and Origin are browser-supplied, but neither the proxy headers
+  // nor an X-Forwarded-Host from an arbitrary client are trusted.
+  const fetchSite = req.get('sec-fetch-site');
+  if (fetchSite === 'cross-site') {
+    return res.status(403).json({ success: false, error: 'Cross-site mutation rejected.' });
+  }
   const origin = req.headers.origin;
   if (origin) {
     try {
-      const host = req.get('x-forwarded-host') || req.get('host');
-      if (!host || new URL(origin).host !== host) {
+      const parsed = new URL(origin);
+      const configured = process.env.APEX_PUBLIC_ORIGIN?.trim();
+      const expected = configured ? new URL(configured).origin : null;
+      const host = req.get('host');
+      if (parsed.origin === 'null' ||
+          (expected ? parsed.origin !== expected :
+            !host || parsed.host.toLowerCase() !== host.toLowerCase())) {
         return res.status(403).json({ success: false, error: 'Cross-origin mutation rejected.' });
       }
     } catch {
       return res.status(403).json({ success: false, error: 'Malformed request origin.' });
     }
+  } else if (req.headers.cookie && fetchSite && fetchSite !== 'same-origin') {
+    // Modern browsers identify same-site requests from sibling subdomains;
+    // without an Origin, they cannot mutate a cookie-authenticated session.
+    return res.status(403).json({ success: false, error: 'Missing same-origin proof.' });
   }
   next();
 });
@@ -207,35 +223,39 @@ app.post('/api/auth/setup', (req, res) => {
 
 // Secure Login (scrypt KDF verification)
 app.post('/api/auth/login', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const { username, password } = req.body || {};
+  if (typeof username !== 'string' || !username.trim() || username.length > 120 ||
+      typeof password !== 'string' || !password || password.length > 1024) {
+    return res.status(400).json({ success: false, error: 'Username and password are required.' });
+  }
+  // Only use the socket peer here: untrusted X-Forwarded-For can be forged.
+  // With a shared reverse-proxy IP, source throttling is conservative; configure
+  // a central rate limiter before load-balancing to multiple server instances.
+  const source = req.socket.remoteAddress || 'unknown';
+  const retrySeconds = loginAttemptLimiter.getRetryAfterSeconds(username, source);
+  if (retrySeconds) {
+    res.setHeader('Retry-After', String(retrySeconds));
+    return res.status(429).json({ success: false, error: 'Too many failed sign-in attempts. Try again later.' });
+  }
   try {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ success: false, error: 'Username and password are required.' });
-    }
-    const user = dbStore.getUserByUsername(username);
-    if (!user || !user.salt || !user.passwordHash || user.disabledAt) {
+    const user = dbStore.getUserByUsername(username.trim());
+    const valid = Boolean(user && !user.disabledAt && user.salt && user.passwordHash &&
+      verifyPassword(password, user.salt, user.passwordHash));
+    if (!valid || !user) {
+      loginAttemptLimiter.recordFailure(username, source);
       return res.status(401).json({ success: false, error: 'Invalid username or password.' });
     }
-    const isValid = verifyPassword(password, user.salt, user.passwordHash);
-    if (!isValid) {
-      return res.status(401).json({ success: false, error: 'Invalid username or password.' });
-    }
-
+    loginAttemptLimiter.recordSuccess(username);
     const session = dbStore.createSession(user.id, user.username, user.role);
     setSessionCookie(res, session.token);
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        tenantId: user.tenantId
-      },
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.json({ success: true, user: {
+      id: user.id, username: user.username, name: user.name, email: user.email,
+      role: user.role, tenantId: user.tenantId
+    } });
+  } catch (err) {
+    console.error('Login failed due to a server error:', err);
+    return res.status(500).json({ success: false, error: 'Authentication is temporarily unavailable.' });
   }
 });
 
@@ -406,6 +426,10 @@ app.get('/api/state', requireAuth, (req, res) => {
     delete safeState.processedTelegramUpdateIds;
     for (const [key, value] of Object.entries(safeState)) {
       if (Array.isArray(value) && key !== 'users' && !allowed.has(key)) safeState[key] = [];
+    }
+    if (actor.role === 'FIELD_ENGINEER') {
+      safeState.tickets = rawState.tickets.filter(t => visibleTicket(t, actor));
+      safeState.jobs = rawState.jobs.filter(j => visibleJob(j, actor));
     }
     res.json({ success: true, data: safeState });
   } catch (err: any) {
@@ -844,9 +868,37 @@ app.patch('/api/invoices/:invoiceNo/settle', requireAuth, requireRole('BUSINESS_
   }
 });
 
+// Identity-based assignments. A display name is never an authorization credential.
+const visibleTicket = (ticket: { assignedUserId?: string; reportedByUserId?: string },
+  actor: { role: UserRole; userId: string }) =>
+  actor.role !== 'FIELD_ENGINEER' ||
+  ticket.assignedUserId === actor.userId || ticket.reportedByUserId === actor.userId;
+const visibleJob = (job: { assignedUserId?: string },
+  actor: { role: UserRole; userId: string }) =>
+  actor.role !== 'FIELD_ENGINEER' || job.assignedUserId === actor.userId;
+const validateAssignment = (userId: unknown): boolean => {
+  if (userId === undefined || userId === null || userId === '') return true;
+  if (typeof userId !== 'string') return false;
+  const user = dbStore.getUserById(userId);
+  return Boolean(user && user.role === 'FIELD_ENGINEER' &&
+    !user.disabledAt && user.tenantId === dbStore.getState().tenant.id);
+};
+const JOB_STAGES = [
+  'SCHEDULED', 'EN_ROUTE', 'CHECKED_IN', 'DIAGNOSING', 'PARTS_REPLACED', 'COMPLETED'
+] as const;
+const TICKET_STATES = ['OPEN','IN_PROGRESS','WAITING_ON_PARTS','RESOLVED'] as const;
+
+app.get('/api/field-engineers', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const data = dbStore.getUsers().filter(u => u.role === 'FIELD_ENGINEER' && !u.disabledAt)
+      .map(u => ({ id: u.id, username: u.username, name: u.name }));
+    res.json({ success: true, data });
+  });
+
 // Tickets CRUD (Protected)
 app.get('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().tickets });
+  const actor = (req as any).user;
+  res.json({ success: true, data: dbStore.getState().tickets.filter(t => visibleTicket(t, actor)) });
 });
 
 app.post('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
@@ -855,12 +907,20 @@ app.post('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_
     if (!ticket || !ticket.title) {
       return res.status(400).json({ success: false, error: 'Ticket title is required' });
     }
+    const actor = (req as any).user as { userId: string; role: UserRole };
+    const requestedAssignee = actor.role === 'FIELD_ENGINEER' ? null : (ticket.assignedUserId || null);
+    if (!validateAssignment(requestedAssignee)) {
+      return res.status(400).json({ success: false, error: 'Unknown or inactive assigned field engineer.' });
+    }
+    const assignee = requestedAssignee ? dbStore.getUserById(requestedAssignee) : null;
     const created = dbStore.addTicket({
       ...ticket,
-      id: ticket.id || `tkt-${crypto.randomUUID()}`,
-      ticketNumber: ticket.ticketNumber || `INC-${Date.now().toString().slice(-6)}`,
-      createdAt: ticket.createdAt || new Date().toISOString().split('T')[0],
-      status: ticket.status || 'OPEN'
+      id: `tkt-${crypto.randomUUID()}`,
+      ticketNumber: `INC-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
+      createdAt: new Date().toISOString().slice(0, 10),
+      status: 'OPEN', assignedUserId: assignee?.id,
+      assignedAgent: assignee?.name || 'Unassigned',
+      reportedByUserId: actor.userId
     });
 
     dbStore.addEvent({
@@ -882,16 +942,37 @@ app.post('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_
 });
 
 app.patch('/api/tickets/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
-  try {
-    const updated = dbStore.updateTicket(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Ticket not found' });
-    }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  const actor = (req as any).user as { userId: string; role: UserRole };
+  const ticket = dbStore.getState().tickets.find(t => t.id === req.params.id);
+  if (!ticket || !visibleTicket(ticket, actor)) return res.status(404).json({ success: false, error: 'Ticket not found.' });
+  if (actor.role === 'FIELD_ENGINEER' && ticket.assignedUserId !== actor.userId) {
+    return res.status(403).json({ success: false, error: 'Only the assigned engineer may update this ticket.' });
   }
+  const body = req.body || {};
+  const keys = Object.keys(body);
+  if (!keys.length || keys.some(k => k !== 'status' && k !== 'rootCause') ||
+      (body.status !== undefined && !TICKET_STATES.includes(body.status)) ||
+      (body.rootCause !== undefined && (typeof body.rootCause !== 'string' || body.rootCause.length > 2000))) {
+    return res.status(400).json({ success: false, error: 'Only valid ticket status and root-cause notes are editable. Use assignment route for staff changes.' });
+  }
+  const updated = dbStore.updateTicket(ticket.id, body);
+  res.json({ success: true, data: updated });
 });
+
+app.patch('/api/tickets/:id/assign', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const userId = req.body?.assignedUserId ?? null;
+    if (!validateAssignment(userId)) {
+      return res.status(400).json({ success: false, error: 'Select an active local field engineer ID.' });
+    }
+    try {
+      const updated = dbStore.assignTicket(req.params.id, userId || null, (req as any).user.username);
+      return updated ? res.json({ success: true, data: updated, externalNotificationSent: false }) :
+        res.status(404).json({ success: false, error: 'Ticket not found.' });
+    } catch {
+      return res.status(400).json({ success: false, error: 'Ticket assignment could not be saved.' });
+    }
+  });
 
 // Endpoints CRUD (Protected)
 app.get('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
@@ -938,7 +1019,8 @@ app.post('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRIS
 
 // Field Jobs & P3.1 Inventory Consumption (Protected)
 app.get('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().jobs });
+  const actor = (req as any).user;
+  res.json({ success: true, data: dbStore.getState().jobs.filter(j => visibleJob(j, actor)) });
 });
 
 app.post('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
@@ -947,12 +1029,19 @@ app.post('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_
     if (!job || !job.title) {
       return res.status(400).json({ success: false, error: 'Job title is required' });
     }
+    if (!validateAssignment(job.assignedUserId)) {
+      return res.status(400).json({ success: false, error: 'Select an active local field engineer ID.' });
+    }
+    const assignee = job.assignedUserId ? dbStore.getUserById(job.assignedUserId) : null;
     const created = dbStore.addJob({
       ...job,
-      id: job.id || `job-${crypto.randomUUID()}`,
-      jobCode: job.jobCode || `JOB-${Date.now().toString().slice(-6)}`,
-      status: job.status || 'SCHEDULED',
-      partsConsumed: job.partsConsumed || []
+      id: `job-${crypto.randomUUID()}`,
+      jobCode: `JOB-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
+      status: 'SCHEDULED',
+      assignedUserId: assignee?.id,
+      technicianName: assignee?.name || 'Unassigned',
+      customerSignatureObtained: false,
+      partsConsumed: []
     });
 
     dbStore.addEvent({
@@ -974,20 +1063,43 @@ app.post('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_
 });
 
 app.patch('/api/jobs/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
-  try {
-    const updated = dbStore.updateJob(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Job not found' });
-    }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  const actor = (req as any).user as { role: UserRole; userId: string };
+  const job = dbStore.getState().jobs.find(j => j.id === req.params.id);
+  if (!job || !visibleJob(job, actor)) return res.status(404).json({ success: false, error: 'Job not found.' });
+  const body = req.body || {};
+  if (Object.keys(body).length !== 1 || !JOB_STAGES.includes(body.status)) {
+    return res.status(400).json({ success: false, error: 'Only valid job status updates are supported. Customer sign-off cannot be self-certified.' });
   }
+  const current = JOB_STAGES.indexOf(job.status);
+  const next = JOB_STAGES.indexOf(body.status);
+  if (next !== current + 1) {
+    return res.status(409).json({ success: false, error: 'Advance field jobs one stage at a time.' });
+  }
+  const updated = dbStore.updateJob(job.id, { status: body.status });
+  return res.json({ success: true, data: updated, customerSignatureVerified: false });
 });
+
+app.patch('/api/jobs/:id/assign', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const userId = req.body?.assignedUserId ?? null;
+    if (!validateAssignment(userId)) {
+      return res.status(400).json({ success: false, error: 'Select an active local field engineer ID.' });
+    }
+    try {
+      const updated = dbStore.assignJob(req.params.id, userId || null, (req as any).user.username);
+      return updated ? res.json({ success: true, data: updated, externalDispatchSent: false }) :
+        res.status(404).json({ success: false, error: 'Job not found.' });
+    } catch {
+      return res.status(400).json({ success: false, error: 'Job assignment could not be saved.' });
+    }
+  });
 
 // P3.1 Strict Inventory Consumption
 app.post('/api/jobs/:id/consume-part', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
+    const actor = (req as any).user as { role: UserRole; userId: string };
+    const job = dbStore.getState().jobs.find(j => j.id === req.params.id);
+    if (!job || !visibleJob(job, actor)) return res.status(404).json({ success: false, error: 'Job not found.' });
     const { productId, quantity } = req.body || {};
     if (typeof productId !== 'string' || !productId.trim()) {
       return res.status(400).json({ success: false, error: 'Exact productId is required' });

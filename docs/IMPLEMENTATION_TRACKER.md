@@ -41,6 +41,10 @@
 | TAX-01 | P3 | Per-line declared rates and proportional discount allocation; missing rates = PENDING_CLASSIFICATION | Phase 3 coded; CI verified | Mixed rate / classification HTTP checks | Actual statutory validation and NIC/IRP filing pending |
 | AUDIT-01 | P1 | Tamper-evident immutable audit and event/data atomicity | **Pending** | — | Central auditable transaction boundary |
 | MULTI-01 | P4 | Actual tenant isolation and scalable durable DB | **Pending** | — | Dedicated persistent DB migration plan |
+| AUTH-05 | P1 | In-memory username + socket peer failed-login throttling | Phase 5 code staged | CI login abuse test pending | Shared persistent limiter, trusted proxy policy, independent security review |
+| CSRF-05 | P1 | Block cross-site Fetch Metadata and forged X-Forwarded-Host Origin bypass | Phase 5 code staged | CI cross-origin test pending | Complete CSRF/session architecture and real reverse-proxy acceptance |
+| OBJ-05 | P1 | Field engineer ticket/job row scoping, manager assignment endpoints | Phase 5 code staged | CI multi-role object tests pending | Further row controls for assets, endpoints, projects and all modules |
+| UI-05 | P2 | Manager assignment dropdowns from real staff registry and no fake sign-offs | Phase 5 code staged | TS/build pending | Browser E2E + accessibility testing |
 | AUTH-04 | P1 | Owner-only local staff creation/disable, atomic audit, session revocation and password rotation | **CI verified** | [Phase 4 role suite 39/39](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | MFA, invite expiry, initial password change enforcement, full external identity JML |
 | DATA-04 | P0 | Production rejects absent, relative or checkout-local JSON data path | **CI verified** | [Phase 4 data-safety suite 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Controlled Hostinger migration to private absolute APEX_DATA_FILE |
 | BACKUP-04 | P1 | Operator-only offline backup with exclusive create, SHA256 and 0600 | **CI verified** | [Phase 4 data-safety suite 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Encryption, offsite retention, verified restoration |
@@ -56,6 +60,16 @@ Phase 2 implementation was pushed as commit `c714f7f5a7bd2206af6a055a589e5fddd27
 - CRM: real client/opportunity values; server-side stage transitions; no fabricated win probabilities or staff names.
 - Disputes: create from genuine projects; save internal recommendations only, not pretend escrow transfers.
 - CI: expanded HTTP persistence checks and separate multi-role access smoke suite. See [Phase 2 report](PHASE_2_IMPLEMENTATION_2026-11-07.md).
+
+## Phase 5 — 9 November 2026
+
+Phase 5 code is being staged in draft PR #1; **no production deployment was performed**. CI verification must be recorded after the push.
+
+- Login throttling: conservative **8 failed attempts/account** and **80 failed attempts/socket peer** in 15 minutes; sends HTTP 429/Retry-After. In-memory **single process only** and not a substitute for MFA / shared distributed limits.
+- Browser cross-site mutation protection using Fetch Metadata + Origin comparison. An attacker-controlled `X-Forwarded-Host` no longer overrides the expected origin; optional `APEX_PUBLIC_ORIGIN` is recommended for a known reverse-proxy origin. CSRF review is not complete.
+- Field engineer ticket/job results are filtered to stable `assignedUserId` (tickets also visible to original reporter); unassigned legacy records do not automatically grant technician access. Managers can assign explicitly to a real enabled local field-engineer user ID.
+- Assigned engineers can update ticket status/root-cause or progress their own field job one stage at a time. Customer digital signature is **not** auto-certified by status changes. Cross-record stock consumption is blocked.
+- Existing generic endpoint/asset/project row isolation and full multi-tenancy remain pending. See [Phase 5 report](PHASE_5_IMPLEMENTATION_2026-11-09.md).
 
 ## Phase 4 — 8 November 2026
 

@@ -45,6 +45,7 @@ async function request(endpoint, options = {}, cookie) {
   const headers = {
     ...(options.body !== undefined ? { 'content-type': 'application/json' } : {}),
     ...(cookie ? { cookie } : {}),
+    ...(options.headers || {}),
   };
   const response = await fetch(base + endpoint, {
     method: options.method || 'GET',
@@ -323,6 +324,41 @@ try {
     assert.equal(result.body.data.crmOpportunities.length, 1);
     assert.equal(result.body.data.marketplaceDisputes.length, 1);
   });
+
+  // Phase 5: browser CSRF metadata and sign-in failure-rate defenses.
+  result = await request('/api/tenant', {
+    method: 'POST', body: { name: 'Cross-Origin-Forgery' },
+    headers: { origin: 'https://attacker.invalid', 'x-forwarded-host': 'attacker.invalid' }
+  }, cookie);
+  verify('Attacker-controlled forwarded host cannot bypass Origin checks', () =>
+    assert.equal(result.response.status, 403));
+  result = await request('/api/tenant', {
+    method: 'POST', body: { name: 'Cross-Site-Forgery' },
+    headers: { 'sec-fetch-site': 'cross-site' }
+  }, cookie);
+  verify('Cross-site Fetch Metadata browser mutation is rejected', () =>
+    assert.equal(result.response.status, 403));
+  result = await request('/api/auth/login', {
+    method: 'POST', body: { username: 'owner', password: 'TestOwnerPassword!2026' },
+    headers: { origin: base, 'sec-fetch-site': 'same-origin' }
+  });
+  verify('Valid same-origin login is not blocked by CSRF protection', () =>
+    assert.equal(result.response.status, 200));
+  const throttledUsername = 'ci-throttle-user';
+  for (let i = 0; i < 8; i++) {
+    result = await post('/api/auth/login', { username: throttledUsername, password: 'not-the-password' });
+    verify('Invalid login attempt ' + (i + 1) + ' uses generic credentials error', () =>
+      assert.equal(result.response.status, 401));
+  }
+  result = await post('/api/auth/login', { username: throttledUsername.toUpperCase(), password: 'not-the-password' });
+  verify('Username case change cannot evade failed-login rate threshold', () => {
+    assert.equal(result.response.status, 429);
+    assert.ok(Number(result.response.headers.get('retry-after')) > 0);
+    assert.ok(!('token' in result.body));
+  });
+  result = await post('/api/auth/login', { username: 'owner', password: 'TestOwnerPassword!2026' });
+  verify('Unrelated valid user is not blocked by another username throttle', () =>
+    assert.equal(result.response.status, 200));
 
   verify('Isolated DB was used', () => assert.ok(fs.existsSync(dbFile)));
   console.log('API SMOKE SUMMARY: ' + passed + '/' + passed + ' PASSED');

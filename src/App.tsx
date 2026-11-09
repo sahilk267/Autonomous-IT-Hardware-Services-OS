@@ -74,6 +74,7 @@ export default function App() {
   const [tickets, setTickets] = useState<ITSMTicket[]>([]);
   const [endpoints, setEndpoints] = useState<EndpointHealth[]>([]);
   const [jobs, setJobs] = useState<FieldJob[]>([]);
+  const [fieldEngineers, setFieldEngineers] = useState<{ id: string; username: string; name: string }[]>([]);
   const [cmdbNodes, setCmdbNodes] = useState<CMDBNode[]>([]);
   const [events, setEvents] = useState<AutonomousEvent[]>([]);
 
@@ -140,6 +141,10 @@ export default function App() {
         setKnowledgeArticles(s.knowledgeArticles || []);
         setCRMOpportunities(s.crmOpportunities || []);
         setMarketplaceDisputes(s.marketplaceDisputes || []);
+        fetch('/api/field-engineers')
+          .then(r => r.ok ? r.json() : null)
+          .then(result => setFieldEngineers(Array.isArray(result?.data) ? result.data : []))
+          .catch(() => setFieldEngineers([]));
         fetch('/api/integrations/status')
           .then(r => r.ok ? r.json() : null)
           .then(status => setIsTelegramConfigured(Boolean(status?.telegram)))
@@ -197,6 +202,7 @@ export default function App() {
     // Remove cached confidential operational data from the previous session.
     setQuotes([]); setLeads([]); setInvoices([]); setSuppliers([]);
     setRfqs([]); setTickets([]); setEndpoints([]); setJobs([]);
+    setFieldEngineers([]);
     setAssets([]); setLicenses([]); setAMCs([]); setProjects([]);
     setProposals([]); setProviders([]); setEvents([]); setProducts([]);
     setTelegramMessages([]); setWorkflows([]); setConnectors([]);
@@ -539,6 +545,42 @@ export default function App() {
     }
   };
 
+  const handleAssignTicket = async (ticketId: string, assignedUserId: string | null) => {
+    try {
+      const res = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/assign`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedUserId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Ticket assignment was not saved.');
+        return;
+      }
+      setTickets(prev => prev.map(t => t.id === ticketId ? data.data : t));
+      showToast('Ticket assigned in local database. No external message sent.');
+    } catch {
+      showToast('Ticket assignment could not be confirmed.');
+    }
+  };
+
+  const handleAssignJob = async (jobId: string, assignedUserId: string | null) => {
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/assign`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedUserId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Job assignment was not saved.');
+        return;
+      }
+      setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
+      showToast('Field job assigned internally; no provider dispatch sent.');
+    } catch {
+      showToast('Job assignment not confirmed.');
+    }
+  };
+
   // Handle Ticket Resolution
   const handleResolveTicket = async (ticketId: string) => {
     try {
@@ -608,12 +650,12 @@ export default function App() {
       const res = await fetch(`/api/jobs/${jobId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'COMPLETED', customerSignatureObtained: true })
+        body: JSON.stringify({ status: 'COMPLETED' })
       });
       const data = await res.json();
       if (data.success && data.data) {
         setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
-        showToast(`Job ${data.data.jobCode} completed and signed off.`);
+        showToast(`Job ${data.data.jobCode} marked complete internally. Customer e-sign is NOT verified.`);
       }
     } catch (err) {
       console.error('Sign off job failed:', err);
@@ -1088,6 +1130,9 @@ export default function App() {
             onCreateTicket={handleCreateTicket}
             onAddEndpoint={handleAddEndpoint}
             knowledgeArticles={knowledgeArticles}
+            fieldEngineers={fieldEngineers}
+            canManageAssignments={currentUser?.role === 'BUSINESS_OWNER' || currentUser?.role === 'ENTERPRISE_IT_HEAD'}
+            onAssignTicket={handleAssignTicket}
             onCreateKnowledgeArticle={handleCreateKnowledge}
             onMarkKnowledgeSolved={handleKnowledgeSolved}
           />
@@ -1120,6 +1165,9 @@ export default function App() {
             products={products}
             onSignOffJob={handleSignOffJob}
             onCreateJob={handleCreateJob}
+            fieldEngineers={fieldEngineers}
+            canManageJobs={currentUser?.role === 'BUSINESS_OWNER' || currentUser?.role === 'ENTERPRISE_IT_HEAD'}
+            onAssignJob={handleAssignJob}
           />
         )}
 

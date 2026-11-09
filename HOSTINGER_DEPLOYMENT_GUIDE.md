@@ -55,6 +55,7 @@ Hostinger Business Plan me built-in **Node.js Application Manager** milta hai.
    - Key: `APEX_DATA_FILE` | Value: **absolute writable private file** e.g. `/home/<user>/private/apex-os/app-store.json` (replace with your actual verified Hostinger path, do not use an example literally)
    - Key: `APEX_INITIAL_SETUP_TOKEN` | Value: strong one-time setup secret (first empty install only)
    - Key: `APEX_ALLOW_PRODUCTION_RESET` | Value: `false`
+   - Key: `APEX_PUBLIC_ORIGIN` | Value: exact public HTTPS origin (e.g. `https://yourdomain.com`) for CSRF Origin comparisons; do not add a path.
    - Confirm the data file is **outside the deployed application checkout** and that a populated existing store was migrated offline with a private verified backup before startup.
 4. Click **Create / Save**.
 

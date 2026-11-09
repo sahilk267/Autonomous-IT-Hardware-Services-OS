@@ -468,6 +468,27 @@ export class PersistentStore {
     });
   }
 
+  // Identity-based ticket assignment. Legacy assignedAgent display labels are not authorization.
+  public assignTicket(id: string, userId: string | null, actor: string): ITSMTicket | null {
+    return this.commit((draft) => {
+      const ticket = draft.tickets.find(t => t.id === id);
+      if (!ticket) return null;
+      const staff = userId ? draft.users.find(u => u.id === userId &&
+        u.role === 'FIELD_ENGINEER' && !u.disabledAt && u.tenantId === draft.tenant.id) : null;
+      if (userId && !staff) throw new Error('Assign an active local field engineer by exact user ID.');
+      ticket.assignedUserId = staff?.id;
+      ticket.assignedAgent = staff?.name || 'Unassigned';
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'TicketEngineerAssigned', agent: actor,
+        summary: 'Ticket ' + ticket.ticketNumber + ' assigned to ' + (staff?.username || 'unassigned') + '.',
+        autonomousActionTaken: 'Saved local assignment only; no external technician notification.',
+        humanApprovalRequired: false, approvalStatus: 'AUTO_APPROVED', confidenceScore: 1
+      });
+      return ticket;
+    });
+  }
+
   // Endpoints
   public addEndpoint(endpoint: EndpointHealth): EndpointHealth {
     return this.commit((draft) => {
@@ -690,6 +711,27 @@ export class PersistentStore {
       if (idx === -1) return null;
       draft.jobs[idx] = { ...draft.jobs[idx], ...updates };
       return draft.jobs[idx];
+    });
+  }
+
+  // Assignment and audit are written in a single JSON transaction.
+  public assignJob(id: string, userId: string | null, actor: string): FieldJob | null {
+    return this.commit((draft) => {
+      const job = draft.jobs.find(j => j.id === id);
+      if (!job) return null;
+      const staff = userId ? draft.users.find(u => u.id === userId &&
+        u.role === 'FIELD_ENGINEER' && !u.disabledAt && u.tenantId === draft.tenant.id) : null;
+      if (userId && !staff) throw new Error('Assign an active local field engineer by exact user ID.');
+      job.assignedUserId = staff?.id;
+      job.technicianName = staff?.name || 'Unassigned';
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'JobEngineerAssigned', agent: actor,
+        summary: 'Job ' + job.jobCode + ' assigned to ' + (staff?.username || 'unassigned') + '.',
+        autonomousActionTaken: 'Saved local assignment only; no external dispatch sent.',
+        humanApprovalRequired: false, approvalStatus: 'AUTO_APPROVED', confidenceScore: 1
+      });
+      return job;
     });
   }
 

@@ -31,6 +31,9 @@ interface ITSMDeskProps {
   onCreateKnowledgeArticle: (article: Partial<KnowledgeArticle>) => Promise<KnowledgeArticle | null>;
   onMarkKnowledgeSolved: (id: string) => Promise<KnowledgeArticle | null>;
   onResolveTicket: (ticketId: string) => void;
+  fieldEngineers: { id: string; name: string; username: string }[];
+  canManageAssignments: boolean;
+  onAssignTicket: (ticketId: string, assignedUserId: string | null) => void;
   onRemoteFix: (endpointId: string, actionName: string) => void;
   onCreateTicket?: (newTicket: Partial<ITSMTicket> & { description?: string; department?: string }) => void;
   onAddEndpoint?: (endpoint: EndpointHealth) => void;
@@ -45,6 +48,9 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
   onCreateKnowledgeArticle,
   onMarkKnowledgeSolved,
   onResolveTicket,
+  fieldEngineers,
+  canManageAssignments,
+  onAssignTicket,
   onRemoteFix,
   onCreateTicket,
   onAddEndpoint
@@ -305,8 +311,8 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                     ></div>
                   </div>
                   <div className="text-[11px] text-slate-400 flex items-center justify-between pt-1">
-                    <span>Target First Response: 15 mins (Met ✓)</span>
-                    <span>Target Resolution: 4 Hours Max</span>
+                    <span>First-response compliance: Not measured</span>
+                    <span>Contracted SLA: Requires verification</span>
                   </div>
                 </div>
 
@@ -319,13 +325,26 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[10px] uppercase">Assigned Engineer</span>
-                    <span className="font-semibold text-white">{selectedTicket.assignedAgent}</span>
+                    <span className="font-semibold text-white">{selectedTicket.assignedAgent || 'Unassigned'}</span>
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[10px] uppercase">Affected Hardware</span>
                     <span className="font-mono text-indigo-300">{selectedTicket.deviceAffected || 'N/A'}</span>
                   </div>
                 </div>
+
+                {canManageAssignments && (
+                  <div className="border border-slate-800 rounded-lg p-3 text-xs">
+                    <label htmlFor="ticket-assignee" className="block mb-1 text-slate-400">Assign local field engineer</label>
+                    <select id="ticket-assignee" value={selectedTicket.assignedUserId || ''}
+                      onChange={e => onAssignTicket(selectedTicket.id, e.target.value || null)}
+                      className="w-full p-2 rounded-lg bg-slate-950 text-white border border-slate-700">
+                      <option value="">Unassigned</option>
+                      {fieldEngineers.map(u => <option key={u.id} value={u.id}>{u.name} ({u.username})</option>)}
+                    </select>
+                    <p className="text-amber-300 mt-1">Local assignment only. No external notification.</p>
+                  </div>
+                )}
 
                 {/* Diagnostic Root Cause */}
                 {selectedTicket.rootCause && (
@@ -346,7 +365,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                       className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition cursor-pointer flex items-center gap-1.5"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      Mark Resolved with Customer Sign-Off
+                      Mark Resolved (Internal Only)
                     </button>
                     <button
                       onClick={() => setSolvedBanner("Parts requisition dispatched to inventory store.")}

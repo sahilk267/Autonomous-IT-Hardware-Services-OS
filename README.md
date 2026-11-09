@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-08): Phases 1–4 in active implementation, NOT production-certified.** Single-tenant JSON store only. Genuine multi-tenancy, verified provider adapters, Hostinger migration, production CSRF threat review, browser E2E tests, MFA and scalable durable storage are **pending**. See [implementation tracker](docs/IMPLEMENTATION_TRACKER.md), [Phase 4 report](docs/PHASE_4_IMPLEMENTATION_2026-11-08.md) and [private data migration instructions](docs/DEPLOYMENT_DATA_SAFETY.md). CI is isolated; passing tests is not a third-party integration acceptance.
+> **Current status (2026-11-09): Phases 1–5 in active implementation, NOT production-certified.** Single-tenant JSON store only. Genuine multi-tenancy, verified provider adapters, Hostinger migration, production CSRF threat review, browser E2E tests, MFA and scalable durable storage are **pending**. See [implementation tracker](docs/IMPLEMENTATION_TRACKER.md), [Phase 4 report](docs/PHASE_4_IMPLEMENTATION_2026-11-08.md) [Phase 5 security report](docs/PHASE_5_IMPLEMENTATION_2026-11-09.md) and [private data migration instructions](docs/DEPLOYMENT_DATA_SAFETY.md). CI is isolated; passing tests is not a third-party integration acceptance.
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -60,6 +60,7 @@ cp .env.example .env
 | `APEX_DATA_FILE` | Absolute writable JSON path **outside app checkout** | REQUIRED for production start |
 | `APEX_INITIAL_SETUP_TOKEN` | One-time randomly generated private token | Required for first owner enrollment |
 | `APEX_ALLOW_PRODUCTION_RESET` | Keep `false` | Disable dangerous production reset |
+| `APEX_PUBLIC_ORIGIN` | Optional explicit HTTPS origin used by Origin validation | Recommended behind reverse proxies |
 
 ### 3. Run Development Server
 ```bash

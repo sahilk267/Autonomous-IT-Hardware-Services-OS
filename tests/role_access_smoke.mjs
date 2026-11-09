@@ -38,7 +38,21 @@ starter.crmOpportunities.push({
 });
 starter.tickets.push({
   id: 'ci-ticket-001', ticketNumber: 'CI-TICKET-001', title: 'CI Incident',
-  priority: 'HIGH', status: 'OPEN', category: 'Network Outage'
+  priority: 'HIGH', status: 'OPEN', category: 'Network Outage', assignedUserId: 'ci-field'
+});
+starter.tickets.push({
+  id: 'ci-ticket-private', ticketNumber: 'CI-TICKET-PRIVATE', title: 'Private Unassigned Incident',
+  priority: 'MEDIUM', status: 'OPEN', category: 'Hardware Fault', assignedAgent: 'Unassigned'
+});
+starter.jobs.push({
+  id: 'ci-job-owned', jobCode: 'CI-JOB-OWNED', title: 'Assigned router task',
+  assignedUserId: 'ci-field', technicianName: 'field', customerName: 'CI Client',
+  status: 'SCHEDULED', partsConsumed: [], customerSignatureObtained: false
+});
+starter.jobs.push({
+  id: 'ci-job-unassigned', jobCode: 'CI-JOB-UNASSIGNED', title: 'Unassigned private work',
+  technicianName: 'Unassigned', customerName: 'CI Private',
+  status: 'SCHEDULED', partsConsumed: [], customerSignatureObtained: false
 });
 writeFileSync(dbFile, JSON.stringify(starter));
 
@@ -134,6 +148,85 @@ try {
     assert.equal(r.data.data.users.length, 5);
     assert.equal(r.data.data.crmOpportunities.length, 2);
   });
+  // Phase 5: field engineer can only read / mutate specifically owned records.
+  r = await api('/api/state', { cookie: sessions.field });
+  check('Field state only contains own tickets and assigned jobs', () => {
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.data.data.tickets.map(t => t.id), ['ci-ticket-001']);
+    assert.deepEqual(r.data.data.jobs.map(j => j.id), ['ci-job-owned']);
+  });
+  r = await api('/api/tickets', { cookie: sessions.field });
+  check('Direct ticket list cannot bypass field record filters', () =>
+    assert.deepEqual(r.data.data.map(t => t.id), ['ci-ticket-001']));
+  r = await api('/api/jobs', { cookie: sessions.field });
+  check('Direct job list cannot bypass field record filters', () =>
+    assert.deepEqual(r.data.data.map(j => j.id), ['ci-job-owned']));
+  r = await api('/api/field-engineers', { cookie: sessions.field });
+  check('Field engineer cannot enumerate staff directory', () => assert.equal(r.status, 403));
+  r = await api('/api/field-engineers', { cookie: sessions.ithead });
+  check('IT manager sees only ID and name of active eligible engineers', () => {
+    assert.equal(r.status, 200);
+    assert.equal(r.data.data.length, 1);
+    assert.deepEqual(Object.keys(r.data.data[0]).sort(), ['id','name','username']);
+  });
+  r = await api('/api/jobs/ci-job-unassigned', {
+    method: 'PATCH', cookie: sessions.field, body: { status: 'COMPLETED' }
+  });
+  check('Field engineer cannot change an unassigned job', () => assert.equal(r.status, 404));
+  r = await api('/api/jobs/ci-job-unassigned/consume-part', {
+    method: 'POST', cookie: sessions.field, body: { productId: 'whatever', quantity: 1 }
+  });
+  check('Field engineer cannot consume parts on another job', () => assert.equal(r.status, 404));
+  r = await api('/api/jobs/ci-job-owned', {
+    method: 'PATCH', cookie: sessions.field,
+    body: { status: 'EN_ROUTE', customerSignatureObtained: true }
+  });
+  check('Field engineer cannot forge customer sign-off', () => assert.equal(r.status, 400));
+  r = await api('/api/jobs/ci-job-owned', {
+    method: 'PATCH', cookie: sessions.field, body: { status: 'COMPLETED' }
+  });
+  check('Field engineer cannot skip job progress stages', () => assert.equal(r.status, 409));
+  r = await api('/api/jobs/ci-job-owned', {
+    method: 'PATCH', cookie: sessions.field, body: { status: 'EN_ROUTE' }
+  });
+  check('Assigned field engineer can advance job by one stage', () => assert.equal(r.status, 200));
+  r = await api('/api/jobs/ci-job-unassigned/assign', {
+    method: 'PATCH', cookie: sessions.field, body: { assignedUserId: 'ci-field' }
+  });
+  check('Field cannot assign itself to unassigned jobs', () => assert.equal(r.status, 403));
+  r = await api('/api/jobs/ci-job-unassigned/assign', {
+    method: 'PATCH', cookie: sessions.ithead, body: { assignedUserId: 'ci-owner' }
+  });
+  check('Manager cannot assign job to non-field role', () => assert.equal(r.status, 400));
+  r = await api('/api/jobs/ci-job-unassigned/assign', {
+    method: 'PATCH', cookie: sessions.ithead, body: { assignedUserId: 'ci-field' }
+  });
+  check('Manager can assign previously unassigned job to real field identity', () => {
+    assert.equal(r.status, 200);
+    assert.equal(r.data.data.assignedUserId, 'ci-field');
+    assert.equal(r.data.externalDispatchSent, false);
+  });
+  r = await api('/api/tickets/ci-ticket-private', {
+    method: 'PATCH', cookie: sessions.field, body: { status: 'RESOLVED' }
+  });
+  check('Field cannot modify unassigned private ticket', () => assert.equal(r.status, 404));
+  r = await api('/api/tickets/ci-ticket-private/assign', {
+    method: 'PATCH', cookie: sessions.ithead, body: { assignedUserId: 'ci-field' }
+  });
+  check('Manager can explicitly assign ticket to field identity', () => {
+    assert.equal(r.status, 200);
+    assert.equal(r.data.data.assignedUserId, 'ci-field');
+    assert.equal(r.data.externalNotificationSent, false);
+  });
+  r = await api('/api/tickets/ci-ticket-private', {
+    method: 'PATCH', cookie: sessions.field, body: { status: 'IN_PROGRESS' }
+  });
+  check('Assigned engineer can update ticket status', () => assert.equal(r.status, 200));
+  r = await api('/api/tickets/ci-ticket-private', {
+    method: 'PATCH', cookie: sessions.field, body: { assignedUserId: 'ci-owner', priority: 'CRITICAL' }
+  });
+  check('Field cannot forge ticket assignee or priority', () => assert.equal(r.status, 400));
+
   // Official Telegram webhook replay handling with an isolated, authorized test fixture.
   const telegramUpdate = {
     update_id: 90001,
