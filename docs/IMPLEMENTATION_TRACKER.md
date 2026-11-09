@@ -149,9 +149,14 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 - **CI-07:** [Push run #42715294577](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42715294577) and [PR run #42715304850](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42715304850) both green at [commit `a386046`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/a386046b654d72fbfed1bb6bb6893dd7d0423f66): typecheck/build PASS, regression **16/16**, auth **7/7**, HTTP **88/88**, roles **64/64**, data **9/9**.
 - **Still blocked:** real per-customer/project/proposal row-level ownership, multi-tenant database, verified provider interactions, tamper-evident audit, browser and Hostinger acceptance. **Do not merge PR #1 or deploy as production-ready.** See [Phase 7 report](PHASE_7_PROPOSAL_INTEGRITY_2026-11-10.md).
 
-## Phase 8 — 10 November 2026 (staff-object authorization; verification pending)
+## Phase 8 — 10 November 2026 (staff-object authorization; CI verified)
 
 - Field service assets and endpoints use explicit engineer identity; private/unassigned assets and linked RMA claims cannot be enumerated by field staff. Manager-only assignment APIs update audit and authorization together.
 - Projects: server-assigned creator IDs and owner-managed collaborator grants, consistent filtering across direct project/proposal endpoints and /api/state. Proposals save submitter identity, with visible-project checks for submission and award.
 - Owner project-sharing UI and manager engineer-assignment controls added. RMM terminal no longer asserts verified TLS session, IP address or user consent when no agent exists.
 - No production data rewritten. Legacy records lacking trusted ownership remain inaccessible to ordinary nonowner users unless explicitly granted. No customer-tenant isolation or real RMM adapter is implemented. CI/browser/Hostinger acceptance still pending.
+
+### Phase 8 verification and merge gate
+
+- Green [GitHub Actions push run #42719314182](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42719314182) and [PR run #42719323407](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42719323407) for `a23e8d4`: TypeScript/build PASS; isolated tests **16/16**, auth **7/7**, API **91/91**, role **95/95**, data-safety **9/9**.
+- CI acceptance is **not production sign-off**. Keep PR #1 draft and `main` unchanged; next gates are customer ownership, browser end-to-end access tests, database-level tenancy and recovery.
