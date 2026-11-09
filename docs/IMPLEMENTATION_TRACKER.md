@@ -124,7 +124,7 @@ Phase 3 code and follow-up safety fixes are on the same draft PR. [GitHub Action
 - **Gate C**: RMA/CRM/KB/disputes persistence + correct quotations, tax, PO lifecycle.
 - **Gate D**: Provider adapters and audited automation; tenant/data architecture and production checks.
 
-## Phase 6 — 10 November 2026 (candidate, CI evidence pending)
+## Phase 6 — 10 November 2026 (source implemented; initial CI verified)
 
 **Focus:** Project/milestone integrity, honest topology/automation UI and fail-closed workflow activation. Work is restricted to the existing draft branch, with `main` and production data untouched.
 
@@ -132,6 +132,6 @@ Phase 3 code and follow-up safety fixes are on the same draft PR. [GitHub Action
 - UI-06: New projects no longer create two fictional milestones or past-dated deadlines. Optional actual first milestone can be supplied explicitly. Legacy escrow states are shown as unverified, not a real payment.
 - CMDB-06: Removed fictional cascading incidents, customer impact and Telegram/failover claims. Topology explorer states what-if only.
 - AUTO-06: Workflow rules are persisted as inactive definitions, not live automation; activation and execution fail closed (`501`). UI inspection never reports trigger evaluation or external dispatch.
-- CI-06B: Production-mode HTTP and multi-role suites expanded with forged project/milestone/role checks. CI pass/fail must be recorded after GitHub Actions completion (do not claim completion from source edits).
+- CI-06B: [GitHub Actions #42713764341](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713764341) and [PR run #42713771860](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713771860) were green at commit `4681536`: TypeScript/build PASS, isolated 16/16, auth 7/7, HTTP 76/76, role 60/60, data 9/9. New workflow draft/activation assertions await next independent CI run.
 - Remaining: project ownership across customers/tenants; genuine payment/GST/provider adapters; audit atomicity; browser E2E; production migration and backups.
 

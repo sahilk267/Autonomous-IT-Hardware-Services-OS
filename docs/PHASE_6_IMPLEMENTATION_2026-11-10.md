@@ -2,7 +2,7 @@
 
 **Date:** 10 November 2026  
 **Working branch:** `fix/phase1-security-integrity-20261106`  
-**Status:** Candidate source implementation; GitHub Actions acceptance to be recorded after push.
+**Status:** Source implemented and CI verified; browser/live provider acceptance pending.
 
 ## Scope
 1. Project creation validates real client details, finite budget, declared category, optional authentic milestone dates and totals, and sets server-generated identifiers, timestamps and lifecycle statuses.
@@ -15,6 +15,12 @@
 
 ## Safe verification
 Run `npm run lint && npm run build && npm test && npm run test:auth && npm run smoke && npm run smoke:roles && npm run smoke:data`. All scripts use isolated fixture data; never run tests on actual `APEX_DATA_FILE`.
+
+## Verified CI evidence
+
+- Initial commit `a9759f1` exposed one old HTTP fixture that still supplied a prohibited client project code; corrected in `4681536`.
+- [GitHub Actions run #42713764341](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713764341) and [PR run #42713771860](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713771860) completed green on `4681536`: TypeScript and build passed, isolated 16/16, auth limiter 7/7, HTTP API 76/76, multi-role 60/60, private data/backup 9/9.
+- Additional workflow inactivity/activation checks added after this evidence; next Actions run must independently verify them.
 
 ## Known limitations
 No browser E2E or live external connectors were validated by this source change. Project/proposal/customer record ownership, escrow verification, payment reconciliation, actual service impact engine and encrypted restore-tested backups are still pending. Keep PR #1 Draft and main unchanged.

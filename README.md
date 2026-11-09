@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-09): Phases 1–5 in active implementation, NOT production-certified.** Single-tenant JSON store only. Genuine multi-tenancy, verified provider adapters, Hostinger migration, production CSRF threat review, browser E2E tests, MFA and scalable durable storage are **pending**. See [implementation tracker](docs/IMPLEMENTATION_TRACKER.md), [Phase 4 report](docs/PHASE_4_IMPLEMENTATION_2026-11-08.md) [Phase 5 security report](docs/PHASE_5_IMPLEMENTATION_2026-11-09.md) and [private data migration instructions](docs/DEPLOYMENT_DATA_SAFETY.md). CI is isolated; passing tests is not a third-party integration acceptance.
+> **Current status (2026-11-10): Phases 1–6 have CI-verified increments on a draft development branch, NOT production-certified.** Single-tenant JSON store only. Genuine multi-tenancy, verified provider adapters, Hostinger migration, production CSRF threat review, browser E2E tests, MFA and scalable durable storage are **pending**. See [implementation tracker](docs/IMPLEMENTATION_TRACKER.md), [Phase 4 report](docs/PHASE_4_IMPLEMENTATION_2026-11-08.md) [Phase 5 security report](docs/PHASE_5_IMPLEMENTATION_2026-11-09.md), [Phase 6 integrity report](docs/PHASE_6_IMPLEMENTATION_2026-11-10.md) and [private data migration instructions](docs/DEPLOYMENT_DATA_SAFETY.md). CI is isolated; passing tests is not a third-party integration acceptance.
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -9,13 +9,13 @@ Apex is an **evolving single-tenant prototype** for IT hardware distributors, sy
 ## ⚡ Key Architectural Capabilities
 
 1. **Strict Zero Mock Data Guarantee**:
-   - Zero hardcoded metrics, zero fake transaction records, and zero simulated telemetry.
+   - Clean initial business records and no fabricated live provider confirmations. Some legacy UI samples/provider claims remain under review; source test fixtures are isolated.
    - A fresh development install can start empty; any existing deployed customer store must be preserved during upgrades.
    - Single-process atomic JSON file commits; no automatic pre-mutation backups. Operator-only offline backups via `npm run backup:data` (service must be stopped).
 
-2. **Autonomous IT Operations & Workflows**:
+2. **IT Operations & Proposed Automation Rules**:
    - **Executive CIO Hub**: Dynamic metrics calculated on real catalog, procurement, and active ledger balances.
-   - **ITSM Helpdesk & CMDB**: Autonomous IT ticket lifecycle, hardware asset topology, and endpoint monitoring.
+   - **ITSM Helpdesk & CMDB**: IT ticket lifecycle, registered endpoint inventory, and what-if topology visualization. Live agent telemetry and discovery are pending.
    - **Procurement & RFQ Engine**: Internal RFQs, manually entered supplier quotes and `PO_PREPARED` records. **No vendor dispatch adapter yet.**
    - **BOM Builder**: Intelligent AI-assisted bill-of-materials sizing powered by Gemini AI.
    - **Field Service & Dispatch**: GPS-tagged engineer dispatch, job status workflows, and atomic inventory spare-part consumption.

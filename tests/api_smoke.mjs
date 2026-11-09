@@ -239,6 +239,19 @@ try {
   verify('Client audit fabrication is rejected', () => assert.equal(result.response.status, 403));
   result = await post('/api/workflows/ci-id/execute', {}, cookie);
   verify('Unsupported automation fails closed', () => assert.equal(result.response.status, 501));
+  result = await post('/api/workflows', {
+    name: 'CI prospective rule', triggerEvent: 'incident.opened',
+    condition: 'priority == CRITICAL', autonomousAction: 'notify', active: true
+  }, cookie);
+  verify('Workflow cannot be created with an active executor', () => {
+    assert.equal(result.response.status, 201);
+    assert.equal(result.body.data.active, false);
+    assert.equal(result.body.data.executionCount, 0);
+  });
+  const draftWorkflowId = result.body.data.id;
+  result = await patch(`/api/workflows/${draftWorkflowId}/toggle`, {}, cookie);
+  verify('Workflow activation is unavailable without audited action adapters', () =>
+    assert.equal(result.response.status, 501));
   result = await post('/api/state/reset', { confirm: true }, cookie);
   verify('Production database reset fails closed', () => assert.equal(result.response.status, 403));
   result = await post('/api/telegram/webhook', { update_id: 1 });
