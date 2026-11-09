@@ -20,7 +20,7 @@ Run `npm run lint && npm run build && npm test && npm run test:auth && npm run s
 
 - Initial commit `a9759f1` exposed one old HTTP fixture that still supplied a prohibited client project code; corrected in `4681536`.
 - [GitHub Actions run #42713764341](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713764341) and [PR run #42713771860](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713771860) completed green on `4681536`: TypeScript and build passed, isolated 16/16, auth limiter 7/7, HTTP API 76/76, multi-role 60/60, private data/backup 9/9.
-- Additional workflow inactivity/activation checks added after this evidence; next Actions run must independently verify them.
+- The additional workflow inactivity/activation checks passed in [run #42714106305](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42714106305) and [PR run #42714114832](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42714114832) on commit `ac27a4e`: TypeScript/build pass, isolated **16/16**, auth **7/7**, HTTP **78/78**, roles **60/60**, data safety **9/9**.
 
 ## Known limitations
 No browser E2E or live external connectors were validated by this source change. Project/proposal/customer record ownership, escrow verification, payment reconciliation, actual service impact engine and encrypted restore-tested backups are still pending. Keep PR #1 Draft and main unchanged.

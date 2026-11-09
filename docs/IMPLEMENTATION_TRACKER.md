@@ -132,6 +132,10 @@ Phase 3 code and follow-up safety fixes are on the same draft PR. [GitHub Action
 - UI-06: New projects no longer create two fictional milestones or past-dated deadlines. Optional actual first milestone can be supplied explicitly. Legacy escrow states are shown as unverified, not a real payment.
 - CMDB-06: Removed fictional cascading incidents, customer impact and Telegram/failover claims. Topology explorer states what-if only.
 - AUTO-06: Workflow rules are persisted as inactive definitions, not live automation; activation and execution fail closed (`501`). UI inspection never reports trigger evaluation or external dispatch.
-- CI-06B: [GitHub Actions #42713764341](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713764341) and [PR run #42713771860](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713771860) were green at commit `4681536`: TypeScript/build PASS, isolated 16/16, auth 7/7, HTTP 76/76, role 60/60, data 9/9. New workflow draft/activation assertions await next independent CI run.
+- CI-06B: [GitHub Actions #42713764341](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713764341) and [PR run #42713771860](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713771860) were green at commit `4681536`: TypeScript/build PASS, isolated 16/16, auth 7/7, HTTP 76/76, role 60/60, data 9/9. The expanded workflow draft/activation checks also passed in the subsequent green run #42714106305 (HTTP 78/78).
 - Remaining: project ownership across customers/tenants; genuine payment/GST/provider adapters; audit atomicity; browser E2E; production migration and backups.
 
+
+### Phase 6 final verification (10 November 2026)
+
+Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42714106305) and [PR verification #42714114832](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42714114832), both green: TypeScript/build PASS; regression **16/16**; auth **7/7**; HTTP **78/78**; roles **60/60**; data safety **9/9**. No browser, payment, tenant-isolation or live-provider acceptance was conducted. This evidence refers only to isolated GitHub Actions.
