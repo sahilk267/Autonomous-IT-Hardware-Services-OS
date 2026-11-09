@@ -30,6 +30,7 @@
 | CI-03 | P4 | Five-role HTTP access matrix (16 assertions, temporary seeded fixture) | **Verified** | [Run 42283191813: 16/16 PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Object-level authorization tests |
 | CI-04 | P4 | Phase 3 quote/GST, PO, Telegram and safe invoice/BOM checks | **CI verified** | [Run 42291102641: 16/16 regression, 49/49 API, 21/21 roles](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42291102641) | Browser / real provider acceptance |
 | CI-05 | P4 | Phase 4 identity, role and data-safety suites | **CI verified** | [Run 42499544462: 16/16 regression, 49/49 HTTP, 39/39 roles, 9/9 data](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Browser, migration and live provider acceptance |
+| CI-06 | P4 | Phase 5 login throttling, CSRF and object-authorization suites | **CI verified** | [Run 42609402631: auth 7/7, regression 16/16, API 62/62, roles 56/56, data 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Browser, multi-instance and real reverse-proxy testing |
 | DOC-01 | P4 | Implementation report + tracker | Added | Reviewed with code | Keep synchronized per commit |
 | PERSIST-01 | P3 | RMA, CRM, KB and disputes connected to typed server APIs and state | **API verified; browser pending** | [38/38 HTTP tests pass](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Browser UX, screen-based save/reload and OEM evidence |
 | INT-01 | P4 | Verified Razorpay/Cashfree transactions | **Pending / 501** | — | Real provider implementation |
@@ -41,10 +42,10 @@
 | TAX-01 | P3 | Per-line declared rates and proportional discount allocation; missing rates = PENDING_CLASSIFICATION | Phase 3 coded; CI verified | Mixed rate / classification HTTP checks | Actual statutory validation and NIC/IRP filing pending |
 | AUDIT-01 | P1 | Tamper-evident immutable audit and event/data atomicity | **Pending** | — | Central auditable transaction boundary |
 | MULTI-01 | P4 | Actual tenant isolation and scalable durable DB | **Pending** | — | Dedicated persistent DB migration plan |
-| AUTH-05 | P1 | In-memory username + socket peer failed-login throttling | Phase 5 code staged | CI login abuse test pending | Shared persistent limiter, trusted proxy policy, independent security review |
-| CSRF-05 | P1 | Block cross-site Fetch Metadata and forged X-Forwarded-Host Origin bypass | Phase 5 code staged | CI cross-origin test pending | Complete CSRF/session architecture and real reverse-proxy acceptance |
-| OBJ-05 | P1 | Field engineer ticket/job row scoping, manager assignment endpoints | Phase 5 code staged | CI multi-role object tests pending | Further row controls for assets, endpoints, projects and all modules |
-| UI-05 | P2 | Manager assignment dropdowns from real staff registry and no fake sign-offs | Phase 5 code staged | TS/build pending | Browser E2E + accessibility testing |
+| AUTH-05 | P1 | In-memory username + socket peer failed-login throttling | **CI verified** | [Run 42609402631: auth unit 7/7, API 62/62](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Shared persistent limiter, trusted proxy policy, independent security review |
+| CSRF-05 | P1 | Block cross-site Fetch Metadata and forged X-Forwarded-Host Origin bypass | **CI verified** | [Run 42609402631: HTTP checks PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Complete CSRF/session architecture and real reverse-proxy acceptance |
+| OBJ-05 | P1 | Field engineer ticket/job row scoping, manager assignment endpoints | **CI verified** | [Run 42609402631: role suite 56/56](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Further row controls for assets, endpoints, projects and all modules |
+| UI-05 | P2 | Manager assignment dropdowns from real staff registry and no fake sign-offs | **Built and typechecked** | [Run 42609402631: build PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Browser E2E + accessibility testing |
 | AUTH-04 | P1 | Owner-only local staff creation/disable, atomic audit, session revocation and password rotation | **CI verified** | [Phase 4 role suite 39/39](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | MFA, invite expiry, initial password change enforcement, full external identity JML |
 | DATA-04 | P0 | Production rejects absent, relative or checkout-local JSON data path | **CI verified** | [Phase 4 data-safety suite 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Controlled Hostinger migration to private absolute APEX_DATA_FILE |
 | BACKUP-04 | P1 | Operator-only offline backup with exclusive create, SHA256 and 0600 | **CI verified** | [Phase 4 data-safety suite 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Encryption, offsite retention, verified restoration |
@@ -63,7 +64,7 @@ Phase 2 implementation was pushed as commit `c714f7f5a7bd2206af6a055a589e5fddd27
 
 ## Phase 5 — 9 November 2026
 
-Phase 5 code is being staged in draft PR #1; **no production deployment was performed**. CI verification must be recorded after the push.
+Phase 5 was pushed to draft PR #1; **no production deployment was performed**. Independent [GitHub Actions run 42609402631](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) verified TypeScript/build PASS, regression **16/16**, login limiter **7/7**, production-mode HTTP **62/62**, role/ownership **56/56**, and data-safety **9/9**.
 
 - Login throttling: conservative **8 failed attempts/account** and **80 failed attempts/socket peer** in 15 minutes; sends HTTP 429/Retry-After. In-memory **single process only** and not a substitute for MFA / shared distributed limits.
 - Browser cross-site mutation protection using Fetch Metadata + Origin comparison. An attacker-controlled `X-Forwarded-Host` no longer overrides the expected origin; optional `APEX_PUBLIC_ORIGIN` is recommended for a known reverse-proxy origin. CSRF review is not complete.

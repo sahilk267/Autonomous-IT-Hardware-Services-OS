@@ -20,9 +20,15 @@
 - **Legacy records:** missing `assignedUserId` remains unassigned, and is not automatically mapped from display names. Explicit manager reconciliation is required.
 
 ### Regression coverage
-- Test forged forwarded-host, modern browser Fetch Metadata, same-origin requests, case-folded username limit, rate-limit Retry-After, other-account unaffected.
+- Test forged forwarded-host, modern browser Fetch Metadata, same-origin requests, case-folded username limit, rate-limit Retry-After, other-account unaffected; dedicated 7-case time-window and peer-budget limiter suite.
 - Test field state and direct endpoint row filters, unassigned job and ticket denial, customer signature forging, unauthorized part consumption, manager assignment, status progression and field record edits.
 - All tests use throwaway local JSON stores, no production data or external services.
+
+## Independently verified CI
+
+[GitHub Actions run #42609402631](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) completed successfully on the Phase 5 branch: **TypeScript lint PASS, production build PASS, 16/16 isolated regressions, 7/7 deterministic limiter unit tests, 62/62 production HTTP checks, 56/56 multi-role/object-access tests and 9/9 data-safety checks**.
+
+CI tested only disposable local stores and a synthetic reverse-proxy header. It does **not** prove browser-level usability, trusted proxy configuration, live Hostinger deployment or real multi-instance rate-limiting. Never treat test fixture endpoints or passwords as deployed credentials.
 
 ## Open blockers and next acceptance gate
 - The new controls cover ticket/job records **only**. Other modules (assets, endpoints, RMA, projects, client data) still need per-object ownership and authorization; real multi-tenant isolation is **not implemented**.
