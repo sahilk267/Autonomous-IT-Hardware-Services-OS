@@ -124,6 +124,34 @@ const ROLE_READ_COLLECTIONS: Record<UserRole, readonly string[]> = {
   ENTERPRISE_IT_HEAD: ['tickets','endpoints','jobs','assets','licenses','amcs','projects','proposals','rmaClaims','knowledgeArticles'],
   FIELD_ENGINEER: ['products','tickets','endpoints','jobs','assets','rmaClaims','knowledgeArticles']
 };
+
+// Phase 8 — same-tenant object grants, not customer tenancy.
+// Legacy rows missing stable ID assignments are owner/manager-only; display names never grant access.
+type LocalActor = { role: UserRole; userId: string };
+const visibleAsset = (asset: { assignedUserId?: string }, actor: LocalActor) =>
+  actor.role !== 'FIELD_ENGINEER' || (!!asset.assignedUserId && asset.assignedUserId === actor.userId);
+const visibleEndpoint = (endpoint: { assignedUserId?: string }, actor: LocalActor) =>
+  actor.role !== 'FIELD_ENGINEER' || (!!endpoint.assignedUserId && endpoint.assignedUserId === actor.userId);
+const visibleRMA = (claim: { assetId?: string }, actor: LocalActor) =>
+  actor.role !== 'FIELD_ENGINEER' ||
+  (!!claim.assetId && dbStore.getState().assets.some(asset =>
+    asset.id === claim.assetId && visibleAsset(asset, actor)));
+const visibleProject = (project: Project, actor: LocalActor) =>
+  actor.role === 'BUSINESS_OWNER' ||
+  ((actor.role === 'SALES_MANAGER' || actor.role === 'ENTERPRISE_IT_HEAD' ||
+    actor.role === 'PROCUREMENT_LEAD') &&
+   (project.createdByUserId === actor.userId ||
+    (Array.isArray(project.collaboratorUserIds) && project.collaboratorUserIds.includes(actor.userId))));
+const mayManageProject = (project: Project, actor: LocalActor) =>
+  actor.role === 'BUSINESS_OWNER' ||
+  (actor.role === 'ENTERPRISE_IT_HEAD' && project.createdByUserId === actor.userId);
+const visibleProjects = (actor: LocalActor) =>
+  dbStore.getState().projects.filter(project => visibleProject(project, actor));
+const visibleProposals = (actor: LocalActor) => {
+  const visibleIds = new Set(visibleProjects(actor).map(project => project.id));
+  return dbStore.getState().proposals.filter(proposal => visibleIds.has(proposal.projectId));
+};
+
 // Collection-level isolation within the current single-tenant instance only.
 // This does not implement per-customer / multi-tenant row-level authorization.
 
@@ -430,7 +458,12 @@ app.get('/api/state', requireAuth, (req, res) => {
     if (actor.role === 'FIELD_ENGINEER') {
       safeState.tickets = rawState.tickets.filter(t => visibleTicket(t, actor));
       safeState.jobs = rawState.jobs.filter(j => visibleJob(j, actor));
+      safeState.assets = rawState.assets.filter(a => visibleAsset(a, actor));
+      safeState.endpoints = rawState.endpoints.filter(e => visibleEndpoint(e, actor));
+      safeState.rmaClaims = rawState.rmaClaims.filter(r => visibleRMA(r, actor));
     }
+    if (allowed.has('projects')) safeState.projects = visibleProjects(actor);
+    if (allowed.has('proposals')) safeState.proposals = visibleProposals(actor);
     res.json({ success: true, data: safeState });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -976,18 +1009,20 @@ app.patch('/api/tickets/:id/assign', requireAuth,
 
 // Endpoints CRUD (Protected)
 app.get('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().endpoints });
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().endpoints.filter(e => visibleEndpoint(e, actor)) });
 });
 
 app.post('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const ep = req.body;
-    if (!ep || !ep.deviceName) {
+    if (!ep || typeof ep.deviceName !== 'string' || !ep.deviceName.trim()) {
       return res.status(400).json({ success: false, error: 'deviceName is required' });
     }
     const created = dbStore.addEndpoint({
       ...ep,
       id: `ep-${crypto.randomUUID()}`,
+      assignedUserId: undefined, // assignment requires owner/IT manager authorization
       lastSeen: 'Awaiting agent check-in',
       status: 'UNENROLLED',
       telemetryAvailable: false,
@@ -1016,6 +1051,24 @@ app.post('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRIS
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
+
+// Only internal service assignment IDs authorize endpoint visibility. No agent deployment occurs.
+app.patch('/api/endpoints/:id/assign', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const body = req.body;
+    if (!body || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'assignedUserId')) {
+      return res.status(400).json({ success: false, error: 'Exact assignedUserId is required (string or null).' });
+    }
+    const userId = body.assignedUserId;
+    if (userId !== null && (typeof userId !== 'string' || !userId.trim())) {
+      return res.status(400).json({ success: false, error: 'Use an active field engineer ID or null.' });
+    }
+    if (!validateAssignment(userId)) return res.status(400).json({ success: false, error: 'Unknown, inactive or non-field user ID.' });
+    const endpoint = dbStore.assignEndpoint(req.params.id, userId, (req as any).user.username);
+    return endpoint ? res.json({ success: true, data: endpoint, agentEnrolled: false }) :
+      res.status(404).json({ success: false, error: 'Endpoint not found.' });
+  });
 
 // Field Jobs & P3.1 Inventory Consumption (Protected)
 app.get('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
@@ -1116,19 +1169,42 @@ app.post('/api/jobs/:id/consume-part', requireAuth, requireRole('BUSINESS_OWNER'
 
 // Assets CRUD (Protected)
 app.get('/api/assets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER', 'PROCUREMENT_LEAD'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().assets });
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().assets.filter(a => visibleAsset(a, actor)) });
 });
 
 app.post('/api/assets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const asset = req.body;
-    if (!asset || !asset.name) {
+    if (!asset || typeof asset.name !== 'string' || !asset.name.trim()) {
       return res.status(400).json({ success: false, error: 'Asset name is required' });
+    }
+    if (asset.assetTag !== undefined &&
+        (typeof asset.assetTag !== 'string' || !/^[A-Za-z0-9._-]{2,80}$/.test(asset.assetTag))) {
+      return res.status(400).json({ success: false, error: 'Asset tag must be 2–80 letters, digits, dots, underscores or dashes.' });
+    }
+    const assetTag = asset.assetTag || ('TAG-' + crypto.randomUUID().slice(0, 12).toUpperCase());
+    if (dbStore.getState().assets.some(a => a.assetTag.toLowerCase() === assetTag.toLowerCase())) {
+      return res.status(409).json({ success: false, error: 'Asset tag already registered.' });
     }
     const created = dbStore.addAsset({
       ...asset,
-      id: asset.id || `ast-${crypto.randomUUID()}`,
-      assetTag: asset.assetTag || `TAG-${Date.now().toString().slice(-6)}`
+      id: `ast-${crypto.randomUUID()}`, // never trust client-selected record IDs
+      assetTag,
+      name: asset.name.trim(),
+      assignedUserId: undefined, // explicit managerial assignment required; display label not an access grant
+      serialNumber: typeof asset.serialNumber === 'string' ? asset.serialNumber : '',
+      category: ['Laptop','Server','Switch','Firewall','Workstation','UPS'].includes(asset.category) ? asset.category : 'Laptop',
+      brand: typeof asset.brand === 'string' ? asset.brand : '',
+      model: typeof asset.model === 'string' ? asset.model : '',
+      assignedUser: typeof asset.assignedUser === 'string' ? asset.assignedUser : '',
+      department: typeof asset.department === 'string' ? asset.department : '',
+      location: typeof asset.location === 'string' ? asset.location : '',
+      purchaseDate: typeof asset.purchaseDate === 'string' ? asset.purchaseDate : '',
+      purchaseCost: typeof asset.purchaseCost === 'number' && Number.isFinite(asset.purchaseCost) && asset.purchaseCost >= 0 ? asset.purchaseCost : 0,
+      warrantyExpiresAt: typeof asset.warrantyExpiresAt === 'string' ? asset.warrantyExpiresAt : '',
+      status: ['IN_USE','AVAILABLE_IN_STOCK','UNDER_REPAIR','RETIRED'].includes(asset.status)
+        ? asset.status : 'AVAILABLE_IN_STOCK'
     });
 
     dbStore.addEvent({
@@ -1150,16 +1226,32 @@ app.post('/api/assets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_I
 });
 
 app.patch('/api/assets/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
-  try {
-    const updated = dbStore.updateAsset(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Asset not found' });
-    }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  const body = req.body;
+  if (!body || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'status') ||
+      !['IN_USE','AVAILABLE_IN_STOCK','UNDER_REPAIR','RETIRED'].includes(body.status)) {
+    return res.status(400).json({ success: false,
+      error: 'Only an allowed status may be changed here. Staff assignment uses the dedicated endpoint.' });
   }
+  const updated = dbStore.updateAsset(req.params.id, { status: body.status });
+  return updated ? res.json({ success: true, data: updated }) :
+    res.status(404).json({ success: false, error: 'Asset not found.' });
 });
+
+app.patch('/api/assets/:id/assign', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const body = req.body;
+    if (!body || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'assignedUserId')) {
+      return res.status(400).json({ success: false, error: 'Exact assignedUserId is required (string or null).' });
+    }
+    const userId = body.assignedUserId;
+    if (userId !== null && (typeof userId !== 'string' || !userId.trim())) {
+      return res.status(400).json({ success: false, error: 'Use an active field engineer ID or null.' });
+    }
+    if (!validateAssignment(userId)) return res.status(400).json({ success: false, error: 'Unknown, inactive or non-field user ID.' });
+    const asset = dbStore.assignAsset(req.params.id, userId, (req as any).user.username);
+    return asset ? res.json({ success: true, data: asset, externalNotificationSent: false }) :
+      res.status(404).json({ success: false, error: 'Asset not found.' });
+  });
 
 // Software Licenses CRUD (Protected)
 app.get('/api/licenses', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
@@ -1310,7 +1402,7 @@ function verifyMilestoneBudget(milestones: ProjectMilestone[], budget: number) {
   }
 }
 app.get('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'PROCUREMENT_LEAD'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().projects });
+  res.json({ success: true, data: visibleProjects((req as any).user as LocalActor) });
 });
 
 app.post('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
@@ -1326,6 +1418,8 @@ app.post('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANA
     verifyMilestoneBudget(milestones, fields.budget ?? 0);
     const created = dbStore.addProject({
       id: 'proj-' + crypto.randomUUID(),
+      createdByUserId: (req as any).user.userId,
+      collaboratorUserIds: [],
       projectCode: 'PRJ-' + crypto.randomUUID().slice(0, 12).toUpperCase(),
       title: fields.title!, clientName: fields.clientName!,
       clientLocation: fields.clientLocation ?? '',
@@ -1348,10 +1442,35 @@ app.patch('/api/projects/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTER
       return res.status(403).json({ success: false, error: 'Only the business owner can change project budget.' });
     }
     const project = dbStore.getState().projects.find(p => p.id === req.params.id);
-    if (!project) return res.status(404).json({ success: false, error: 'Project not found.' });
+    if (!project || !mayManageProject(project, (req as any).user as LocalActor)) {
+      return res.status(404).json({ success: false, error: 'Project not found.' });
+    }
     if (fields.budget !== undefined) verifyMilestoneBudget(project.milestones, fields.budget);
     const updated = dbStore.updateProject(project.id, fields);
     return res.json({ success: true, data: updated });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+
+app.patch('/api/projects/:id/access', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).sort().join(',') !== 'grant,userId' ||
+      typeof body.userId !== 'string' || typeof body.grant !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'Require exact staff userId and boolean grant.' });
+  }
+  const target = dbStore.getUserById(body.userId);
+  if (!target || target.tenantId !== dbStore.getState().tenant.id ||
+      !['SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'PROCUREMENT_LEAD'].includes(target.role) ||
+      (body.grant && target.disabledAt)) {
+    return res.status(400).json({ success: false, error: 'Only eligible local active staff may be granted project access.' });
+  }
+  try {
+    const project = dbStore.setProjectCollaborator(req.params.id, target.id, body.grant, (req as any).user.username);
+    return project ? res.json({ success: true, data: project, externalCustomerAccessChanged: false }) :
+      res.status(404).json({ success: false, error: 'Project not found.' });
   } catch (err: any) {
     return res.status(400).json({ success: false, error: err.message });
   }
@@ -1397,7 +1516,7 @@ app.patch('/api/projects/:id/milestones/:milestoneId', requireAuth, requireRole(
 });
 
 app.get('/api/proposals', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().proposals });
+  res.json({ success: true, data: visibleProposals((req as any).user as LocalActor) });
 });
 
 // Proposal inputs describe a candidate bid, not verified provider credentials, identity or matching.
@@ -1419,11 +1538,14 @@ app.post('/api/proposals', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MAN
     return res.status(400).json({ success: false, error: 'Valid existing project, provider, positive bid and turnaround days are required.' });
   }
   const project = dbStore.getState().projects.find(p => p.id === projectId);
-  if (!project) return res.status(404).json({ success: false, error: 'Referenced project not found.' });
+  if (!project || !visibleProject(project, (req as any).user as LocalActor)) {
+    return res.status(404).json({ success: false, error: 'Referenced project not found.' });
+  }
   if (project.status !== 'PROPOSALS_OPEN') return res.status(409).json({ success: false, error: 'Project is not accepting new proposals.' });
   try {
     const created = dbStore.submitProjectProposal({
       id: 'prop-' + crypto.randomUUID(), projectId, providerName, commercialBid, timelineDays,
+      submittedByUserId: (req as any).user.userId,
       technicalApproach: technicalApproach.trim(),
       providerVerified: false, providerRating: 0, matchScore: 0,
       matchExplanation: 'Provider rating, credentials and AI matching have not been verified.',
@@ -1438,6 +1560,11 @@ app.post('/api/proposals', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MAN
 // Atomic single-award acceptance: no second accepted proposal, no fake vendor dispatch or escrow.
 app.patch('/api/proposals/:id/accept', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
+    const proposal = dbStore.getState().proposals.find(p => p.id === req.params.id);
+    const project = proposal && dbStore.getState().projects.find(p => p.id === proposal.projectId);
+    if (!proposal || !project || !mayManageProject(project, (req as any).user as LocalActor)) {
+      return res.status(404).json({ success: false, error: 'Proposal not found.' });
+    }
     const award = dbStore.acceptProjectProposal(req.params.id, (req as any).user.username);
     return award
       ? res.json({ success: true, data: award.proposal, project: award.project,
@@ -1463,14 +1590,18 @@ const stringArray = (value: unknown): string[] | null =>
     : null;
 
 app.get('/api/rma', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().rmaClaims });
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().rmaClaims.filter(r => visibleRMA(r, actor)) });
 });
 app.post('/api/rma', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
     const assetTag = stringField(req.body?.assetTag);
     const faultSymptom = stringField(req.body?.faultSymptom);
     const asset = dbStore.getState().assets.find(a => a.assetTag === assetTag);
-    if (!asset || !faultSymptom) return res.status(400).json({ success: false, error: 'A registered asset tag and actual fault symptom are required.' });
+    if (!asset || !visibleAsset(asset, (req as any).user as LocalActor)) {
+      return res.status(404).json({ success: false, error: 'Asset not found or not assigned.' });
+    }
+    if (!faultSymptom) return res.status(400).json({ success: false, error: 'An actual fault symptom is required.' });
     const identifier = crypto.randomUUID();
     const created = dbStore.addRMAClaim({
       id: 'rma-' + identifier,

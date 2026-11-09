@@ -497,6 +497,24 @@ export class PersistentStore {
     });
   }
 
+  // Assignment and audit update are committed together; never use a display name as identity.
+  public assignEndpoint(id: string, userId: string | null, actor: string): EndpointHealth | null {
+    return this.commit(draft => {
+      const endpoint = draft.endpoints.find(e => e.id === id);
+      if (!endpoint) return null;
+      if (userId) endpoint.assignedUserId = userId;
+      else delete endpoint.assignedUserId;
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'EndpointEngineerAssigned', agent: actor,
+        summary: 'Endpoint ' + endpoint.id + ' engineer assignment changed.',
+        autonomousActionTaken: 'Local access grant updated; no RMM agent enrolled.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return endpoint;
+    });
+  }
+
   public updateEndpoint(id: string, updates: Partial<EndpointHealth>): EndpointHealth | null {
     return this.commit((draft) => {
       const idx = draft.endpoints.findIndex(e => e.id === id);
@@ -510,6 +528,23 @@ export class PersistentStore {
   public addAsset(asset: AssetItem): AssetItem {
     return this.commit((draft) => {
       draft.assets = [asset, ...draft.assets];
+      return asset;
+    });
+  }
+
+  public assignAsset(id: string, userId: string | null, actor: string): AssetItem | null {
+    return this.commit(draft => {
+      const asset = draft.assets.find(a => a.id === id);
+      if (!asset) return null;
+      if (userId) asset.assignedUserId = userId;
+      else delete asset.assignedUserId;
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'AssetEngineerAssigned', agent: actor,
+        summary: 'Asset ' + asset.assetTag + ' engineer assignment changed.',
+        autonomousActionTaken: 'Local service access updated; no OEM or customer notification sent.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
       return asset;
     });
   }
@@ -855,6 +890,25 @@ export class PersistentStore {
   public addProject(project: Project): Project {
     return this.commit((draft) => {
       draft.projects = [project, ...draft.projects];
+      return project;
+    });
+  }
+
+  public setProjectCollaborator(projectId: string, userId: string, grant: boolean, actor: string): Project | null {
+    return this.commit(draft => {
+      const project = draft.projects.find(p => p.id === projectId);
+      if (!project) return null;
+      const collaborators = Array.isArray(project.collaboratorUserIds) ? project.collaboratorUserIds : [];
+      project.collaboratorUserIds = grant
+        ? Array.from(new Set([...collaborators, userId]))
+        : collaborators.filter(id => id !== userId);
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'ProjectStaffAccessChanged', agent: actor,
+        summary: 'Internal project ' + project.projectCode + ' staff access ' + (grant ? 'granted' : 'revoked') + '.',
+        autonomousActionTaken: 'Updated local staff access only; no external customer access.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
       return project;
     });
   }

@@ -159,6 +159,25 @@ try {
   check('Field engineer cannot submit procurement/project proposal', () => assert.equal(r.status, 403));
   r = await api('/api/proposals', {
     method: 'POST', cookie: sessions.sales,
+    body: { projectId: projectForRole, providerName: 'Unauthorized Bid', commercialBid: 300, timelineDays: 10 }
+  });
+  check('Sales cannot submit into another staff member private project', () => assert.equal(r.status, 404));
+  r = await api('/api/projects', { cookie: sessions.sales });
+  check('Sales cannot list a private IT-managed project', () =>
+    assert.ok(!r.data.data.some(p => p.id === projectForRole)));
+  r = await api('/api/projects/' + projectForRole + '/access', {
+    method: 'PATCH', cookie: sessions.ithead, body: { userId: 'ci-sales', grant: true }
+  });
+  check('Project creator cannot self-assign collaborators', () => assert.equal(r.status, 403));
+  r = await api('/api/projects/' + projectForRole + '/access', {
+    method: 'PATCH', cookie: sessions.owner, body: { userId: 'ci-sales', grant: true }
+  });
+  check('Owner can explicitly grant project access to sales', () => {
+    assert.equal(r.status, 200);
+    assert.ok(r.data.data.collaboratorUserIds.includes('ci-sales'));
+  });
+  r = await api('/api/proposals', {
+    method: 'POST', cookie: sessions.sales,
     body: { projectId: projectForRole, providerName: 'Sales Bid', commercialBid: 300, timelineDays: 10,
       id: 'forged-id', status: 'ACCEPTED', providerVerified: true }
   });
@@ -182,6 +201,108 @@ try {
     assert.equal(r.data.project.status, 'IN_PROGRESS');
     assert.equal(r.data.providerNotified, false);
   });
+
+  // Phase 8: same-tenant object authorization is enforced for state AND direct lists.
+  r = await api('/api/assets', { method: 'POST', cookie: sessions.owner,
+    body: { id: 'forged-object', assetTag: 'CI-FIELD-01', name: 'CI Service Asset',
+      assignedUserId: 'ci-field', assignedUser: 'field', purchaseCost: 1200 } });
+  check('Asset create ignores forged object ID and user assignment', () => {
+    assert.equal(r.status, 201);
+    assert.notEqual(r.data.data.id, 'forged-object');
+    assert.equal(r.data.data.assignedUserId, undefined);
+  });
+  const ownedAssetId = r.data.data.id;
+  r = await api('/api/assets', { method: 'POST', cookie: sessions.owner,
+    body: { assetTag: 'CI-PRIVATE-01', name: 'Confidential Client Asset', assignedUser: 'field' } });
+  check('Private asset creates without granting field access by display name', () =>
+    assert.equal(r.status, 201));
+  const privateAssetId = r.data.data.id;
+  r = await api('/api/assets', { cookie: sessions.field });
+  check('Field cannot read private or unassigned assets', () => assert.equal(r.data.data.length, 0));
+  r = await api('/api/assets/' + ownedAssetId + '/assign', { method: 'PATCH', cookie: sessions.field,
+    body: { assignedUserId: 'ci-field' } });
+  check('Field cannot self-assign an asset', () => assert.equal(r.status, 403));
+  r = await api('/api/assets/' + ownedAssetId + '/assign', { method: 'PATCH', cookie: sessions.ithead,
+    body: { assignedUserId: 'ci-sales' } });
+  check('IT manager cannot assign asset to a non-field role', () => assert.equal(r.status, 400));
+  r = await api('/api/assets/' + ownedAssetId + '/assign', { method: 'PATCH', cookie: sessions.ithead,
+    body: { assignedUserId: 'ci-field' } });
+  check('IT manager can assign asset to stable field engineer ID', () =>
+    assert.equal(r.data.data.assignedUserId, 'ci-field'));
+  r = await api('/api/assets/' + ownedAssetId, { method: 'PATCH', cookie: sessions.ithead,
+    body: { assignedUserId: 'ci-owner', purchaseCost: 0 } });
+  check('Asset generic patch cannot alter identity or financial fields', () => assert.equal(r.status, 400));
+  r = await api('/api/assets', { cookie: sessions.field });
+  check('Field asset list includes only explicit ID assignment', () =>
+    assert.deepEqual(r.data.data.map(a => a.id), [ownedAssetId]));
+  r = await api('/api/endpoints', { method: 'POST', cookie: sessions.ithead,
+    body: { id: 'forged-ep', deviceName: 'CI Service Endpoint', assignedUserId: 'ci-field', assignedUser: 'field' } });
+  check('Endpoint registration does not permit client-assigned field access', () => {
+    assert.equal(r.status, 201);
+    assert.equal(r.data.data.assignedUserId, undefined);
+  });
+  const ownedEndpointId = r.data.data.id;
+  r = await api('/api/endpoints', { method: 'POST', cookie: sessions.owner,
+    body: { deviceName: 'Confidential Customer Endpoint', assignedUser: 'field' } });
+  check('Private endpoint registered without engineer grant', () => assert.equal(r.status, 201));
+  r = await api('/api/endpoints', { cookie: sessions.field });
+  check('Field cannot read endpoint without explicit assignment', () =>
+    assert.equal(r.data.data.length, 0));
+  r = await api('/api/endpoints/' + ownedEndpointId + '/assign', { method: 'PATCH', cookie: sessions.owner,
+    body: { assignedUserId: 'ci-field' } });
+  check('Owner grants endpoint visibility using exact staff ID', () =>
+    assert.equal(r.data.data.assignedUserId, 'ci-field'));
+  r = await api('/api/endpoints', { cookie: sessions.field });
+  check('Field endpoint list is scoped after assignment', () =>
+    assert.deepEqual(r.data.data.map(e => e.id), [ownedEndpointId]));
+  r = await api('/api/rma', { method: 'POST', cookie: sessions.field,
+    body: { assetTag: 'CI-PRIVATE-01', faultSymptom: 'Unauthorized confidential device request' } });
+  check('Field cannot create RMA for another customer asset', () => assert.equal(r.status, 404));
+  r = await api('/api/rma', { method: 'POST', cookie: sessions.owner,
+    body: { assetTag: 'CI-PRIVATE-01', faultSymptom: 'Private owner-only RMA' } });
+  check('Owner can record a private RMA', () => assert.equal(r.status, 201));
+  r = await api('/api/rma', { method: 'POST', cookie: sessions.field,
+    body: { assetTag: 'CI-FIELD-01', faultSymptom: 'Assigned field device failure' } });
+  check('Field can create RMA for an assigned asset', () => assert.equal(r.status, 201));
+  const ownedRmaId = r.data.data.id;
+  r = await api('/api/rma', { cookie: sessions.field });
+  check('Field RMA list is limited to linked assigned assets', () =>
+    assert.deepEqual(r.data.data.map(e => e.id), [ownedRmaId]));
+  r = await api('/api/state', { cookie: sessions.field });
+  check('State response cannot bypass asset, endpoint, or RMA filters', () => {
+    assert.deepEqual(r.data.data.assets.map(a => a.id), [ownedAssetId]);
+    assert.deepEqual(r.data.data.endpoints.map(e => e.id), [ownedEndpointId]);
+    assert.deepEqual(r.data.data.rmaClaims.map(e => e.id), [ownedRmaId]);
+  });
+  r = await api('/api/assets/' + ownedAssetId + '/assign', { method: 'PATCH', cookie: sessions.owner,
+    body: { assignedUserId: null } });
+  check('Owner revokes asset access without deleting business data', () => assert.equal(r.status, 200));
+  r = await api('/api/rma', { cookie: sessions.field });
+  check('Revoking asset access also hides linked RMA', () => assert.equal(r.data.data.length, 0));
+  r = await api('/api/assets', { cookie: sessions.owner });
+  check('Owner retains legacy/private and unassigned asset records', () => assert.equal(r.data.data.length, 2));
+  r = await api('/api/assets', { cookie: sessions.procurement });
+  check('Procurement lead retains internal inventory visibility by trusted role', () =>
+    assert.equal(r.data.data.length, 2));
+  r = await api('/api/projects', { cookie: sessions.procurement });
+  check('Procurement cannot enumerate unshared projects', () =>
+    assert.ok(!r.data.data.some(p => p.id === projectForRole));
+  r = await api('/api/projects/' + projectForRole + '/access', {
+    method: 'PATCH', cookie: sessions.owner, body: { userId: 'ci-sales', grant: false }
+  });
+  check('Owner can revoke project collaborator access', () => assert.equal(r.status, 200));
+  r = await api('/api/proposals', { cookie: sessions.sales });
+  check('Revocation immediately removes linked proposals from direct endpoint', () =>
+    assert.ok(!r.data.data.some(p => p.id === salesProposalId));
+  r = await api('/api/state', { cookie: sessions.sales });
+  check('Revocation also removes project and proposals from state response', () => {
+    assert.ok(!r.data.data.projects.some(p => p.id === projectForRole));
+    assert.ok(!r.data.data.proposals.some(p => p.projectId === projectForRole));
+  });
+  r = await api('/api/projects/' + projectForRole, { method: 'PATCH',
+    cookie: sessions.ithead, body: { scopeDescription: 'Legitimate project update' } });
+  check('Original IT project creator retains project editing rights', () => assert.equal(r.status, 200));
+
   r = await api('/api/invoices', { method: 'POST', cookie: sessions.procurement, body: { customer: 'Fraud', amount: 1 } });
   check('Procurement cannot create invoices', () => assert.equal(r.status, 403));
   r = await api('/api/crm', { method: 'POST', cookie: sessions.sales, body: { title: 'CI Sale', clientName: 'CI Customer', value: 100 } });

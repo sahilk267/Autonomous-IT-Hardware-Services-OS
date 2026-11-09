@@ -217,6 +217,7 @@ export interface ITSMTicket {
 
 export interface EndpointHealth {
   id: string;
+  assignedUserId?: string; // explicit local FIELD_ENGINEER assignment, never inferred from assignedUser display text
   deviceName: string;
   assignedUser: string;
   os: string;
@@ -278,6 +279,8 @@ export interface ProjectMilestone {
 
 export interface Project {
   id: string;
+  createdByUserId?: string; // server-assigned local owner; legacy records have no trusted creator
+  collaboratorUserIds?: string[]; // owner-managed authorized internal staff, not external customers
   projectCode: string;
   title: string;
   clientName: string;
@@ -295,6 +298,7 @@ export interface Project {
 
 export interface Proposal {
   id: string;
+  submittedByUserId?: string; // authenticated staff identity; providerName is unverified display text
   projectId: string;
   providerName: string;
   providerRating: number;
@@ -327,6 +331,7 @@ export interface ProviderProfile {
 
 export interface AssetItem {
   id: string;
+  assignedUserId?: string; // explicit local service engineer ID, display label is NOT authorization
   assetTag: string;
   serialNumber: string;
   name: string;

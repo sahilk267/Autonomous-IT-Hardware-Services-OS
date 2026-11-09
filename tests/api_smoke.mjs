@@ -264,6 +264,17 @@ try {
     serialNumber: 'CI-SERIAL-001', model: 'Test', purchaseCost: 1000
   }, cookie);
   verify('Real asset registered for RMA', () => assert.equal(result.response.status, 201));
+  const persistedAssetId = result.body.data.id;
+  result = await post('/api/assets', {
+    id: 'forged-owner-id', assetTag: 'CI-ASSET-001', name: 'Collision'
+  }, cookie);
+  verify('Duplicate asset tags cannot create ambiguous RMA associations', () =>
+    assert.equal(result.response.status, 409));
+  result = await patch('/api/assets/' + persistedAssetId, {
+    assignedUserId: 'fake-staff', status: 'IN_USE', purchaseCost: -50
+  }, cookie);
+  verify('Generic asset patch forbids identity and cost mass assignment', () =>
+    assert.equal(result.response.status, 400));
 
   result = await post('/api/rma', {
     assetTag: 'CI-ASSET-001', faultSymptom: 'WAN interface fails intermittently',
@@ -312,6 +323,10 @@ try {
   result = await post('/api/projects', { title: 'CI Network Installation', clientName: 'CI Customer' }, cookie);
   verify('Real project created for dispute', () => assert.equal(result.response.status, 201));
   const projectId = result.body.data.id;
+  verify('Project creator and collaboration list are server-authoritative', () => {
+    assert.equal(typeof result.body.data.createdByUserId, 'string');
+    assert.deepEqual(result.body.data.collaboratorUserIds, []);
+  });
   result = await post('/api/projects', {
     id: 'client-forged', title: 'Forged project', clientName: 'CI Customer',
     status: 'COMPLETED', projectCode: 'FRAUD', milestones: []
