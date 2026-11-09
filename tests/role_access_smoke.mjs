@@ -286,14 +286,14 @@ try {
     assert.equal(r.data.data.length, 2));
   r = await api('/api/projects', { cookie: sessions.procurement });
   check('Procurement cannot enumerate unshared projects', () =>
-    assert.ok(!r.data.data.some(p => p.id === projectForRole));
+    assert.ok(!r.data.data.some(p => p.id === projectForRole)));
   r = await api('/api/projects/' + projectForRole + '/access', {
     method: 'PATCH', cookie: sessions.owner, body: { userId: 'ci-sales', grant: false }
   });
   check('Owner can revoke project collaborator access', () => assert.equal(r.status, 200));
   r = await api('/api/proposals', { cookie: sessions.sales });
   check('Revocation immediately removes linked proposals from direct endpoint', () =>
-    assert.ok(!r.data.data.some(p => p.id === salesProposalId));
+    assert.ok(!r.data.data.some(p => p.id === salesProposalId)));
   r = await api('/api/state', { cookie: sessions.sales });
   check('Revocation also removes project and proposals from state response', () => {
     assert.ok(!r.data.data.projects.some(p => p.id === projectForRole));
