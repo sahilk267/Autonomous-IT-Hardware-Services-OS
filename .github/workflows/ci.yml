@@ -29,6 +29,8 @@ jobs:
         run: npm run build
       - name: Isolated regression tests
         run: npm test
+      - name: Deterministic sign-in rate limit unit tests
+        run: npm run test:auth
       - name: Production-mode HTTP smoke test (throwaway DB)
         run: npm run smoke
       - name: Multi-role API access smoke test (throwaway DB)
