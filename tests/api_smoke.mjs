@@ -296,7 +296,7 @@ try {
   result = await patch(`/api/crm/${crmId}`, { stage: 'QUALIFIED' }, cookie);
   verify('CRM next stage persists', () => assert.equal(result.body.data.stage, 'QUALIFIED'));
 
-  result = await post('/api/projects', { title: 'CI Network Installation', clientName: 'CI Customer', projectCode: 'CI-PROJ-01' }, cookie);
+  result = await post('/api/projects', { title: 'CI Network Installation', clientName: 'CI Customer' }, cookie);
   verify('Real project created for dispute', () => assert.equal(result.response.status, 201));
   const projectId = result.body.data.id;
   result = await post('/api/projects', {
