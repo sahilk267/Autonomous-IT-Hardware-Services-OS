@@ -299,6 +299,79 @@ try {
   result = await post('/api/projects', { title: 'CI Network Installation', clientName: 'CI Customer', projectCode: 'CI-PROJ-01' }, cookie);
   verify('Real project created for dispute', () => assert.equal(result.response.status, 201));
   const projectId = result.body.data.id;
+  result = await post('/api/projects', {
+    id: 'client-forged', title: 'Forged project', clientName: 'CI Customer',
+    status: 'COMPLETED', projectCode: 'FRAUD', milestones: []
+  }, cookie);
+  verify('Project creation rejects forged identifiers, status and client project code', () =>
+    assert.equal(result.response.status, 400));
+  result = await post('/api/projects', {
+    title: 'Milestone-managed CI project', clientName: 'CI Customer', budget: 12000,
+    milestones: [{ title: 'Actual staging', amount: 8000, dueDate: '2026-12-20' }]
+  }, cookie);
+  verify('Server creates authoritative project and internal milestone identifiers', () => {
+    assert.equal(result.response.status, 201);
+    assert.equal(result.body.data.status, 'PROPOSALS_OPEN');
+    assert.equal(result.body.data.proposalsCount, 0);
+    assert.equal(result.body.data.milestones[0].status, 'PENDING_FUNDING');
+    assert.ok(result.body.data.milestones[0].id.startsWith('milestone-'));
+    assert.equal(result.body.externalEscrowVerified, false);
+  });
+  const securedProjectId = result.body.data.id;
+  const milestoneId = result.body.data.milestones[0].id;
+  result = await post('/api/projects', {
+    title: 'Invalid due date', clientName: 'CI', budget: 1000,
+    milestones: [{ title: 'Impossible date', amount: 500, dueDate: '2026-02-30' }]
+  }, cookie);
+  verify('Project creation rejects non-calendar milestone due dates', () =>
+    assert.equal(result.response.status, 400));
+  result = await post('/api/projects', {
+    title: 'Overfunded milestone', clientName: 'CI', budget: 1000,
+    milestones: [{ title: 'Too large', amount: 1001, dueDate: '2026-12-01' }]
+  }, cookie);
+  verify('Project rejects milestone totals above budget', () =>
+    assert.equal(result.response.status, 400));
+  result = await patch(`/api/projects/${securedProjectId}`, { status: 'COMPLETED' }, cookie);
+  verify('Project patch cannot forge project lifecycle status', () =>
+    assert.equal(result.response.status, 400));
+  result = await patch(`/api/projects/${securedProjectId}`, { milestones: [] }, cookie);
+  verify('Project patch cannot replace recorded financial milestones', () =>
+    assert.equal(result.response.status, 400));
+  result = await patch(`/api/projects/${securedProjectId}`, { budget: 7999 }, cookie);
+  verify('Project budget cannot be lowered below recorded milestones', () =>
+    assert.equal(result.response.status, 400));
+  result = await patch(`/api/projects/${securedProjectId}/milestones/${milestoneId}`,
+    { status: 'RELEASED' }, cookie);
+  verify('Milestone cannot forge payout/escrow release', () =>
+    assert.equal(result.response.status, 400));
+  result = await patch(`/api/projects/${securedProjectId}/milestones/${milestoneId}`,
+    { status: 'IN_PROGRESS', amount: 0 }, cookie);
+  verify('Milestone update rejects mixed work-status and financial field forgery', () =>
+    assert.equal(result.response.status, 400));
+  result = await patch(`/api/projects/${securedProjectId}/milestones/${milestoneId}`,
+    { status: 'COMPLETED' }, cookie);
+  verify('Milestone cannot skip directly to completed', () =>
+    assert.equal(result.response.status, 409));
+  result = await patch(`/api/projects/${securedProjectId}/milestones/${milestoneId}`,
+    { status: 'IN_PROGRESS' }, cookie);
+  verify('Milestone can enter internal work progress', () =>
+    assert.equal(result.body.data.milestones[0].status, 'IN_PROGRESS'));
+  result = await patch(`/api/projects/${securedProjectId}/milestones/${milestoneId}`,
+    { status: 'COMPLETED' }, cookie);
+  verify('Milestone can complete internal work without external payout claims', () => {
+    assert.equal(result.body.data.milestones[0].status, 'COMPLETED');
+    assert.equal(result.body.paymentReleased, false);
+  });
+  result = await post(`/api/projects/${securedProjectId}/milestones`, {
+    id: 'forged', title: 'Escrow event', amount: 100, dueDate: '2026-12-31', status: 'RELEASED'
+  }, cookie);
+  verify('Additional milestone creation rejects forged IDs and financial status', () =>
+    assert.equal(result.response.status, 400));
+  result = await post(`/api/projects/${securedProjectId}/milestones`, {
+    title: 'Acceptance testing', amount: 3000, dueDate: '2026-12-31'
+  }, cookie);
+  verify('Owner can append a genuine work milestone within remaining budget', () =>
+    assert.equal(result.response.status, 201));
   result = await post('/api/disputes', {
     projectId, reason: 'Documented delivery disagreement', customerClaim: 'Router delivery disputed',
     disputedAmount: 1500, escrowHeld: 1500, status: 'RESOLVED_RELEASED'

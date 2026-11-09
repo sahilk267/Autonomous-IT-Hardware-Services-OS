@@ -662,13 +662,19 @@ export default function App() {
     }
   };
 
-  // Handler: Release Project Milestone Escrow
+  // Work milestones are internal progress records, not payment or escrow instructions.
   const handleReleaseMilestone = async (projectId: string, milestoneId: string) => {
+    const milestone = projects.find(p => p.id === projectId)?.milestones.find(m => m.id === milestoneId);
+    if (!milestone || !['PENDING_FUNDING', 'IN_PROGRESS'].includes(milestone.status)) {
+      showToast('Only pending or in-progress work can be advanced. Escrow is not verified.');
+      return;
+    }
+    const nextStatus = milestone.status === 'PENDING_FUNDING' ? 'IN_PROGRESS' : 'COMPLETED';
     try {
       const res = await fetch(`/api/projects/${projectId}/milestones/${milestoneId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'COMPLETED' })
+        body: JSON.stringify({ status: nextStatus })
       });
       const data = await res.json();
       if (!res.ok || !data.success || !data.data) {
@@ -676,10 +682,10 @@ export default function App() {
         return;
       }
       setProjects(prev => prev.map(p => p.id === projectId ? data.data : p));
-      showToast('Milestone marked completed in the project ledger. No escrow payout occurred.');
+      showToast(`Internal work milestone updated to ${nextStatus}. No funds or escrow moved.`);
     } catch (err) {
       console.error('Update milestone failed:', err);
-      showToast('Milestone completion could not be confirmed.');
+      showToast('Milestone update could not be confirmed.');
     }
   };
 
@@ -990,10 +996,11 @@ export default function App() {
         method: 'PATCH'
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setWorkflows(prev => prev.map(w => w.id === id ? data.data : w));
-        showToast(`Workflow rule ${data.data.active ? 'activated' : 'paused'}.`);
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Workflow activation is unavailable.');
+        return;
       }
+      if (data.data) setWorkflows(prev => prev.map(w => w.id === id ? data.data : w));
     } catch (err) {
       console.error('Toggle workflow failed:', err);
     }
@@ -1006,10 +1013,11 @@ export default function App() {
         method: 'POST'
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setWorkflows(prev => prev.map(w => w.id === workflowId ? data.data : w));
-        showToast(`Rule "${data.data.name}" evaluated.`);
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Workflow execution is not implemented.');
+        return;
       }
+      if (data.data) setWorkflows(prev => prev.map(w => w.id === workflowId ? data.data : w));
     } catch (err) {
       console.error('Execute workflow failed:', err);
     }
@@ -1026,7 +1034,7 @@ export default function App() {
       const data = await res.json();
       if (data.success && data.data) {
         setWorkflows(prev => [data.data, ...prev]);
-        showToast(`Workflow "${data.data.name}" created.`);
+        showToast(`Workflow "${data.data.name}" saved as an inactive draft. No execution scheduled.`);
       }
     } catch (err) {
       console.error('Create workflow failed:', err);

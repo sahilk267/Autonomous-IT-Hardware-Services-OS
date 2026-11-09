@@ -133,6 +133,25 @@ try {
   check('Field engineer cannot inspect connector configuration', () => assert.equal(r.status, 403));
   r = await api('/api/tenant', { method: 'POST', cookie: sessions.sales, body: { name: 'Injected Tenant' } });
   check('Sales cannot change tenant configuration', () => assert.equal(r.status, 403));
+  r = await api('/api/projects', {
+    method: 'POST', cookie: sessions.ithead,
+    body: { title: 'Role-scoped CI project', clientName: 'Role CI Client', budget: 500 }
+  });
+  check('IT manager can create a project with server-authoritative defaults', () =>
+    assert.equal(r.status, 201));
+  const projectForRole = r.data.data.id;
+  r = await api('/api/projects/' + projectForRole, {
+    method: 'PATCH', cookie: sessions.ithead, body: { budget: 999999 }
+  });
+  check('IT manager cannot change project budget', () => assert.equal(r.status, 403));
+  r = await api('/api/projects/' + projectForRole + '/milestones', {
+    method: 'POST', cookie: sessions.ithead, body: { title: 'Unauthorized', amount: 100, dueDate: '2026-12-31' }
+  });
+  check('IT manager cannot create owner-only project milestones', () => assert.equal(r.status, 403));
+  r = await api('/api/projects/' + projectForRole, {
+    method: 'PATCH', cookie: sessions.sales, body: { status: 'COMPLETED' }
+  });
+  check('Sales cannot forge project status through patch endpoint', () => assert.equal(r.status, 403));
   r = await api('/api/invoices', { method: 'POST', cookie: sessions.procurement, body: { customer: 'Fraud', amount: 1 } });
   check('Procurement cannot create invoices', () => assert.equal(r.status, 403));
   r = await api('/api/crm', { method: 'POST', cookie: sessions.sales, body: { title: 'CI Sale', clientName: 'CI Customer', value: 100 } });

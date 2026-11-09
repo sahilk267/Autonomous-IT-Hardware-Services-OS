@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { dbStore, defaultConnectors, hashPassword, verifyPassword } from './server/db.ts';
-import { UserRole } from './src/types.ts';
+import { UserRole, Project, ProjectMilestone } from './src/types.ts';
 import { loginAttemptLimiter } from './server/login_limit.ts';
 
 const app = express();
@@ -1231,51 +1231,168 @@ app.post('/api/amcs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_
 });
 
 // Projects & Proposals CRUD (Protected)
+// Project and milestone financial facts must never be copied from untrusted client payloads.
+const PROJECT_CATEGORIES: readonly Project['category'][] = [
+  'Cloud Migration', 'Enterprise Cabling', 'Network Security', 'Hardware Overhaul', 'Disaster Recovery'
+];
+const PROJECT_EDITABLE = new Set([
+  'title', 'clientName', 'clientLocation', 'budget', 'category',
+  'scopeDescription', 'deliverables', 'skillsRequired'
+]);
+function projectInputObject(input: unknown): Record<string, any> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('A JSON object is required.');
+  }
+  return input as Record<string, any>;
+}
+function projectEditableFields(input: unknown, required = false): Partial<Project> {
+  const body = projectInputObject(input);
+  const keys = Object.keys(body);
+  if ((!keys.length && !required) || keys.some(key => !PROJECT_EDITABLE.has(key))) {
+    throw new Error('Project updates may only change declared project details, never IDs, status, milestones or financial evidence.');
+  }
+  const fields: Partial<Project> = {};
+  for (const key of keys) {
+    const value = body[key];
+    if (['title', 'clientName', 'clientLocation', 'scopeDescription'].includes(key)) {
+      const maxLength = key === 'scopeDescription' ? 5000 : 160;
+      if (typeof value !== 'string' || value.trim().length > maxLength ||
+          ((key === 'title' || key === 'clientName') && !value.trim())) {
+        throw new Error('Invalid project ' + key + '.');
+      }
+      (fields as any)[key] = value.trim();
+    } else if (key === 'budget') {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1_000_000_000_000) {
+        throw new Error('Project budget must be a finite, non-negative amount.');
+      }
+      fields.budget = value;
+    } else if (key === 'category') {
+      if (!PROJECT_CATEGORIES.includes(value)) throw new Error('Unknown project category.');
+      fields.category = value;
+    } else {
+      if (!Array.isArray(value) || value.length > 30 ||
+          value.some(item => typeof item !== 'string' || !item.trim() || item.length > 300)) {
+        throw new Error('Invalid project list: ' + key + '.');
+      }
+      (fields as any)[key] = value.map((item: string) => item.trim());
+    }
+  }
+  if (required && (!fields.title || !fields.clientName)) {
+    throw new Error('Project title and actual client name are required.');
+  }
+  return fields;
+}
+function verifiedProjectMilestoneInput(input: unknown): ProjectMilestone {
+  const body = projectInputObject(input);
+  if (Object.keys(body).sort().join(',') !== 'amount,dueDate,title') {
+    throw new Error('Milestones require only title, amount and dueDate; client IDs, status and payment proofs are forbidden.');
+  }
+  if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 160 ||
+      typeof body.amount !== 'number' || !Number.isFinite(body.amount) ||
+      body.amount <= 0 || body.amount > 1_000_000_000_000) {
+    throw new Error('Milestone requires a real title and positive finite amount.');
+  }
+  const dueDate = body.dueDate;
+  if (typeof dueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate) ||
+      !Number.isFinite(Date.parse(dueDate + 'T00:00:00.000Z')) ||
+      new Date(dueDate + 'T00:00:00.000Z').toISOString().slice(0, 10) !== dueDate) {
+    throw new Error('Milestone dueDate must be a real YYYY-MM-DD calendar date.');
+  }
+  return {
+    id: 'milestone-' + crypto.randomUUID(), title: body.title.trim(),
+    amount: body.amount, dueDate, status: 'PENDING_FUNDING'
+  };
+}
+function verifyMilestoneBudget(milestones: ProjectMilestone[], budget: number) {
+  const total = milestones.reduce((sum, item) => sum + item.amount, 0);
+  if (!Number.isFinite(total) || total > budget) {
+    throw new Error('Milestone amounts cannot exceed the documented project budget.');
+  }
+}
 app.get('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'PROCUREMENT_LEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().projects });
 });
 
 app.post('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const proj = req.body;
-    if (!proj || !proj.title) {
-      return res.status(400).json({ success: false, error: 'Project title is required' });
+    const raw = projectInputObject(req.body);
+    const { milestones: milestoneInput, ...editable } = raw;
+    const fields = projectEditableFields(editable, true);
+    if (milestoneInput !== undefined &&
+        (!Array.isArray(milestoneInput) || milestoneInput.length > 50)) {
+      throw new Error('Milestones must be an array of at most 50 explicitly supplied records.');
     }
+    const milestones = ((milestoneInput || []) as unknown[]).map(verifiedProjectMilestoneInput);
+    verifyMilestoneBudget(milestones, fields.budget ?? 0);
     const created = dbStore.addProject({
-      ...proj,
-      id: proj.id || `proj-${crypto.randomUUID()}`,
-      projectCode: proj.projectCode || `PRJ-${Date.now().toString().slice(-6)}`,
-      createdAt: proj.createdAt || new Date().toISOString().split('T')[0],
-      milestones: proj.milestones || []
+      id: 'proj-' + crypto.randomUUID(),
+      projectCode: 'PRJ-' + crypto.randomUUID().slice(0, 12).toUpperCase(),
+      title: fields.title!, clientName: fields.clientName!,
+      clientLocation: fields.clientLocation ?? '',
+      budget: fields.budget ?? 0, category: fields.category ?? 'Hardware Overhaul',
+      scopeDescription: fields.scopeDescription ?? '',
+      deliverables: fields.deliverables ?? [], skillsRequired: fields.skillsRequired ?? [],
+      status: 'PROPOSALS_OPEN', proposalsCount: 0,
+      createdAt: new Date().toISOString().slice(0, 10), milestones
     });
-
-    res.status(201).json({ success: true, data: created });
+    return res.status(201).json({ success: true, data: created, externalEscrowVerified: false });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(400).json({ success: false, error: err.message });
   }
 });
 
 app.patch('/api/projects/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const updated = dbStore.updateProject(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Project not found' });
+    const fields = projectEditableFields(req.body);
+    if (fields.budget !== undefined && (req as any).user.role !== 'BUSINESS_OWNER') {
+      return res.status(403).json({ success: false, error: 'Only the business owner can change project budget.' });
     }
-    res.json({ success: true, data: updated });
+    const project = dbStore.getState().projects.find(p => p.id === req.params.id);
+    if (!project) return res.status(404).json({ success: false, error: 'Project not found.' });
+    if (fields.budget !== undefined) verifyMilestoneBudget(project.milestones, fields.budget);
+    const updated = dbStore.updateProject(project.id, fields);
+    return res.json({ success: true, data: updated });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/projects/:id/milestones', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  try {
+    const project = dbStore.getState().projects.find(p => p.id === req.params.id);
+    if (!project) return res.status(404).json({ success: false, error: 'Project not found.' });
+    if (project.milestones.length >= 50) throw new Error('Maximum 50 milestones per project.');
+    const milestone = verifiedProjectMilestoneInput(req.body);
+    const milestones = [...project.milestones, milestone];
+    verifyMilestoneBudget(milestones, project.budget);
+    const updated = dbStore.updateProject(project.id, { milestones });
+    return res.status(201).json({ success: true, data: updated, externalEscrowVerified: false });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
   }
 });
 
 app.patch('/api/projects/:id/milestones/:milestoneId', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const updated = dbStore.updateProjectMilestone(req.params.id, req.params.milestoneId, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Project or milestone not found' });
+    const body = projectInputObject(req.body);
+    if (Object.keys(body).length !== 1 || !Object.hasOwn(body, 'status') ||
+        !['IN_PROGRESS', 'COMPLETED'].includes(body.status)) {
+      return res.status(400).json({ success: false, error: 'Only internal work progression is permitted; escrow, release and payment cannot be self-certified.' });
     }
-    res.json({ success: true, data: updated });
+    const project = dbStore.getState().projects.find(p => p.id === req.params.id);
+    const milestone = project?.milestones.find(m => m.id === req.params.milestoneId);
+    if (!project || !milestone) {
+      return res.status(404).json({ success: false, error: 'Project or milestone not found.' });
+    }
+    const permitted = (milestone.status === 'PENDING_FUNDING' && body.status === 'IN_PROGRESS') ||
+      (milestone.status === 'IN_PROGRESS' && body.status === 'COMPLETED');
+    if (!permitted) {
+      return res.status(409).json({ success: false, error: 'Work milestones must progress one stage at a time; historical escrow statuses require separate verification.' });
+    }
+    const updated = dbStore.updateProjectMilestone(project.id, milestone.id, { status: body.status });
+    return res.json({ success: true, data: updated, externalEscrowVerified: false, paymentReleased: false });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(400).json({ success: false, error: err.message });
   }
 });
 
@@ -1528,7 +1645,7 @@ app.post('/api/workflows', requireAuth, requireRole('BUSINESS_OWNER'), (req, res
     const created = dbStore.addWorkflow({
       ...wf,
       id: wf.id || `wf-${crypto.randomUUID()}`,
-      active: true,
+      active: false,
       executionCount: 0,
       lastExecuted: 'Never'
     });
@@ -1539,15 +1656,9 @@ app.post('/api/workflows', requireAuth, requireRole('BUSINESS_OWNER'), (req, res
 });
 
 app.patch('/api/workflows/:id/toggle', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
-  try {
-    const toggled = dbStore.toggleWorkflow(req.params.id);
-    if (!toggled) {
-      return res.status(404).json({ success: false, error: 'Workflow not found' });
-    }
-    res.json({ success: true, data: toggled });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+  return res.status(501).json({
+    success: false, error: 'Workflow activation is disabled until audited execution adapters are implemented.'
+  });
 });
 
 // Connectors & Integrations

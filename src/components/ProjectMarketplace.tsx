@@ -175,6 +175,9 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   const [newBudget, setNewBudget] = useState('');
   const [newCategory, setNewCategory] = useState<Project['category']>('Cloud Migration');
   const [newScope, setNewScope] = useState('');
+  const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
+  const [newMilestoneAmount, setNewMilestoneAmount] = useState('');
+  const [newMilestoneDueDate, setNewMilestoneDueDate] = useState('');
 
   // Submit Proposal Modal State
   const [showAddProposalModal, setShowAddProposalModal] = useState(false);
@@ -240,29 +243,40 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
       return;
     }
 
-    const budgetNum = parseInt(newBudget, 10) || 0;
+    const budgetNum = newBudget.trim() ? Number(newBudget) : 0;
+    if (!Number.isFinite(budgetNum) || budgetNum < 0) {
+      setMpNotice('Enter a valid non-negative project budget.');
+      return;
+    }
+    const hasMilestoneInput = Boolean(newMilestoneTitle.trim() || newMilestoneAmount || newMilestoneDueDate);
+    const milestoneAmount = Number(newMilestoneAmount);
+    if (hasMilestoneInput && (!newMilestoneTitle.trim() || !newMilestoneDueDate ||
+        !Number.isFinite(milestoneAmount) || milestoneAmount <= 0 || milestoneAmount > budgetNum)) {
+      setMpNotice('Optional milestone requires a title, actual due date and positive amount within budget.');
+      return;
+    }
     const newProj: Partial<Project> = {
-      projectCode: `PRJ-2026-${Math.floor(100 + Math.random() * 900)}`,
       title: newTitle.trim(),
       clientName: newClient.trim(),
-      clientLocation: 'On-site / Multi-facility',
+      clientLocation: '',
       budget: budgetNum,
       category: newCategory,
-      scopeDescription: newScope.trim() || 'Enterprise IT deployment and acceptance verification.',
-      deliverables: ['Design Document', 'Implementation', 'Final UAT Sign-off'],
-      skillsRequired: ['Enterprise Architecture', 'SLA Adherence'],
-      status: 'PROPOSALS_OPEN',
-      proposalsCount: 0,
-      milestones: [
-        { id: `m-${Date.now()}-1`, title: 'Milestone 1: Kickoff & Staging', amount: Math.round(budgetNum * 0.3), status: 'PENDING_FUNDING', dueDate: '2026-09-20' },
-        { id: `m-${Date.now()}-2`, title: 'Milestone 2: Execution & Handover', amount: Math.round(budgetNum * 0.7), status: 'PENDING_FUNDING', dueDate: '2026-10-10' }
-      ]
+      scopeDescription: newScope.trim(),
+      deliverables: [],
+      skillsRequired: [],
+      // No fabricated dates, payment holds, statuses or author-supplied identifiers.
+      milestones: hasMilestoneInput ? [{
+        title: newMilestoneTitle.trim(), amount: milestoneAmount, dueDate: newMilestoneDueDate
+      } as ProjectMilestone] : []
     };
 
     onCreateProject(newProj);
     setShowNewProjectModal(false);
     setNewTitle('');
     setNewScope('');
+    setNewMilestoneTitle('');
+    setNewMilestoneAmount('');
+    setNewMilestoneDueDate('');
   };
 
   const handleAddProposalSubmit = (e: React.FormEvent) => {
@@ -305,7 +319,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
             Enterprise IT Project Marketplace & AI Matching
           </h1>
           <p className="text-sm text-slate-400">
-            Upwork-grade project bidding, milestone escrow holds, multi-dimensional AI provider scoring, and AI diagnostic wizard.
+            Project proposals, internal milestone progress, provider information and AI diagnostic assistance. No escrow, payout or provider certification is automated.
           </p>
         </div>
 
@@ -549,14 +563,14 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                     </div>
                   </div>
 
-                  {/* Milestone Escrow Payment Schedule */}
+                  {/* Internal milestones: no escrow or payment-provider control */}
                   <div className="space-y-3 pt-2">
                     <div className="flex justify-between items-center">
                       <h3 className="text-xs font-mono uppercase text-slate-400 font-bold">
-                        Milestone Escrow Payment Schedule (Compliant Regulated Flow)
+                        Internal Work Milestones (No Escrow or Payment Processing)
                       </h3>
                       <span className="text-xs font-mono text-slate-400">
-                        {selectedProject.milestones.filter(m => m.status === 'RELEASED').length}/{selectedProject.milestones.length} Completed
+                        {selectedProject.milestones.filter(m => m.status === 'COMPLETED').length}/{selectedProject.milestones.length} Completed
                       </span>
                     </div>
 
@@ -589,14 +603,17 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                               ₹{m.amount.toLocaleString('en-IN')}
                             </span>
 
-                            {m.status === 'ESCROW_HELD' && (
+                            {(m.status === 'PENDING_FUNDING' || m.status === 'IN_PROGRESS') && (
                               <button
                                 onClick={() => onReleaseMilestone(selectedProject.id, m.id)}
                                 className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer transition flex items-center gap-1 shadow"
                               >
-                                <Unlock className="w-3.5 h-3.5" />
-                                Release Payout
+                                <Check className="w-3.5 h-3.5" />
+                                {m.status === 'PENDING_FUNDING' ? 'Start Work' : 'Mark Work Complete'}
                               </button>
+                            )}
+                            {(m.status === 'ESCROW_HELD' || m.status === 'RELEASED') && (
+                              <span className="text-amber-300 text-[10px]">Legacy payment state: unverified</span>
                             )}
                           </div>
                         </div>
@@ -717,7 +734,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                   <div>
                     <h3 className="text-base font-bold text-white">No Enterprise Project Selected</h3>
                     <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-                      Post an enterprise deployment project or select an active contract to review RFP proposals, milestone deliverables, and escrow releases.
+                      Create a real project or review recorded proposals and work milestones. Payments and escrow are not integrated.
                     </p>
                   </div>
                   <button
@@ -1612,6 +1629,22 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                 />
               </div>
 
+              <div className="border-t border-slate-700 pt-3 space-y-2">
+                <p className="text-amber-300 text-xs">Optional actual work milestone — no automatic financing or escrow</p>
+                <input aria-label="Milestone title" value={newMilestoneTitle}
+                  onChange={e => setNewMilestoneTitle(e.target.value)}
+                  placeholder="Milestone title (optional)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input aria-label="Milestone amount" type="number" min="0.01" step="0.01"
+                    value={newMilestoneAmount} onChange={e => setNewMilestoneAmount(e.target.value)}
+                    placeholder="Amount in ₹" className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                  <input aria-label="Milestone due date" type="date" value={newMilestoneDueDate}
+                    onChange={e => setNewMilestoneDueDate(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                </div>
+              </div>
+
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
                 <button
                   type="button"
@@ -1699,7 +1732,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
               <div className="p-3 bg-indigo-950/20 border border-indigo-800/40 rounded-xl text-indigo-300 text-[11px] space-y-1">
                 <span className="font-bold block">Autonomous Matching Engine:</span>
                 <span>• AI evaluates OEM certifications against client RFP requirements</span>
-                <span className="block">• Escrow smart-contract holds milestones upon project award</span>
+                <span className="block">• Provider verification and escrow/payment settlement are not integrated</span>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">

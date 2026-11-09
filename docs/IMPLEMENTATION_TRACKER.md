@@ -123,3 +123,15 @@ Phase 3 code and follow-up safety fixes are on the same draft PR. [GitHub Action
 - **Gate B**: Complete RBAC and per-role data access; CSRF, webhook replay controls and audit safety.
 - **Gate C**: RMA/CRM/KB/disputes persistence + correct quotations, tax, PO lifecycle.
 - **Gate D**: Provider adapters and audited automation; tenant/data architecture and production checks.
+
+## Phase 6 — 10 November 2026 (candidate, CI evidence pending)
+
+**Focus:** Project/milestone integrity, honest topology/automation UI and fail-closed workflow activation. Work is restricted to the existing draft branch, with `main` and production data untouched.
+
+- P0-PROJ-06: Server-generated project and milestone identifiers, safe editable project field allowlist, validated amounts, calendar dates and budget totals. No caller-provided lifecycle status, milestone financial evidence or client project codes. Owner-only milestone creation and sequential internal work progression; `ESCROW_HELD` and `RELEASED` cannot be forged or implied by work completion.
+- UI-06: New projects no longer create two fictional milestones or past-dated deadlines. Optional actual first milestone can be supplied explicitly. Legacy escrow states are shown as unverified, not a real payment.
+- CMDB-06: Removed fictional cascading incidents, customer impact and Telegram/failover claims. Topology explorer states what-if only.
+- AUTO-06: Workflow rules are persisted as inactive definitions, not live automation; activation and execution fail closed (`501`). UI inspection never reports trigger evaluation or external dispatch.
+- CI-06B: Production-mode HTTP and multi-role suites expanded with forged project/milestone/role checks. CI pass/fail must be recorded after GitHub Actions completion (do not claim completion from source edits).
+- Remaining: project ownership across customers/tenants; genuine payment/GST/provider adapters; audit atomicity; browser E2E; production migration and backups.
+

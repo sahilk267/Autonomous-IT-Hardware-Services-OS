@@ -563,7 +563,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 CMDB Configuration Item & Cascading Impact Engine
               </h3>
               <p className="text-xs text-slate-400">
-                Interactive topology showing upstream and downstream dependencies. Click a node to simulate component failure and view service impact.
+                Topology explorer for registered configuration items. Selection is a visual what-if only; no live network changes, impact calculation or escalation occurs.
               </p>
             </div>
 
@@ -575,7 +575,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
             >
-              {simulatedOutageNode ? 'Reset Outage Simulation' : 'Simulate Core Switch Failure'}
+              {simulatedOutageNode ? 'Clear What-if Selection' : 'Select Topology Scenario'}
             </button>
           </div>
 
@@ -586,11 +586,11 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500 space-y-3 col-span-full">
                   <Server className="w-10 h-10 text-slate-700 mx-auto" />
                   <h4 className="font-bold text-slate-300 text-sm">No CMDB Topology Discovered</h4>
-                  <p className="text-xs text-slate-500 max-w-sm mx-auto">Run network auto-discovery to map IT switches, hypervisors, and service dependency graphs.</p>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">No verified topology is available. Network auto-discovery is not implemented.</p>
                 </div>
               ) : (
                 cmdbNodes.map((node) => {
-                  const isDown = simulatedOutageNode === node.id || (simulatedOutageNode === 'cmdb-4' && ['cmdb-1', 'cmdb-2', 'cmdb-3'].includes(node.id));
+                  const isDown = simulatedOutageNode === node.id;
                   return (
                     <div
                       key={node.id}
@@ -607,7 +607,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                       
                       <div className="mt-2 pt-2 border-t border-slate-800 text-[10px] font-bold">
                         {isDown ? (
-                          <span className="text-rose-400 animate-pulse">IMPACTED (DOWN)</span>
+                          <span className="text-rose-400 animate-pulse">SELECTED (WHAT-IF)</span>
                         ) : (
                           <span className="text-emerald-400">OPERATIONAL</span>
                         )}
@@ -622,10 +622,12 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             {simulatedOutageNode && (
               <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-xs text-rose-200">
                 <span className="font-bold block text-sm mb-1 text-rose-400">
-                  🚨 CASCADING FAILURE IMPACT ANALYSIS:
+                  VISUAL WHAT-IF — NO LIVE INCIDENT:
                 </span>
                 <p>
-                  Failure of Core Network Switch (Cisco CBS350) severs connectivity between the <strong>Trading API Gateway</strong> and the <strong>PostgreSQL High-Availability Cluster</strong>. 2 Enterprise client services are currently at risk. Automated failover route via Secondary SFP Uplink and Telegram Escalation initiated.
+                  A topology item is selected for review. No outage, downstream service impact, customer count,
+                  automatic failover or Telegram escalation has been measured or triggered. Connect a verified
+                  discovery/telemetry adapter before using this view for operational decisions.
                 </p>
               </div>
             )}
