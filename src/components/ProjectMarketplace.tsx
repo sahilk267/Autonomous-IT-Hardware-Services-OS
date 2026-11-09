@@ -45,7 +45,7 @@ interface ProjectMarketplaceProps {
   onAcceptProposal: (projectId: string, proposalId: string) => void;
   onCreateProject: (newProject: Partial<Project>) => void;
   onRequestDiagnosticBooking: (diagnosisSummary: string, estimatedCost: number) => void;
-  onAddProposal?: (proposal: Proposal) => void;
+  onAddProposal?: (proposal: Partial<Proposal>) => void;
   isCleanSlate?: boolean;
 }
 
@@ -281,31 +281,20 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
   const handleAddProposalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProjectId || !propBidProvider.trim()) return;
-
-    const bidAmt = parseInt(propBidAmount, 10) || 150000;
-    const newProp: Proposal = {
-      id: `prop-${Date.now()}`,
-      projectId: selectedProjectId,
-      providerName: propBidProvider.trim(),
-      providerRating: 4.9,
-      providerVerified: true,
-      commercialBid: bidAmt,
-      timelineDays: parseInt(propBidDays, 10) || 14,
-      matchScore: 95,
-      matchExplanation: 'Vendor is ISO/IEC 27001 certified with verified enterprise deployment track record.',
-      technicalApproach: propBidApproach.trim() || 'Structured phased deployment with strict rollback procedures.',
-      oemCertifications: ['Cisco CCNA/CCNP', 'Microsoft Gold Partner', 'Fortinet NSE 4'],
-      status: 'SUBMITTED'
-    };
-
-    if (onAddProposal) {
-      onAddProposal(newProp);
+    const amount = Number(propBidAmount), days = Number(propBidDays);
+    if (!selectedProjectId || !propBidProvider.trim() || !propBidAmount.trim() || !propBidDays.trim() ||
+        !Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(days) || days < 1) {
+      setMpNotice('Enter a real provider name, positive commercial bid and explicit turnaround days.');
+      return;
     }
+    // No fabricated ratings, identities, credentials, certification or matching scores.
+    const proposal: Partial<Proposal> = {
+      projectId: selectedProjectId, providerName: propBidProvider.trim(),
+      commercialBid: amount, timelineDays: days, technicalApproach: propBidApproach.trim()
+    };
+    if (onAddProposal) onAddProposal(proposal);
     setShowAddProposalModal(false);
-    setPropBidProvider('');
-    setPropBidAmount('');
-    setPropBidApproach('');
+    setPropBidProvider(''); setPropBidAmount(''); setPropBidDays(''); setPropBidApproach('');
   };
 
   return (
@@ -655,9 +644,8 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                                   {prop.providerVerified && (
                                     <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                                   )}
-                                  <span className="flex items-center gap-1 text-amber-400 text-xs font-mono">
-                                    <Star className="w-3.5 h-3.5 fill-amber-400" />
-                                    {prop.providerRating}
+                                  <span className="text-[11px] text-amber-300">
+                                    {prop.providerVerified && prop.providerRating > 0 ? `Rating: ${prop.providerRating}` : 'Provider not independently verified'}
                                   </span>
                                 </div>
                                 <div className="text-[11px] text-slate-400 mt-0.5">
@@ -670,7 +658,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                                   ₹{prop.commercialBid.toLocaleString('en-IN')}
                                 </span>
                                 <span className="px-2 py-0.5 rounded-full bg-indigo-950 border border-indigo-700 text-indigo-300 font-mono text-[10px] font-bold">
-                                  {prop.matchScore}% Match Index
+                                  Match not independently verified
                                 </span>
                               </div>
                             </div>
@@ -679,25 +667,21 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                             <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800/80 text-xs space-y-1">
                               <span className="text-[10px] font-mono text-amber-400 font-bold uppercase flex items-center gap-1">
                                 <Sparkles className="w-3 h-3" />
-                                AI Assessment:
+                                Provider Verification:
                               </span>
                               <p className="text-slate-300 text-[11px] leading-relaxed">
-                                {prop.matchExplanation}
+                                Provider ratings, OEM credentials and AI matching are not independently verified in this system.
                               </p>
                             </div>
 
                             {/* Technical Approach & Certifications */}
                             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pt-2 border-t border-slate-800 text-xs">
-                              <div className="flex flex-wrap gap-1">
-                                {prop.oemCertifications.map((c, i) => (
-                                  <span key={i} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-400 font-mono text-[10px]">
-                                    {c}
-                                  </span>
-                                ))}
+                              <div className="text-amber-300 text-[11px]">
+                                OEM certifications are not verified. Submitted technical approach is self-reported.
                               </div>
 
                               <div className="flex items-center gap-2">
-                                {prop.status !== 'ACCEPTED' && (
+                                {prop.status === 'SUBMITTED' && selectedProject.status === 'PROPOSALS_OPEN' && (
                                   <button
                                     onClick={() => onAcceptProposal(selectedProject.id, prop.id)}
                                     className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer transition shadow"
@@ -713,7 +697,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                       </div>
                     ) : (
                       <div className="p-6 bg-slate-950 rounded-xl border border-slate-800 text-center text-xs text-slate-500 space-y-3">
-                        <p>No proposals received for this project yet. External providers are being notified automatically.</p>
+                        <p>No proposals recorded. No external supplier or service provider has been notified automatically.</p>
                         <button
                           onClick={() => setShowAddProposalModal(true)}
                           className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer inline-flex items-center gap-1.5 shadow transition"
@@ -1708,9 +1692,12 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="text-slate-400 block mb-1 font-semibold">Estimated Turnaround (Days)</label>
+                  <label className="text-slate-400 block mb-1 font-semibold">Estimated Turnaround (Days) *</label>
                   <input
                     type="number"
+                    min="1"
+                    step="1"
+                    required
                     value={propBidDays}
                     onChange={(e) => setPropBidDays(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
@@ -1730,8 +1717,8 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
               </div>
 
               <div className="p-3 bg-indigo-950/20 border border-indigo-800/40 rounded-xl text-indigo-300 text-[11px] space-y-1">
-                <span className="font-bold block">Autonomous Matching Engine:</span>
-                <span>• AI evaluates OEM certifications against client RFP requirements</span>
+                <span className="font-bold block">Internal Proposal Record:</span>
+                <span>• Submitted bid and technical approach are unverified; no AI matching or OEM checks were performed</span>
                 <span className="block">• Provider verification and escrow/payment settlement are not integrated</span>
               </div>
 

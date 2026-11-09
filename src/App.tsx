@@ -689,23 +689,22 @@ export default function App() {
     }
   };
 
-  // Handler: Accept Project Proposal
+  // Accept exactly one project bid, updating all competing statuses from the authoritative server commit.
   const handleAcceptProposal = async (projectId: string, proposalId: string) => {
     try {
-      const res = await fetch(`/api/proposals/${proposalId}/accept`, {
-        method: 'PATCH'
-      });
+      const res = await fetch(`/api/proposals/${proposalId}/accept`, { method: 'PATCH' });
       const data = await res.json();
-      if (data.success) {
-        setProposals(prev => prev.map(p => {
-          if (p.projectId !== projectId) return p;
-          return { ...p, status: p.id === proposalId ? 'ACCEPTED' : 'REJECTED' };
-        }));
-        setProjects(prev => prev.map(p => p.id === projectId ? { ...p, status: 'IN_PROGRESS' } : p));
-        showToast('Proposal accepted. Project moved to IN_PROGRESS.');
+      if (!res.ok || !data.success || !data.project || !Array.isArray(data.affectedProposals)) {
+        showToast(data.error || 'Proposal acceptance could not be confirmed.');
+        return;
       }
+      const authoritative = new Map<string, Proposal>(data.affectedProposals.map((proposal: Proposal) => [proposal.id, proposal] as [string, Proposal]));
+      setProposals(prev => prev.map(proposal => authoritative.get(proposal.id) || proposal));
+      setProjects(prev => prev.map(project => project.id === data.project.id ? data.project : project));
+      showToast('One proposal selected internally; no provider notification, funding or payment occurred.');
     } catch (err) {
       console.error('Accept proposal failed:', err);
+      showToast('Proposal acceptance could not be confirmed.');
     }
   };
 
@@ -936,7 +935,7 @@ export default function App() {
   };
 
   // Handler: Add Proposal
-  const handleAddProposal = async (prop: Proposal) => {
+  const handleAddProposal = async (prop: Partial<Proposal>) => {
     try {
       const res = await fetch('/api/proposals', {
         method: 'POST',
@@ -944,12 +943,15 @@ export default function App() {
         body: JSON.stringify(prop)
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setProposals(prev => [data.data, ...prev]);
-        showToast(`Proposal from ${data.data.providerName} received.`);
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Proposal could not be saved.');
+        return;
       }
+      setProposals(prev => [data.data, ...prev]);
+      showToast(`Unverified proposal from ${data.data.providerName} saved internally.`);
     } catch (err) {
       console.error('Add proposal failed:', err);
+      showToast('Proposal could not be saved.');
     }
   };
 

@@ -152,6 +152,36 @@ try {
     method: 'PATCH', cookie: sessions.sales, body: { status: 'COMPLETED' }
   });
   check('Sales cannot forge project status through patch endpoint', () => assert.equal(r.status, 403));
+  r = await api('/api/proposals', {
+    method: 'POST', cookie: sessions.field,
+    body: { projectId: projectForRole, providerName: 'Unauthorized', commercialBid: 10, timelineDays: 5 }
+  });
+  check('Field engineer cannot submit procurement/project proposal', () => assert.equal(r.status, 403));
+  r = await api('/api/proposals', {
+    method: 'POST', cookie: sessions.sales,
+    body: { projectId: projectForRole, providerName: 'Sales Bid', commercialBid: 300, timelineDays: 10,
+      id: 'forged-id', status: 'ACCEPTED', providerVerified: true }
+  });
+  check('Sales can submit but cannot forge accepted or verified bid', () => {
+    assert.equal(r.status, 201);
+    assert.equal(r.data.data.status, 'SUBMITTED');
+    assert.equal(r.data.data.providerVerified, false);
+    assert.notEqual(r.data.data.id, 'forged-id');
+  });
+  const salesProposalId = r.data.data.id;
+  r = await api('/api/proposals/' + salesProposalId + '/accept', {
+    method: 'PATCH', cookie: sessions.sales
+  });
+  check('Sales cannot award their own proposal', () => assert.equal(r.status, 403));
+  r = await api('/api/proposals/' + salesProposalId + '/accept', {
+    method: 'PATCH', cookie: sessions.owner
+  });
+  check('Owner can award a real submitted proposal', () => {
+    assert.equal(r.status, 200);
+    assert.equal(r.data.data.status, 'ACCEPTED');
+    assert.equal(r.data.project.status, 'IN_PROGRESS');
+    assert.equal(r.data.providerNotified, false);
+  });
   r = await api('/api/invoices', { method: 'POST', cookie: sessions.procurement, body: { customer: 'Fraud', amount: 1 } });
   check('Procurement cannot create invoices', () => assert.equal(r.status, 403));
   r = await api('/api/crm', { method: 'POST', cookie: sessions.sales, body: { title: 'CI Sale', clientName: 'CI Customer', value: 100 } });

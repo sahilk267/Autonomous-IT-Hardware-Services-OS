@@ -578,6 +578,57 @@ export class PersistentStore {
     });
   }
 
+  // Proposal submission and project bid count must share one durable store commit.
+  // Provider identity/ratings are locally self-reported, never independently verified.
+  public submitProjectProposal(proposal: Proposal): Proposal {
+    return this.commit((draft) => {
+      const project = draft.projects.find(p => p.id === proposal.projectId);
+      if (!project) throw new Error('Referenced project does not exist.');
+      if (project.status !== 'PROPOSALS_OPEN') throw new Error('Project is not accepting new proposals.');
+      if (draft.proposals.some(p => p.id === proposal.id)) throw new Error('Duplicate proposal identifier.');
+      draft.proposals.unshift(proposal);
+      project.proposalsCount = draft.proposals.filter(p => p.projectId === project.id).length;
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'ProjectProposalSubmitted', agent: 'Project Marketplace',
+        summary: 'Unverified proposal ' + proposal.id + ' registered for project ' + project.projectCode + '.',
+        autonomousActionTaken: 'Saved internal proposal and project count; no external verification, bid message or payment executed.',
+        humanApprovalRequired: false, approvalStatus: 'AUTO_APPROVED', confidenceScore: 1
+      });
+      return proposal;
+    });
+  }
+
+  // One project may have exactly one accepted proposal; all competing submissions are
+  // rejected in the SAME commit as project award and audit event.
+  public acceptProjectProposal(id: string, actor: string): { proposal: Proposal; project: Project; proposals: Proposal[] } | null {
+    return this.commit((draft) => {
+      const proposal = draft.proposals.find(p => p.id === id);
+      if (!proposal) return null;
+      const project = draft.projects.find(p => p.id === proposal.projectId);
+      if (!project) throw new Error('Proposal is not linked to an existing project.');
+      if (project.status !== 'PROPOSALS_OPEN' || proposal.status !== 'SUBMITTED' ||
+          draft.proposals.some(p => p.projectId === project.id && p.status === 'ACCEPTED')) {
+        throw new Error('Project has already been awarded or proposal is not awaiting acceptance.');
+      }
+      proposal.status = 'ACCEPTED';
+      project.status = 'IN_PROGRESS';
+      for (const item of draft.proposals) {
+        if (item.projectId === project.id && item.id !== proposal.id && item.status === 'SUBMITTED') {
+          item.status = 'REJECTED';
+        }
+      }
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'ProjectProposalAccepted', agent: actor,
+        summary: 'Proposal ' + proposal.id + ' was selected for project ' + project.projectCode + '.',
+        autonomousActionTaken: 'Recorded internal award only; no vendor dispatch, escrow release or payment performed.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return { proposal, project, proposals: draft.proposals.filter(p => p.projectId === project.id) };
+    });
+  }
+
   // Proposals
   public addProposal(proposal: Proposal): Proposal {
     return this.commit((draft) => {

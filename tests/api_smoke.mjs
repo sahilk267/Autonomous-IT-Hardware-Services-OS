@@ -385,6 +385,67 @@ try {
   }, cookie);
   verify('Owner can append a genuine work milestone within remaining budget', () =>
     assert.equal(result.response.status, 201));
+  // Phase 7: proposal integrity, award uniqueness and atomic project counters.
+  result = await post('/api/proposals', {
+    projectId: 'nonexistent-project', providerName: 'Unknown', commercialBid: 500,
+    timelineDays: 20
+  }, cookie);
+  verify('Proposal cannot be attached to a missing project', () => assert.equal(result.response.status, 404));
+  result = await post('/api/proposals', {
+    projectId, providerName: 'Unpriced Bid', commercialBid: 0, timelineDays: 20
+  }, cookie);
+  verify('Proposal rejects missing or nonpositive commercial bid', () => assert.equal(result.response.status, 400));
+  result = await post('/api/proposals', {
+    projectId, providerName: 'Self-Reported Vendor', commercialBid: 5600, timelineDays: 21,
+    id: 'forged-proposal', status: 'ACCEPTED', providerVerified: true, providerRating: 4.9,
+    matchScore: 95, matchExplanation: 'certified', oemCertifications: ['Invented certification'],
+    technicalApproach: 'Actual submitted proposal'
+  }, cookie);
+  verify('Proposal cannot forge ID, accepted status or external provider verification', () => {
+    assert.equal(result.response.status, 201);
+    assert.notEqual(result.body.data.id, 'forged-proposal');
+    assert.equal(result.body.data.status, 'SUBMITTED');
+    assert.equal(result.body.data.providerVerified, false);
+    assert.equal(result.body.data.providerRating, 0);
+    assert.equal(result.body.data.matchScore, 0);
+    assert.deepEqual(result.body.data.oemCertifications, []);
+    assert.equal(result.body.externalProviderVerified, false);
+  });
+  const selectedProposalId = result.body.data.id;
+  result = await post('/api/proposals', {
+    projectId, providerName: 'Second Vendor', commercialBid: 6100, timelineDays: 25
+  }, cookie);
+  verify('Second real proposal registered before award', () => assert.equal(result.response.status, 201));
+  const otherProposalId = result.body.data.id;
+  result = await request('/api/projects', {}, cookie);
+  verify('Two proposal submissions update the linked project count atomically', () =>
+    assert.equal(result.body.data.find(p => p.id === projectId).proposalsCount, 2));
+  result = await patch('/api/proposals/' + selectedProposalId + '/accept', {}, cookie);
+  verify('One internal proposal award atomically starts project and rejects competing bids', () => {
+    assert.equal(result.response.status, 200);
+    assert.equal(result.body.data.status, 'ACCEPTED');
+    assert.equal(result.body.project.id, projectId);
+    assert.equal(result.body.project.status, 'IN_PROGRESS');
+    assert.equal(result.body.affectedProposals.find(p => p.id === otherProposalId).status, 'REJECTED');
+    assert.equal(result.body.paymentReleased, false);
+    assert.equal(result.body.providerNotified, false);
+  });
+  result = await patch('/api/proposals/' + selectedProposalId + '/accept', {}, cookie);
+  verify('Repeat award is rejected', () => assert.equal(result.response.status, 409));
+  result = await patch('/api/proposals/' + otherProposalId + '/accept', {}, cookie);
+  verify('Competing rejected proposal cannot also be accepted', () => assert.equal(result.response.status, 409));
+  result = await post('/api/proposals', {
+    projectId, providerName: 'Late Vendor', commercialBid: 5400, timelineDays: 18
+  }, cookie);
+  verify('Awarded project rejects late new bids', () => assert.equal(result.response.status, 409));
+  result = await request('/api/state', {}, cookie);
+  verify('Single award and proposal event evidence survive independent state read', () => {
+    const saved = result.body.data.proposals.filter(p => p.projectId === projectId);
+    assert.equal(saved.filter(p => p.status === 'ACCEPTED').length, 1);
+    assert.equal(saved.filter(p => p.status === 'REJECTED').length, 1);
+    assert.equal(result.body.data.events.filter(e => e.eventType === 'ProjectProposalAccepted').length, 1);
+  });
+
   result = await post('/api/disputes', {
     projectId, reason: 'Documented delivery disagreement', customerClaim: 'Router delivery disputed',
     disputedAmount: 1500, escrowHeld: 1500, status: 'RESOLVED_RELEASED'

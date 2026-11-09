@@ -1400,45 +1400,53 @@ app.get('/api/proposals', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANA
   res.json({ success: true, data: dbStore.getState().proposals });
 });
 
+// Proposal inputs describe a candidate bid, not verified provider credentials, identity or matching.
 app.post('/api/proposals', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return res.status(400).json({ success: false, error: 'A real proposal record is required.' });
+  }
+  const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
+  const providerName = typeof body.providerName === 'string' ? body.providerName.trim() : '';
+  const commercialBid = body.commercialBid;
+  const timelineDays = body.timelineDays;
+  const technicalApproach = body.technicalApproach === undefined ? '' : body.technicalApproach;
+  if (!projectId || !providerName || providerName.length > 200 ||
+      typeof commercialBid !== 'number' || !Number.isFinite(commercialBid) ||
+      commercialBid <= 0 || commercialBid > 1_000_000_000_000 ||
+      !Number.isSafeInteger(timelineDays) || timelineDays < 1 || timelineDays > 3650 ||
+      typeof technicalApproach !== 'string' || technicalApproach.length > 4000) {
+    return res.status(400).json({ success: false, error: 'Valid existing project, provider, positive bid and turnaround days are required.' });
+  }
+  const project = dbStore.getState().projects.find(p => p.id === projectId);
+  if (!project) return res.status(404).json({ success: false, error: 'Referenced project not found.' });
+  if (project.status !== 'PROPOSALS_OPEN') return res.status(409).json({ success: false, error: 'Project is not accepting new proposals.' });
   try {
-    const proposal = req.body;
-    if (!proposal || !proposal.providerName || !proposal.projectId) {
-      return res.status(400).json({ success: false, error: 'providerName and projectId are required' });
-    }
-    const created = dbStore.addProposal({
-      ...proposal,
-      id: proposal.id || `prop-${crypto.randomUUID()}`,
-      status: proposal.status || 'SUBMITTED'
+    const created = dbStore.submitProjectProposal({
+      id: 'prop-' + crypto.randomUUID(), projectId, providerName, commercialBid, timelineDays,
+      technicalApproach: technicalApproach.trim(),
+      providerVerified: false, providerRating: 0, matchScore: 0,
+      matchExplanation: 'Provider rating, credentials and AI matching have not been verified.',
+      oemCertifications: [], status: 'SUBMITTED'
     });
-
-    const project = dbStore.getState().projects.find(p => p.id === proposal.projectId);
-    if (project) {
-      dbStore.updateProject(project.id, { proposalsCount: (project.proposalsCount || 0) + 1 });
-    }
-
-    res.status(201).json({ success: true, data: created });
+    return res.status(201).json({ success: true, data: created, externalProviderVerified: false });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(409).json({ success: false, error: err.message });
   }
 });
 
+// Atomic single-award acceptance: no second accepted proposal, no fake vendor dispatch or escrow.
 app.patch('/api/proposals/:id/accept', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const prop = dbStore.getState().proposals.find(p => p.id === req.params.id);
-    if (!prop) {
-      return res.status(404).json({ success: false, error: 'Proposal not found' });
-    }
-    const updated = dbStore.updateProposal(prop.id, { status: 'ACCEPTED' });
-    if (prop.projectId) {
-      dbStore.updateProject(prop.projectId, { status: 'IN_PROGRESS' });
-    }
-    res.json({ success: true, data: updated });
+    const award = dbStore.acceptProjectProposal(req.params.id, (req as any).user.username);
+    return award
+      ? res.json({ success: true, data: award.proposal, project: award.project,
+          affectedProposals: award.proposals, providerNotified: false, paymentReleased: false })
+      : res.status(404).json({ success: false, error: 'Proposal not found.' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(409).json({ success: false, error: err.message });
   }
 });
-
 
 /**
  * Persistent business collections: validate input against the actual TS types.
