@@ -139,3 +139,12 @@ Phase 3 code and follow-up safety fixes are on the same draft PR. [GitHub Action
 ### Phase 6 final verification (10 November 2026)
 
 Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42714106305) and [PR verification #42714114832](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42714114832), both green: TypeScript/build PASS; regression **16/16**; auth **7/7**; HTTP **78/78**; roles **60/60**; data safety **9/9**. No browser, payment, tenant-isolation or live-provider acceptance was conducted. This evidence refers only to isolated GitHub Actions.
+
+
+## Phase 7 — 10 November 2026 (proposal integrity / single award; CI verified)
+
+- **PROPOSAL-07 (P1):** Server validates project-linked bid details; never accepts client-supplied proposal identity, vendor verification, rating, fabricated AI match or privileged award status. Existing project must still accept bids. **Source implemented, CI verified.**
+- **AWARD-07 (P1):** Proposal creation + project count + audit occur in one JSON commit. Exactly one project award; competing bids, project status and audit event persist together. Duplicate, competing and late awards fail closed. **Source implemented, CI verified.**
+- **UI-07 (P2):** Removed fabricated provider certifications/ratings/default bid costs and matching scores; show unverified disclosures and server-authoritative award results. **Typechecked/build verified; browser E2E pending.**
+- **CI-07:** [Push run #42715294577](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42715294577) and [PR run #42715304850](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42715304850) both green at [commit `a386046`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/a386046b654d72fbfed1bb6bb6893dd7d0423f66): typecheck/build PASS, regression **16/16**, auth **7/7**, HTTP **88/88**, roles **64/64**, data **9/9**.
+- **Still blocked:** real per-customer/project/proposal row-level ownership, multi-tenant database, verified provider interactions, tamper-evident audit, browser and Hostinger acceptance. **Do not merge PR #1 or deploy as production-ready.** See [Phase 7 report](PHASE_7_PROPOSAL_INTEGRITY_2026-11-10.md).
