@@ -16,7 +16,9 @@
     "smoke:data": "node tests/data_safety_smoke.mjs",
     "backup:data": "node scripts/backup_data.mjs",
     "test:auth": "tsx tests/auth_limit.test.ts",
-    "smoke:browser": "playwright test --config=playwright.config.ts"
+    "smoke:browser": "playwright test --config=playwright.config.ts",
+    "preflight:customers": "node scripts/customer_migration_preflight.mjs",
+    "smoke:preflight": "node tests/customer_preflight_smoke.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

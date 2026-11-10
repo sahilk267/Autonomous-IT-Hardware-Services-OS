@@ -37,6 +37,8 @@ jobs:
         run: npm run smoke:roles
       - name: Production data-path and offline backup smoke test
         run: npm run smoke:data
+      - name: Customer migration preflight (read-only, isolated fixtures)
+        run: npm run smoke:preflight
       - name: Install isolated headless Chromium
         run: npx playwright install --with-deps chromium
       - name: Browser login and cross-customer access (disposable DB)
