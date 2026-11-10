@@ -115,7 +115,7 @@ CREATE TABLE apex.staging_imports (
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='apex_stage_reader') THEN
-    CREATE ROLE apex_stage_reader NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+    CREATE ROLE apex_stage_reader NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles
              WHERE rolname='apex_stage_reader' AND (rolsuper OR rolbypassrls OR rolinherit)) THEN
