@@ -21,9 +21,10 @@ import {
   Plus,
   X
 } from 'lucide-react';
-import { ITSMTicket, EndpointHealth, CMDBNode, KnowledgeArticle } from '../types';
+import { ITSMTicket, EndpointHealth, CMDBNode, KnowledgeArticle, CustomerAccount } from '../types';
 
 interface ITSMDeskProps {
+  customers: CustomerAccount[];
   tickets: ITSMTicket[];
   endpoints: EndpointHealth[];
   cmdbNodes: CMDBNode[];
@@ -42,6 +43,7 @@ interface ITSMDeskProps {
 }
 
 export const ITSMDesk: React.FC<ITSMDeskProps> = ({
+  customers,
   tickets,
   endpoints,
   cmdbNodes,
@@ -64,6 +66,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
 
   // New Ticket Modal State
   const [showNewTicketModal, setShowNewTicketModal] = useState(false);
+  const [newTicketCustomerId, setNewTicketCustomerId] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [newRequester, setNewRequester] = useState('');
   const [newDept, setNewDept] = useState('IT Operations');
@@ -73,15 +76,17 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
 
   // Endpoint Enrollment Modal State
   const [showEnrollEndpointModal, setShowEnrollEndpointModal] = useState(false);
+  const [newEpCustomerId, setNewEpCustomerId] = useState('');
   const [newEpDeviceName, setNewEpDeviceName] = useState('');
   const [newEpUser, setNewEpUser] = useState('');
   const [newEpOs, setNewEpOs] = useState('Windows 11 Pro 23H2 (x64)');
 
   const handleEnrollEndpointSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEpDeviceName.trim()) return;
+    if (!newEpDeviceName.trim() || !newEpCustomerId) return;
 
     const newEndpoint: EndpointHealth = {
+      customerId: newEpCustomerId,
       id: `ep-${Date.now()}`,
       deviceName: newEpDeviceName.trim(),
       assignedUser: newEpUser.trim() || 'Unassigned',
@@ -101,6 +106,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
       onAddEndpoint(newEndpoint);
     }
     setShowEnrollEndpointModal(false);
+    setNewEpCustomerId('');
     setNewEpDeviceName('');
     setNewEpUser('');
   };
@@ -1191,8 +1197,9 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!newTitle.trim() || !onCreateTicket) return;
+                if (!newTitle.trim() || !newTicketCustomerId || !onCreateTicket) return;
                 onCreateTicket({
+                  customerId: newTicketCustomerId,
                   title: newTitle,
                   requesterName: newRequester || 'Enterprise Employee',
                   requesterDept: newDept,
@@ -1205,11 +1212,21 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 });
                 setShowNewTicketModal(false);
                 setNewTitle('');
+                setNewTicketCustomerId('');
                 setNewRequester('');
                 setNewDescription('');
               }}
               className="p-5 space-y-3.5 text-xs"
             >
+              <div>
+                <label className="text-slate-400 block mb-1 font-semibold">Registered Customer *</label>
+                <select aria-label="Ticket customer" required value={newTicketCustomerId}
+                  onChange={e => setNewTicketCustomerId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white">
+                  <option value="">Select customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
               <div>
                 <label className="text-slate-400 block mb-1 font-semibold">Incident Summary / Title</label>
                 <input
@@ -1324,6 +1341,14 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             </div>
 
             <form onSubmit={handleEnrollEndpointSubmit} className="space-y-3.5 text-xs">
+              <label className="block text-slate-300 font-semibold">Registered Customer *
+                <select aria-label="Endpoint customer" required value={newEpCustomerId}
+                  onChange={e => setNewEpCustomerId(e.target.value)}
+                  className="block w-full mt-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white">
+                  <option value="">Select customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
               <div>
                 <label className="text-slate-400 block mb-1 font-semibold">Device Hostname *</label>
                 <input
