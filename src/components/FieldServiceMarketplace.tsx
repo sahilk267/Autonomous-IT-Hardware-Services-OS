@@ -17,9 +17,10 @@ import {
   UserCheck,
   Check
 } from 'lucide-react';
-import { FieldJob, ProductItem } from '../types';
+import { FieldJob, ProductItem, CustomerAccount } from '../types';
 
 interface FieldServiceMarketplaceProps {
+  customers: CustomerAccount[];
   jobs: FieldJob[];
   products: ProductItem[];
   onUpdateJobStatus: (jobId: string, nextStatus: FieldJob['status']) => void;
@@ -33,6 +34,7 @@ interface FieldServiceMarketplaceProps {
 }
 
 export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = ({
+  customers,
   jobs,
   products,
   onUpdateJobStatus,
@@ -51,7 +53,7 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
   // Dispatch Job Modal State
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [dispatchTitle, setDispatchTitle] = useState('');
-  const [dispatchCustomer, setDispatchCustomer] = useState('');
+  const [dispatchCustomerId, setDispatchCustomerId] = useState('');
   const [dispatchAddress, setDispatchAddress] = useState('');
   const [dispatchTech, setDispatchTech] = useState('');
   const [dispatchPhone, setDispatchPhone] = useState('');
@@ -125,7 +127,7 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
   const handleDispatchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dispatchTitle.trim() || !dispatchCustomer.trim() || !dispatchAddress.trim()) {
+    if (!dispatchTitle.trim() || !dispatchCustomerId || !dispatchAddress.trim()) {
       setActionBanner('Job title, customer and address are required. Unassigned jobs are internal drafts.');
       return;
     }
@@ -133,7 +135,8 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
     onCreateJob({
       title: dispatchTitle.trim(),
-      customerName: dispatchCustomer.trim(),
+      customerId: dispatchCustomerId,
+      customerName: customers.find(c => c.id === dispatchCustomerId)?.name || '',
       address: dispatchAddress.trim(),
       assignedUserId: dispatchTech || undefined,
       technicianName: fieldEngineers.find(u => u.id === dispatchTech)?.name || 'Unassigned',
@@ -145,7 +148,7 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
     setShowDispatchModal(false);
     setDispatchTitle('');
-    setDispatchCustomer('');
+    setDispatchCustomerId('');
     setDispatchAddress('');
     setDispatchTech('');
     setDispatchPhone('');
@@ -467,15 +470,13 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-400 block mb-1 font-semibold">Customer / Client Name</label>
-                  <input
-                    type="text"
-                    value={dispatchCustomer}
-                    onChange={(e) => setDispatchCustomer(e.target.value)}
-                    placeholder="e.g. Apex Hospital HQ"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
-                    required
-                  />
+                  <label className="text-slate-400 block mb-1 font-semibold">Registered Customer</label>
+                  <select aria-label="Field job customer" required value={dispatchCustomerId}
+                    onChange={e => setDispatchCustomerId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+                    <option value="">Select customer</option>
+                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1 font-semibold">SLA Window / Schedule Slot</label>
