@@ -39,7 +39,24 @@ jobs:
         run: npm run smoke:data
       - name: Customer migration preflight (read-only, isolated fixtures)
         run: npm run smoke:preflight
-      - name: Install isolated headless Chromium
+browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js 22 for current Chromium
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: |
+          npm install --include=optional --no-audit --no-fund
+          if ! node -e "require('@rollup/rollup-linux-x64-gnu')" >/dev/null 2>&1; then
+            npm install --no-save --include=optional --no-audit --no-fund "@rollup/rollup-linux-x64-gnu@$(node -p "require('./node_modules/rollup/package.json').version")"
+          fi
+      - name: Build production application
+        run: npm run build
+      - name: Install current Chromium and OS dependencies
         run: npx playwright install --with-deps chromium
-      - name: Browser login and cross-customer access (disposable DB)
+      - name: Real browser login and cross-customer isolation (throwaway DB)
         run: npm run smoke:browser
