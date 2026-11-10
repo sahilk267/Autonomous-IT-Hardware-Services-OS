@@ -160,3 +160,42 @@ test('real browser: anonymous access blocked before sign-in', async ({ page }) =
   });
   expect(result).toBe(401);
 });
+
+
+test('real browser: owner grant and customer revocation propagate across existing sales session', async ({ page, browser }) => {
+  // No mocked fetch. All clicks update the ephemeral production-mode HTTP server.
+  await signIn(page, 'owner');
+  await page.getByRole('button', { name: 'Account Security & Staff' }).click();
+  const betaGrant = page.getByRole('combobox', { name: 'Select staff for Customer Beta' });
+  await betaGrant.selectOption('ci-sales');
+  await betaGrant.locator('..').getByRole('button', { name: 'Grant' }).click();
+  await expect(page.getByText('Customer staff access granted locally', { exact: false })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Projects & Marketplace' }).click();
+  await page.getByText('Project Beta Confidential').first().click();
+  const share = page.getByRole('combobox', { name: 'Choose internal project collaborator' });
+  await share.selectOption('ci-sales');
+  await share.locator('..').getByRole('button', { name: 'Grant' }).click();
+  await expect(page.getByText('Local staff access updated', { exact: false })).toBeVisible();
+
+  const salesContext = await browser.newContext();
+  try {
+    const salesPage = await salesContext.newPage();
+    await signIn(salesPage, 'sales');
+    await salesPage.getByRole('button', { name: 'Projects & Marketplace' }).click();
+    await expect(salesPage.getByText('Project Beta Confidential').first()).toBeVisible();
+
+    await page.getByRole('button', { name: 'Account Security & Staff' }).click();
+    const betaRow = page.getByText('Customer Beta', { exact: true }).locator('..');
+    await betaRow.getByRole('button', { name: 'Revoke' }).first().click();
+    await expect(page.getByText('Customer staff access revoked locally', { exact: false })).toBeVisible();
+
+    await salesPage.reload();
+    await salesPage.getByRole('button', { name: 'Projects & Marketplace' }).click();
+    await expect(salesPage.getByText('Project Beta Confidential')).toHaveCount(0);
+    const afterRevoke = await salesPage.evaluate(async () => (await fetch('/api/projects')).json());
+    expect(afterRevoke.data.some((project: {id: string}) => project.id === 'beta')).toBe(false);
+  } finally {
+    await salesContext.close();
+  }
+});
