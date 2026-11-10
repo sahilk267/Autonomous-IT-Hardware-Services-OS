@@ -435,7 +435,7 @@ try {
     assert.equal(r.status, 200);
     assert.equal(r.data.data.invoices.length, 1);
     assert.equal(r.data.data.users.length, 5);
-    assert.equal(r.data.data.crmOpportunities.length, 2);
+    assert.equal(r.data.data.crmOpportunities.length, 3);
   });
   // Phase 5: field engineer can only read / mutate specifically owned records.
   r = await api('/api/state', { cookie: sessions.field });
