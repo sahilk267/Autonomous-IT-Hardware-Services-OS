@@ -187,14 +187,15 @@ test('real browser: owner grant and customer revocation propagate across existin
 
     await page.getByRole('button', { name: 'Account Security & Staff' }).click();
     const betaRow = page.getByText('Customer Beta', { exact: true }).locator('..');
-    await betaRow.getByRole('button', { name: 'Revoke' }).first().click();
+    await betaRow.getByText('sales (SALES_MANAGER)', { exact: true })
+      .locator('..').getByRole('button', { name: 'Revoke' }).click();
     await expect(page.getByText('Customer staff access revoked locally', { exact: false })).toBeVisible();
 
+    const afterRevoke = await salesPage.evaluate(async () => (await fetch('/api/projects')).json());
+    expect(afterRevoke.data.some((project: {id: string}) => project.id === 'beta')).toBe(false);
     await salesPage.reload();
     await salesPage.getByRole('button', { name: 'Projects & Marketplace' }).click();
     await expect(salesPage.getByText('Project Beta Confidential')).toHaveCount(0);
-    const afterRevoke = await salesPage.evaluate(async () => (await fetch('/api/projects')).json());
-    expect(afterRevoke.data.some((project: {id: string}) => project.id === 'beta')).toBe(false);
   } finally {
     await salesContext.close();
   }
