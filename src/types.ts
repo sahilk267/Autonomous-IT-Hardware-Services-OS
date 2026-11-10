@@ -24,6 +24,15 @@ export interface UserAccount {
   passwordChangedAt?: string;
 }
 
+// Each customer belongs to the single current tenant. Membership is an explicit staff authorization grant.
+export interface CustomerAccount {
+  id: string;
+  tenantId: string;
+  name: string;
+  createdAt: string;
+  staffUserIds: string[];
+}
+
 export interface TenantInfo {
   id: string;
   name: string;
@@ -217,6 +226,7 @@ export interface ITSMTicket {
 
 export interface EndpointHealth {
   id: string;
+  customerId?: string; // set by server against owner-managed registry
   assignedUserId?: string; // explicit local FIELD_ENGINEER assignment, never inferred from assignedUser display text
   deviceName: string;
   assignedUser: string;
@@ -279,6 +289,7 @@ export interface ProjectMilestone {
 
 export interface Project {
   id: string;
+  customerId?: string; // authoritative customer registry ID; missing means unmapped legacy
   createdByUserId?: string; // server-assigned local owner; legacy records have no trusted creator
   collaboratorUserIds?: string[]; // owner-managed authorized internal staff, not external customers
   projectCode: string;
@@ -331,6 +342,7 @@ export interface ProviderProfile {
 
 export interface AssetItem {
   id: string;
+  customerId?: string; // immutable verified customer association
   assignedUserId?: string; // explicit local service engineer ID, display label is NOT authorization
   assetTag: string;
   serialNumber: string;
@@ -422,6 +434,7 @@ export type OperatingMode =
 
 export interface RMAClaim {
   id: string;
+  customerId?: string; // inherited from registered asset, never chosen by RMA submitter
   rmaNumber: string;
   assetTag: string;
   assetId?: string;

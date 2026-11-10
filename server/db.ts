@@ -25,6 +25,7 @@ import {
   CRMOpportunity,
   MarketplaceDispute,
   TenantInfo,
+  CustomerAccount,
   UserAccount,
   UserRole,
   InvoiceRecord,
@@ -62,6 +63,7 @@ export interface InventoryTransaction {
 
 export interface AppStoreState {
   tenant: TenantInfo;
+  customers: CustomerAccount[];
   users: ServerUser[];
   sessions: SessionRecord[];
   products: ProductItem[];
@@ -206,6 +208,7 @@ export function getInitialCleanState(): AppStoreState {
       logoText: 'APEX',
       isConfigured: false
     },
+    customers: [],
     users: [],
     sessions: [],
     products: [],
@@ -319,6 +322,53 @@ export class PersistentStore {
     return this.commit((draft) => {
       draft.tenant = { ...draft.tenant, ...updates };
       return draft.tenant;
+    });
+  }
+
+  // Customer identities and staff grants share one atomic store commit with their audit event.
+  public registerCustomer(name: string, actor: string): CustomerAccount {
+    return this.commit(draft => {
+      if (draft.customers.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+        throw new Error('Customer name already registered.');
+      }
+      const customer: CustomerAccount = {
+        id: 'cust-' + crypto.randomUUID(),
+        tenantId: draft.tenant.id, name, createdAt: new Date().toISOString(), staffUserIds: []
+      };
+      draft.customers.unshift(customer);
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'CustomerRegistered', agent: actor,
+        summary: 'Customer record registered: ' + customer.id,
+        autonomousActionTaken: 'Created internal customer registry record; no external account provisioned.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return customer;
+    });
+  }
+
+  public setCustomerStaffAccess(customerId: string, userId: string, grant: boolean, actor: string): CustomerAccount | null {
+    return this.commit(draft => {
+      const customer = draft.customers.find(c => c.id === customerId && c.tenantId === draft.tenant.id);
+      if (!customer) return null;
+      const staff = draft.users.find(u => u.id === userId && u.tenantId === draft.tenant.id &&
+        u.role !== 'BUSINESS_OWNER' && !u.disabledAt);
+      if (!staff) throw new Error('An active local nonowner staff identity is required.');
+      customer.staffUserIds = grant
+        ? Array.from(new Set([...customer.staffUserIds, staff.id]))
+        : customer.staffUserIds.filter(id => id !== staff.id);
+      // Revoke per-project shares at the same time; permission check still enforces the customer grant.
+      if (!grant) for (const project of draft.projects.filter(p => p.customerId === customerId)) {
+        project.collaboratorUserIds = (project.collaboratorUserIds || []).filter(id => id !== userId);
+      }
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'CustomerStaffAccessChanged', agent: actor,
+        summary: 'Customer ' + customer.id + ' staff access ' + (grant ? 'granted' : 'revoked') + '.',
+        autonomousActionTaken: 'Committed customer access change and dependent project-share revocation locally.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return customer;
     });
   }
 

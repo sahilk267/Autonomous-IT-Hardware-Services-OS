@@ -118,33 +118,47 @@ function requireRole(...roles: UserRole[]) {
 }
 
 const ROLE_READ_COLLECTIONS: Record<UserRole, readonly string[]> = {
-  BUSINESS_OWNER: ['products','leads','quotes','telegramMessages','suppliers','rfqs','tickets','endpoints','jobs','assets','licenses','amcs','projects','proposals','providers','events','invoices','workflows','connectors','rmaClaims','knowledgeArticles','crmOpportunities','marketplaceDisputes','inventoryTransactions'],
-  SALES_MANAGER: ['products','leads','quotes','projects','proposals','crmOpportunities','knowledgeArticles'],
-  PROCUREMENT_LEAD: ['products','suppliers','rfqs','quotes','projects','assets','inventoryTransactions'],
-  ENTERPRISE_IT_HEAD: ['tickets','endpoints','jobs','assets','licenses','amcs','projects','proposals','rmaClaims','knowledgeArticles'],
-  FIELD_ENGINEER: ['products','tickets','endpoints','jobs','assets','rmaClaims','knowledgeArticles']
+  BUSINESS_OWNER: ['products','leads','quotes','telegramMessages','suppliers','rfqs','tickets','endpoints','jobs','assets','licenses','amcs','projects','proposals','providers','events','invoices','workflows','connectors','rmaClaims','knowledgeArticles','crmOpportunities','marketplaceDisputes','inventoryTransactions','customers'],
+  SALES_MANAGER: ['products','leads','quotes','projects','proposals','crmOpportunities','knowledgeArticles','customers'],
+  PROCUREMENT_LEAD: ['products','suppliers','rfqs','quotes','projects','assets','inventoryTransactions','customers'],
+  ENTERPRISE_IT_HEAD: ['tickets','endpoints','jobs','assets','licenses','amcs','projects','proposals','rmaClaims','knowledgeArticles','customers'],
+  FIELD_ENGINEER: ['products','tickets','endpoints','jobs','assets','rmaClaims','knowledgeArticles','customers']
 };
 
-// Phase 8 — same-tenant object grants, not customer tenancy.
-// Legacy rows missing stable ID assignments are owner/manager-only; display names never grant access.
+// Phase 9 — explicit customer membership AND role/object permission for customer-bound records.
+// Unmapped legacy records have no inferred customer membership. Only the owner can access them.
 type LocalActor = { role: UserRole; userId: string };
-const visibleAsset = (asset: { assignedUserId?: string }, actor: LocalActor) =>
-  actor.role !== 'FIELD_ENGINEER' || (!!asset.assignedUserId && asset.assignedUserId === actor.userId);
-const visibleEndpoint = (endpoint: { assignedUserId?: string }, actor: LocalActor) =>
-  actor.role !== 'FIELD_ENGINEER' || (!!endpoint.assignedUserId && endpoint.assignedUserId === actor.userId);
-const visibleRMA = (claim: { assetId?: string }, actor: LocalActor) =>
-  actor.role !== 'FIELD_ENGINEER' ||
-  (!!claim.assetId && dbStore.getState().assets.some(asset =>
-    asset.id === claim.assetId && visibleAsset(asset, actor)));
+const customerRecord = (customerId: unknown) =>
+  typeof customerId === 'string' ? dbStore.getState().customers.find(
+    c => c.id === customerId && c.tenantId === dbStore.getState().tenant.id) : undefined;
+const canAccessCustomer = (customerId: string | undefined, actor: LocalActor) =>
+  actor.role === 'BUSINESS_OWNER' ||
+  !!(customerRecord(customerId)?.staffUserIds.includes(actor.userId));
+const visibleCustomers = (actor: LocalActor) =>
+  dbStore.getState().customers.filter(c => canAccessCustomer(c.id, actor));
+const customerFromInput = (input: unknown, actor: LocalActor): import('./src/types.ts').CustomerAccount | null => {
+  const customer = customerRecord(input);
+  return customer && canAccessCustomer(customer.id, actor) ? customer : null;
+};
+const visibleAsset = (asset: { customerId?: string; assignedUserId?: string }, actor: LocalActor) =>
+  canAccessCustomer(asset.customerId, actor) &&
+  (actor.role !== 'FIELD_ENGINEER' || (!!asset.assignedUserId && asset.assignedUserId === actor.userId));
+const visibleEndpoint = (endpoint: { customerId?: string; assignedUserId?: string }, actor: LocalActor) =>
+  canAccessCustomer(endpoint.customerId, actor) &&
+  (actor.role !== 'FIELD_ENGINEER' || (!!endpoint.assignedUserId && endpoint.assignedUserId === actor.userId));
+const visibleRMA = (claim: { assetId?: string; customerId?: string }, actor: LocalActor) =>
+  !!claim.assetId && dbStore.getState().assets.some(asset =>
+    asset.id === claim.assetId && asset.customerId === claim.customerId && visibleAsset(asset, actor));
 const visibleProject = (project: Project, actor: LocalActor) =>
-  actor.role === 'BUSINESS_OWNER' ||
-  ((actor.role === 'SALES_MANAGER' || actor.role === 'ENTERPRISE_IT_HEAD' ||
-    actor.role === 'PROCUREMENT_LEAD') &&
-   (project.createdByUserId === actor.userId ||
-    (Array.isArray(project.collaboratorUserIds) && project.collaboratorUserIds.includes(actor.userId))));
+  canAccessCustomer(project.customerId, actor) &&
+  (actor.role === 'BUSINESS_OWNER' ||
+    ((actor.role === 'SALES_MANAGER' || actor.role === 'ENTERPRISE_IT_HEAD' ||
+      actor.role === 'PROCUREMENT_LEAD') &&
+     (project.createdByUserId === actor.userId ||
+      (Array.isArray(project.collaboratorUserIds) && project.collaboratorUserIds.includes(actor.userId)))));
 const mayManageProject = (project: Project, actor: LocalActor) =>
-  actor.role === 'BUSINESS_OWNER' ||
-  (actor.role === 'ENTERPRISE_IT_HEAD' && project.createdByUserId === actor.userId);
+  visibleProject(project, actor) && (actor.role === 'BUSINESS_OWNER' ||
+   (actor.role === 'ENTERPRISE_IT_HEAD' && project.createdByUserId === actor.userId));
 const visibleProjects = (actor: LocalActor) =>
   dbStore.getState().projects.filter(project => visibleProject(project, actor));
 const visibleProposals = (actor: LocalActor) => {
@@ -152,8 +166,7 @@ const visibleProposals = (actor: LocalActor) => {
   return dbStore.getState().proposals.filter(proposal => visibleIds.has(proposal.projectId));
 };
 
-// Collection-level isolation within the current single-tenant instance only.
-// This does not implement per-customer / multi-tenant row-level authorization.
+// Internal customer boundaries are not database-enforced tenant isolation. Other modules remain in scope for expansion.
 
 // Helper for Gemini initialization using modern @google/genai SDK
 function getGeminiClient(): GoogleGenAI | null {
@@ -440,6 +453,43 @@ app.post('/api/tenant', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) =
   }
 });
 
+// Customer ownership is local-only. Client-facing identity and portal login are NOT implemented.
+app.get('/api/customers', requireAuth, (req, res) => {
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: visibleCustomers(actor) });
+});
+
+app.post('/api/customers', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).length !== 1 || typeof body.name !== 'string' ||
+      !body.name.trim() || body.name.trim().length > 160) {
+    return res.status(400).json({ success: false, error: 'Only a real customer name (1–160 chars) is accepted.' });
+  }
+  try {
+    const customer = dbStore.registerCustomer(body.name.trim(), (req as any).user.username);
+    return res.status(201).json({ success: true, data: customer, externalAccountCreated: false });
+  } catch (err: any) {
+    return res.status(409).json({ success: false, error: err.message });
+  }
+});
+
+app.patch('/api/customers/:id/access', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).sort().join(',') !== 'grant,userId' ||
+      typeof body.userId !== 'string' || typeof body.grant !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'Require an exact staff userId and boolean grant.' });
+  }
+  try {
+    const customer = dbStore.setCustomerStaffAccess(req.params.id, body.userId, body.grant, (req as any).user.username);
+    return customer ? res.json({ success: true, data: customer, externalAccessChanged: false }) :
+      res.status(404).json({ success: false, error: 'Customer not found.' });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 // Full Application State (Protected - secrets and password hashes stripped)
 app.get('/api/state', requireAuth, (req, res) => {
   try {
@@ -455,13 +505,16 @@ app.get('/api/state', requireAuth, (req, res) => {
     for (const [key, value] of Object.entries(safeState)) {
       if (Array.isArray(value) && key !== 'users' && !allowed.has(key)) safeState[key] = [];
     }
-    if (actor.role === 'FIELD_ENGINEER') {
+    if (allowed.has('customers')) safeState.customers = visibleCustomers(actor);
+    if (allowed.has('tickets') && actor.role === 'FIELD_ENGINEER') {
       safeState.tickets = rawState.tickets.filter(t => visibleTicket(t, actor));
-      safeState.jobs = rawState.jobs.filter(j => visibleJob(j, actor));
-      safeState.assets = rawState.assets.filter(a => visibleAsset(a, actor));
-      safeState.endpoints = rawState.endpoints.filter(e => visibleEndpoint(e, actor));
-      safeState.rmaClaims = rawState.rmaClaims.filter(r => visibleRMA(r, actor));
     }
+    if (allowed.has('jobs') && actor.role === 'FIELD_ENGINEER') {
+      safeState.jobs = rawState.jobs.filter(j => visibleJob(j, actor));
+    }
+    if (allowed.has('assets')) safeState.assets = rawState.assets.filter(a => visibleAsset(a, actor));
+    if (allowed.has('endpoints')) safeState.endpoints = rawState.endpoints.filter(e => visibleEndpoint(e, actor));
+    if (allowed.has('rmaClaims')) safeState.rmaClaims = rawState.rmaClaims.filter(r => visibleRMA(r, actor));
     if (allowed.has('projects')) safeState.projects = visibleProjects(actor);
     if (allowed.has('proposals')) safeState.proposals = visibleProposals(actor);
     res.json({ success: true, data: safeState });
@@ -1019,9 +1072,12 @@ app.post('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRIS
     if (!ep || typeof ep.deviceName !== 'string' || !ep.deviceName.trim()) {
       return res.status(400).json({ success: false, error: 'deviceName is required' });
     }
+    const customer = customerFromInput(ep.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
     const created = dbStore.addEndpoint({
       ...ep,
       id: `ep-${crypto.randomUUID()}`,
+      customerId: customer.id,
       assignedUserId: undefined, // assignment requires owner/IT manager authorization
       lastSeen: 'Awaiting agent check-in',
       status: 'UNENROLLED',
@@ -1065,6 +1121,11 @@ app.patch('/api/endpoints/:id/assign', requireAuth,
       return res.status(400).json({ success: false, error: 'Use an active field engineer ID or null.' });
     }
     if (!validateAssignment(userId)) return res.status(400).json({ success: false, error: 'Unknown, inactive or non-field user ID.' });
+    const endpointRecord = dbStore.getState().endpoints.find(e => e.id === req.params.id);
+    if (!endpointRecord || !visibleEndpoint(endpointRecord, (req as any).user as LocalActor))
+      return res.status(404).json({ success: false, error: 'Endpoint not found.' });
+    if (userId && !canAccessCustomer(endpointRecord.customerId, { userId, role: 'FIELD_ENGINEER' }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
     const endpoint = dbStore.assignEndpoint(req.params.id, userId, (req as any).user.username);
     return endpoint ? res.json({ success: true, data: endpoint, agentEnrolled: false }) :
       res.status(404).json({ success: false, error: 'Endpoint not found.' });
@@ -1183,6 +1244,8 @@ app.post('/api/assets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_I
         (typeof asset.assetTag !== 'string' || !/^[A-Za-z0-9._-]{2,80}$/.test(asset.assetTag))) {
       return res.status(400).json({ success: false, error: 'Asset tag must be 2–80 letters, digits, dots, underscores or dashes.' });
     }
+    const customer = customerFromInput(asset.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
     const assetTag = asset.assetTag || ('TAG-' + crypto.randomUUID().slice(0, 12).toUpperCase());
     if (dbStore.getState().assets.some(a => a.assetTag.toLowerCase() === assetTag.toLowerCase())) {
       return res.status(409).json({ success: false, error: 'Asset tag already registered.' });
@@ -1190,6 +1253,7 @@ app.post('/api/assets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_I
     const created = dbStore.addAsset({
       ...asset,
       id: `ast-${crypto.randomUUID()}`, // never trust client-selected record IDs
+      customerId: customer.id,
       assetTag,
       name: asset.name.trim(),
       assignedUserId: undefined, // explicit managerial assignment required; display label not an access grant
@@ -1248,6 +1312,11 @@ app.patch('/api/assets/:id/assign', requireAuth,
       return res.status(400).json({ success: false, error: 'Use an active field engineer ID or null.' });
     }
     if (!validateAssignment(userId)) return res.status(400).json({ success: false, error: 'Unknown, inactive or non-field user ID.' });
+    const assetRecord = dbStore.getState().assets.find(a => a.id === req.params.id);
+    if (!assetRecord || !visibleAsset(assetRecord, (req as any).user as LocalActor))
+      return res.status(404).json({ success: false, error: 'Asset not found.' });
+    if (userId && !canAccessCustomer(assetRecord.customerId, { userId, role: 'FIELD_ENGINEER' }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
     const asset = dbStore.assignAsset(req.params.id, userId, (req as any).user.username);
     return asset ? res.json({ success: true, data: asset, externalNotificationSent: false }) :
       res.status(404).json({ success: false, error: 'Asset not found.' });
@@ -1408,8 +1477,13 @@ app.get('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAG
 app.post('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const raw = projectInputObject(req.body);
-    const { milestones: milestoneInput, ...editable } = raw;
+    const { milestones: milestoneInput, customerId, ...editable } = raw;
+    const customer = customerFromInput(customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
     const fields = projectEditableFields(editable, true);
+    if (fields.clientName !== customer.name) {
+      return res.status(400).json({ success: false, error: 'Project clientName must equal the registered customer; customer identity is not free text.' });
+    }
     if (milestoneInput !== undefined &&
         (!Array.isArray(milestoneInput) || milestoneInput.length > 50)) {
       throw new Error('Milestones must be an array of at most 50 explicitly supplied records.');
@@ -1418,6 +1492,7 @@ app.post('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANA
     verifyMilestoneBudget(milestones, fields.budget ?? 0);
     const created = dbStore.addProject({
       id: 'proj-' + crypto.randomUUID(),
+      customerId: customer.id,
       createdByUserId: (req as any).user.userId,
       collaboratorUserIds: [],
       projectCode: 'PRJ-' + crypto.randomUUID().slice(0, 12).toUpperCase(),
@@ -1438,6 +1513,9 @@ app.post('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANA
 app.patch('/api/projects/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const fields = projectEditableFields(req.body);
+    if (fields.clientName !== undefined) {
+      return res.status(400).json({ success: false, error: 'Customer identity cannot be modified on a project.' });
+    }
     if (fields.budget !== undefined && (req as any).user.role !== 'BUSINESS_OWNER') {
       return res.status(403).json({ success: false, error: 'Only the business owner can change project budget.' });
     }
@@ -1468,6 +1546,10 @@ app.patch('/api/projects/:id/access', requireAuth, requireRole('BUSINESS_OWNER')
     return res.status(400).json({ success: false, error: 'Only eligible local active staff may be granted project access.' });
   }
   try {
+    const existingProject = dbStore.getState().projects.find(p => p.id === req.params.id);
+    if (!existingProject) return res.status(404).json({ success: false, error: 'Project not found.' });
+    if (body.grant && !canAccessCustomer(existingProject.customerId, { userId: target.id, role: target.role }))
+      return res.status(403).json({ success: false, error: 'Staff member must first be granted customer access.' });
     const project = dbStore.setProjectCollaborator(req.params.id, target.id, body.grant, (req as any).user.username);
     return project ? res.json({ success: true, data: project, externalCustomerAccessChanged: false }) :
       res.status(404).json({ success: false, error: 'Project not found.' });
@@ -1606,6 +1688,7 @@ app.post('/api/rma', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_H
     const created = dbStore.addRMAClaim({
       id: 'rma-' + identifier,
       rmaNumber: 'RMA-' + identifier.slice(0, 10).toUpperCase(),
+      customerId: asset.customerId,
       assetId: asset.id, assetTag: asset.assetTag, assetName: asset.name,
       serialNumber: asset.serialNumber || '', oemBrand: asset.brand || '',
       oemCaseNumber: '', faultSymptom, warrantyStatus: 'UNVERIFIED',
@@ -1618,7 +1701,8 @@ app.post('/api/rma', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_H
 app.patch('/api/rma/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const current = dbStore.getState().rmaClaims.find(c => c.id === req.params.id);
-    if (!current) return res.status(404).json({ success: false, error: 'RMA claim not found.' });
+    if (!current || !visibleRMA(current, (req as any).user as LocalActor))
+      return res.status(404).json({ success: false, error: 'RMA claim not found.' });
     const stage = req.body?.stage;
     const index = rmaStages.indexOf(current.stage);
     if (typeof stage !== 'string' || stage !== rmaStages[index + 1]) {
