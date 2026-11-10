@@ -24,9 +24,10 @@ import {
   Check,
   X
 } from 'lucide-react';
-import { AssetItem, SoftwareLicense, AMCContract, RMAClaim } from '../types';
+import { AssetItem, SoftwareLicense, AMCContract, RMAClaim, CustomerAccount } from '../types';
 
 interface AssetAMCManagerProps {
+  customers: CustomerAccount[];
   assets: AssetItem[];
   licenses: SoftwareLicense[];
   amcs: AMCContract[];
@@ -45,6 +46,7 @@ interface AssetAMCManagerProps {
 }
 
 export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
+  customers,
   assets,
   licenses,
   amcs,
@@ -73,6 +75,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
   // Asset Registration Modal State
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
+  const [newAssetCustomerId, setNewAssetCustomerId] = useState('');
   const [newAssetName, setNewAssetName] = useState('');
   const [newAssetTag, setNewAssetTag] = useState('');
   const [newAssetSerial, setNewAssetSerial] = useState('');
@@ -87,7 +90,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
   // AMC Modal State
   const [showAddAmcModal, setShowAddAmcModal] = useState(false);
-  const [newAmcClient, setNewAmcClient] = useState('');
+  const [newAmcCustomerId, setNewAmcCustomerId] = useState('');
   const [newAmcType, setNewAmcType] = useState<AMCContract['type']>('COMPREHENSIVE');
   const [newAmcDeviceCount, setNewAmcDeviceCount] = useState('1');
   const [newAmcAnnualValue, setNewAmcAnnualValue] = useState('');
@@ -95,12 +98,14 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
   const handleAddAmcSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAmcClient.trim()) return;
+    const customer = customers.find(c => c.id === newAmcCustomerId);
+    if (!customer) return;
 
     const newAmc: AMCContract = {
       id: `amc-${Date.now()}`,
       contractNumber: `AMC-${Date.now().toString().slice(-6)}`,
-      clientName: newAmcClient.trim(),
+      customerId: customer.id,
+      clientName: customer.name,
       type: newAmcType,
       startDate: new Date().toISOString().split('T')[0],
       endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -115,14 +120,15 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
       onAddAMC(newAmc);
     }
     setShowAddAmcModal(false);
-    setNewAmcClient('');
+    setNewAmcCustomerId('');
   };
 
   const handleAddAssetSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAssetName || !newAssetTag) return;
+    if (!newAssetName || !newAssetTag || !newAssetCustomerId) return;
 
     const newAsset: AssetItem = {
+      customerId: newAssetCustomerId,
       id: `ast-${Date.now()}`,
       assetTag: newAssetTag.toUpperCase(),
       serialNumber: newAssetSerial.trim() || 'UNTRACKED',
@@ -143,6 +149,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
       onAddAsset(newAsset);
     }
     setShowAddAssetModal(false);
+    setNewAssetCustomerId('');
     setNewAssetName('');
     setNewAssetTag('');
     setNewAssetSerial('');
@@ -1009,6 +1016,15 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
             </div>
 
             <form onSubmit={handleAddAssetSubmit} className="space-y-3.5 text-xs">
+              <label className="block text-slate-300 font-semibold">
+                Registered Customer *
+                <select aria-label="Asset customer" required value={newAssetCustomerId}
+                  onChange={e => setNewAssetCustomerId(e.target.value)}
+                  className="block w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl p-2 text-white">
+                  <option value="">Select customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">Asset Tag *</label>
@@ -1163,15 +1179,13 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
             <form onSubmit={handleAddAmcSubmit} className="space-y-3.5 text-xs">
               <div>
-                <label className="text-slate-400 block mb-1 font-semibold">Client Enterprise Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Nexus FinTech Solutions Ltd"
-                  value={newAmcClient}
-                  onChange={(e) => setNewAmcClient(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:border-emerald-500 focus:outline-none"
-                />
+                <label className="text-slate-400 block mb-1 font-semibold">Registered Customer *</label>
+                <select aria-label="AMC customer" required value={newAmcCustomerId}
+                  onChange={e => setNewAmcCustomerId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white">
+                  <option value="">Select customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
