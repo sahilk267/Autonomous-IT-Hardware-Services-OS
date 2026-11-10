@@ -170,3 +170,9 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 - **MIGRATE-09 (P0):** PostgreSQL/RLS cutover is only a documented blueprint, **not implemented**. See [Phase 9 implementation report](PHASE_9_CUSTOMER_ISOLATION_2026-11-11.md) and [PostgreSQL architecture plan](POSTGRESQL_MIGRATION_BLUEPRINT.md). No Hostinger/live migration and no customer data rewritten.
 - **RELEASE GATES OPEN:** Customer-facing authentication, tenant-level DB isolation, remaining auxiliary customer references, rollback rehearsal and restore verification, in-browser end-user approval/denial scenarios, and external provider integration acceptance. CI run evidence is recorded separately after successful completion.
 
+
+### Phase 9 final isolated CI and browser evidence — 11 November 2026
+
+- [GitHub Actions push #42902830813](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42902830813) and [Draft PR #42902844014](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42902844014) both completed **success** on [code commit `bb01caf`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/bb01caf995e067cfd08be4833d4117660df1b47f).
+- Node20 TypeScript/build **PASS**, regression **16/16**, login limiter **7/7**, production-mode HTTP **96/96**, role/customer authorization **133/133**, data safety **9/9**, read-only customer mapping preflight **5/5**; separately, real Node22 Chromium Playwright **7/7**. Browser tests cover five roles plus anonymous denial and owner customer/project access grant → cross-session revocation against isolated fixtures.
+- Verified only on disposable CI stores. Deployment **not performed**; DB-level tenant enforcement/RLS, historical customer mapping, additional legacy customer-linked collections, backup restore validation and live providers remain release blockers. **Keep PR draft.**

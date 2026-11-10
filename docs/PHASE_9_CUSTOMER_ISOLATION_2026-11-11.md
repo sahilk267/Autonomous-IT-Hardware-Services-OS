@@ -43,3 +43,10 @@
 6. Sign off browser/API/security acceptance and restore drill before any production cutover. This phase did not perform any actual deployment, restore, schema migration or customer data modification.
 
 **Current safety decision: keep PR #1 draft; main and live deployments unchanged.**
+
+## Final isolated CI evidence — 11 November 2026
+
+- [Push run #42902830813](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42902830813) and [draft-PR run #42902844014](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42902844014) both green on commit `bb01caf`.
+- Node20 verification: TypeScript/build PASS; regression **16/16**, auth **7/7**, production-mode API **96/96**, role/customer API **133/133**, data safety **9/9**, customer migration read-only preflight **5/5**.
+- Node22 real Chromium Playwright **7/7**: separate owner/sales/procurement/IT manager/field perspectives, anonymous access denial, owner customer grant + project collaboration, and immediate denial across an existing sales session after exact staff membership revocation.
+- All fixtures are disposable local JSON files. No customer records, Hostinger instance, external credentials, real browser sessions or live provider APIs were accessed. Passing these checks is not a claim of production-ready multi-tenancy.
