@@ -100,6 +100,21 @@ try {
     assert.match(sessionHeader, /Secure/);
   });
   const cookie = sessionHeader.split(';')[0];
+  result = await post('/api/customers', { name: 'CI Customer' }, cookie);
+  verify('Owner registers an authoritative customer identity', () => {
+    assert.equal(result.response.status, 201);
+    assert.ok(result.body.data.id.startsWith('cust-'));
+    assert.deepEqual(result.body.data.staffUserIds, []);
+    assert.equal(result.body.externalAccountCreated, false);
+  });
+  const customerId = result.body.data.id;
+  result = await post('/api/customers', { name: 'ci customer' }, cookie);
+  verify('Customer registry rejects duplicate case-folded customer names', () =>
+    assert.equal(result.response.status, 409));
+  result = await post('/api/customers', { name: 'Different Customer', staffUserIds: ['owner'] }, cookie);
+  verify('Owner cannot fabricate customer grants on registration', () =>
+    assert.equal(result.response.status, 400));
+
 
   result = await request('/api/state', {}, cookie);
   verify('Authenticated state redacts password hashes and sessions', () => {
@@ -260,13 +275,13 @@ try {
 
   // Phase 2: typed RMA lifecycle, KB, CRM and dispute APIs must genuinely persist.
   result = await post('/api/assets', {
-    assetTag: 'CI-ASSET-001', name: 'CI Test Router', brand: 'Cisco',
+    customerId, assetTag: 'CI-ASSET-001', name: 'CI Test Router', brand: 'Cisco',
     serialNumber: 'CI-SERIAL-001', model: 'Test', purchaseCost: 1000
   }, cookie);
   verify('Real asset registered for RMA', () => assert.equal(result.response.status, 201));
   const persistedAssetId = result.body.data.id;
   result = await post('/api/assets', {
-    id: 'forged-owner-id', assetTag: 'CI-ASSET-001', name: 'Collision'
+    customerId, id: 'forged-owner-id', assetTag: 'CI-ASSET-001', name: 'Collision'
   }, cookie);
   verify('Duplicate asset tags cannot create ambiguous RMA associations', () =>
     assert.equal(result.response.status, 409));
@@ -320,20 +335,20 @@ try {
   result = await patch(`/api/crm/${crmId}`, { stage: 'QUALIFIED' }, cookie);
   verify('CRM next stage persists', () => assert.equal(result.body.data.stage, 'QUALIFIED'));
 
-  result = await post('/api/projects', { title: 'CI Network Installation', clientName: 'CI Customer' }, cookie);
+  result = await post('/api/projects', { customerId, title: 'CI Network Installation', clientName: 'CI Customer' }, cookie);
   verify('Real project created for dispute', () => assert.equal(result.response.status, 201));
   const projectId = result.body.data.id;
   verify('Project creator and collaboration list are server-authoritative', () => {
     assert.equal(typeof result.body.data.createdByUserId, 'string');
     assert.deepEqual(result.body.data.collaboratorUserIds, []);
   });
-  result = await post('/api/projects', {
+  result = await post('/api/projects', { customerId,
     id: 'client-forged', title: 'Forged project', clientName: 'CI Customer',
     status: 'COMPLETED', projectCode: 'FRAUD', milestones: []
   }, cookie);
   verify('Project creation rejects forged identifiers, status and client project code', () =>
     assert.equal(result.response.status, 400));
-  result = await post('/api/projects', {
+  result = await post('/api/projects', { customerId,
     title: 'Milestone-managed CI project', clientName: 'CI Customer', budget: 12000,
     milestones: [{ title: 'Actual staging', amount: 8000, dueDate: '2026-12-20' }]
   }, cookie);
@@ -347,14 +362,14 @@ try {
   });
   const securedProjectId = result.body.data.id;
   const milestoneId = result.body.data.milestones[0].id;
-  result = await post('/api/projects', {
-    title: 'Invalid due date', clientName: 'CI', budget: 1000,
+  result = await post('/api/projects', { customerId,
+    title: 'Invalid due date', clientName: 'CI Customer', budget: 1000,
     milestones: [{ title: 'Impossible date', amount: 500, dueDate: '2026-02-30' }]
   }, cookie);
   verify('Project creation rejects non-calendar milestone due dates', () =>
     assert.equal(result.response.status, 400));
-  result = await post('/api/projects', {
-    title: 'Overfunded milestone', clientName: 'CI', budget: 1000,
+  result = await post('/api/projects', { customerId,
+    title: 'Overfunded milestone', clientName: 'CI Customer', budget: 1000,
     milestones: [{ title: 'Too large', amount: 1001, dueDate: '2026-12-01' }]
   }, cookie);
   verify('Project rejects milestone totals above budget', () =>

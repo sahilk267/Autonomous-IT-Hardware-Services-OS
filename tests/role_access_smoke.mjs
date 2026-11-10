@@ -25,6 +25,10 @@ for (const [role, username] of [
     salt, passwordHash: scryptSync(password, salt, 64).toString('hex')
   });
 }
+starter.customers = [{
+  id: 'ci-customer-a', tenantId: starter.tenant.id, name: 'Role CI Client',
+  createdAt: new Date().toISOString(), staffUserIds: ['ci-sales', 'ci-field', 'ci-ithead', 'ci-procurement']
+}];
 // Only isolated fixture records are used; this cannot mutate deployed data.
 starter.invoices.push({
   customer: 'Private CI Customer', invoiceNo: 'CI-INVOICE-001',
@@ -135,7 +139,7 @@ try {
   check('Sales cannot change tenant configuration', () => assert.equal(r.status, 403));
   r = await api('/api/projects', {
     method: 'POST', cookie: sessions.ithead,
-    body: { title: 'Role-scoped CI project', clientName: 'Role CI Client', budget: 500 }
+    body: { customerId: 'ci-customer-a', title: 'Role-scoped CI project', clientName: 'Role CI Client', budget: 500 }
   });
   check('IT manager can create a project with server-authoritative defaults', () =>
     assert.equal(r.status, 201));
@@ -204,7 +208,7 @@ try {
 
   // Phase 8: same-tenant object authorization is enforced for state AND direct lists.
   r = await api('/api/assets', { method: 'POST', cookie: sessions.owner,
-    body: { id: 'forged-object', assetTag: 'CI-FIELD-01', name: 'CI Service Asset',
+    body: { customerId: 'ci-customer-a', id: 'forged-object', assetTag: 'CI-FIELD-01', name: 'CI Service Asset',
       assignedUserId: 'ci-field', assignedUser: 'field', purchaseCost: 1200 } });
   check('Asset create ignores forged object ID and user assignment', () => {
     assert.equal(r.status, 201);
@@ -213,7 +217,7 @@ try {
   });
   const ownedAssetId = r.data.data.id;
   r = await api('/api/assets', { method: 'POST', cookie: sessions.owner,
-    body: { assetTag: 'CI-PRIVATE-01', name: 'Confidential Client Asset', assignedUser: 'field' } });
+    body: { customerId: 'ci-customer-a', assetTag: 'CI-PRIVATE-01', name: 'Confidential Client Asset', assignedUser: 'field' } });
   check('Private asset creates without granting field access by display name', () =>
     assert.equal(r.status, 201));
   const privateAssetId = r.data.data.id;
@@ -236,14 +240,14 @@ try {
   check('Field asset list includes only explicit ID assignment', () =>
     assert.deepEqual(r.data.data.map(a => a.id), [ownedAssetId]));
   r = await api('/api/endpoints', { method: 'POST', cookie: sessions.ithead,
-    body: { id: 'forged-ep', deviceName: 'CI Service Endpoint', assignedUserId: 'ci-field', assignedUser: 'field' } });
+    body: { customerId: 'ci-customer-a', id: 'forged-ep', deviceName: 'CI Service Endpoint', assignedUserId: 'ci-field', assignedUser: 'field' } });
   check('Endpoint registration does not permit client-assigned field access', () => {
     assert.equal(r.status, 201);
     assert.equal(r.data.data.assignedUserId, undefined);
   });
   const ownedEndpointId = r.data.data.id;
   r = await api('/api/endpoints', { method: 'POST', cookie: sessions.owner,
-    body: { deviceName: 'Confidential Customer Endpoint', assignedUser: 'field' } });
+    body: { customerId: 'ci-customer-a', deviceName: 'Confidential Customer Endpoint', assignedUser: 'field' } });
   check('Private endpoint registered without engineer grant', () => assert.equal(r.status, 201));
   r = await api('/api/endpoints', { cookie: sessions.field });
   check('Field cannot read endpoint without explicit assignment', () =>
@@ -302,6 +306,83 @@ try {
   r = await api('/api/projects/' + projectForRole, { method: 'PATCH',
     cookie: sessions.ithead, body: { scopeDescription: 'Legitimate project update' } });
   check('Original IT project creator retains project editing rights', () => assert.equal(r.status, 200));
+
+  // Phase 9: two customer accounts with explicit grants, no customer-name inference.
+  r = await api('/api/customers', { cookie: sessions.field });
+  check('Field customer registry includes only explicitly granted account', () =>
+    assert.deepEqual(r.data.data.map(c => c.id), ['ci-customer-a']));
+  r = await api('/api/customers', { method: 'POST', cookie: sessions.sales, body: { name: 'Customer B' } });
+  check('Sales cannot fabricate a new customer identity', () => assert.equal(r.status, 403));
+  r = await api('/api/customers', { method: 'POST', cookie: sessions.owner, body: { name: 'Customer B' } });
+  check('Owner can register an independent customer B', () => assert.equal(r.status, 201));
+  const customerB = r.data.data.id;
+  r = await api('/api/customers', { cookie: sessions.sales });
+  check('Sales cannot enumerate ungranted customer B', () =>
+    assert.ok(!r.data.data.some(c => c.id === customerB)));
+  r = await api('/api/projects', { method: 'POST', cookie: sessions.ithead,
+    body: { customerId: customerB, title: 'Cross-customer project', clientName: 'Customer B', budget: 250 } });
+  check('IT head cannot create a project for unauthorized customer B', () => assert.equal(r.status, 404));
+  r = await api('/api/assets', { method: 'POST', cookie: sessions.ithead,
+    body: { customerId: customerB, name: 'Cross-customer asset', assetTag: 'CI-CROSS-ASSET' } });
+  check('IT head cannot create another customer asset', () => assert.equal(r.status, 404));
+  r = await api('/api/endpoints', { method: 'POST', cookie: sessions.ithead,
+    body: { customerId: customerB, deviceName: 'Cross-customer endpoint' } });
+  check('IT head cannot register another customer endpoint', () => assert.equal(r.status, 404));
+  r = await api('/api/assets', { method: 'POST', cookie: sessions.owner,
+    body: { customerId: customerB, name: 'B-only Asset', assetTag: 'CI-CUSTOMER-B' } });
+  check('Owner can create isolated customer B asset', () => assert.equal(r.status, 201));
+  const assetBId = r.data.data.id;
+  r = await api('/api/assets/' + assetBId + '/assign', { method: 'PATCH', cookie: sessions.owner,
+    body: { assignedUserId: 'ci-field' } });
+  check('Even owner cannot assign customer B asset to engineer without B membership', () =>
+    assert.equal(r.status, 403));
+  r = await api('/api/customers/' + customerB + '/access', { method: 'PATCH', cookie: sessions.ithead,
+    body: { userId: 'ci-field', grant: true } });
+  check('IT manager cannot grant customer membership', () => assert.equal(r.status, 403));
+  r = await api('/api/customers/' + customerB + '/access', { method: 'PATCH', cookie: sessions.owner,
+    body: { userId: 'ci-field', grant: true } });
+  check('Owner explicitly grants field engineer customer B membership', () =>
+    assert.ok(r.data.data.staffUserIds.includes('ci-field')));
+  r = await api('/api/assets/' + assetBId + '/assign', { method: 'PATCH', cookie: sessions.owner,
+    body: { assignedUserId: 'ci-field' } });
+  check('Customer B asset assignment succeeds only after explicit customer grant', () =>
+    assert.equal(r.status, 200));
+  r = await api('/api/assets', { cookie: sessions.field });
+  check('Engineer can now read assigned record in granted B', () =>
+    assert.ok(r.data.data.some(a => a.id === assetBId)));
+  r = await api('/api/rma', { method: 'POST', cookie: sessions.field,
+    body: { assetTag: 'CI-CUSTOMER-B', faultSymptom: 'Customer B actual problem' } });
+  check('Engineer can log RMA for B while authorized', () => assert.equal(r.status, 201));
+  const rmaBId = r.data.data.id;
+  r = await api('/api/customers/' + customerB + '/access', { method: 'PATCH', cookie: sessions.owner,
+    body: { userId: 'ci-field', grant: false } });
+  check('Owner revokes customer B membership atomically', () =>
+    assert.ok(!r.data.data.staffUserIds.includes('ci-field')));
+  r = await api('/api/state', { cookie: sessions.field });
+  check('Customer revocation immediately hides B asset and linked RMA in /api/state', () => {
+    assert.ok(!r.data.data.assets.some(a => a.id === assetBId));
+    assert.ok(!r.data.data.rmaClaims.some(a => a.id === rmaBId));
+    assert.ok(!r.data.data.customers.some(c => c.id === customerB));
+  });
+  r = await api('/api/assets', { cookie: sessions.field });
+  check('Direct asset list cannot bypass customer B revocation', () =>
+    assert.ok(!r.data.data.some(a => a.id === assetBId)));
+  r = await api('/api/rma', { cookie: sessions.field });
+  check('Direct RMA list cannot bypass customer B revocation', () =>
+    assert.ok(!r.data.data.some(a => a.id === rmaBId)));
+  r = await api('/api/projects', { method: 'POST', cookie: sessions.owner,
+    body: { customerId: customerB, title: 'Customer B private project',
+      clientName: 'Role CI Client', budget: 50 } });
+  check('Owner cannot impersonate customer A name under customer B identity', () =>
+    assert.equal(r.status, 400));
+  r = await api('/api/customers/' + customerB + '/access', { method: 'PATCH', cookie: sessions.owner,
+    body: { userId: 'ci-sales', grant: true } });
+  check('Owner can permit sales access to customer B', () => assert.equal(r.status, 200));
+  r = await api('/api/projects/' + projectForRole + '/access', {
+    method: 'PATCH', cookie: sessions.owner, body: { userId: 'ci-procurement', grant: true }
+  });
+  check('Owner can share project with a customer-authorized procurement lead', () =>
+    assert.equal(r.status, 200));
 
   r = await api('/api/invoices', { method: 'POST', cookie: sessions.procurement, body: { customer: 'Fraud', amount: 1 } });
   check('Procurement cannot create invoices', () => assert.equal(r.status, 403));
