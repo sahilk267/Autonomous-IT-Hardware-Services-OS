@@ -41,20 +41,20 @@ starter.crmOpportunities.push({
   contactPerson: '', expectedCloseDate: '', assignedEngineer: '', category: ''
 });
 starter.tickets.push({
-  id: 'ci-ticket-001', ticketNumber: 'CI-TICKET-001', title: 'CI Incident',
+  customerId: 'ci-customer-a', id: 'ci-ticket-001', ticketNumber: 'CI-TICKET-001', title: 'CI Incident',
   priority: 'HIGH', status: 'OPEN', category: 'Network Outage', assignedUserId: 'ci-field'
 });
 starter.tickets.push({
-  id: 'ci-ticket-private', ticketNumber: 'CI-TICKET-PRIVATE', title: 'Private Unassigned Incident',
+  customerId: 'ci-customer-a', id: 'ci-ticket-private', ticketNumber: 'CI-TICKET-PRIVATE', title: 'Private Unassigned Incident',
   priority: 'MEDIUM', status: 'OPEN', category: 'Hardware Fault', assignedAgent: 'Unassigned'
 });
 starter.jobs.push({
-  id: 'ci-job-owned', jobCode: 'CI-JOB-OWNED', title: 'Assigned router task',
+  customerId: 'ci-customer-a', id: 'ci-job-owned', jobCode: 'CI-JOB-OWNED', title: 'Assigned router task',
   assignedUserId: 'ci-field', technicianName: 'field', customerName: 'CI Client',
   status: 'SCHEDULED', partsConsumed: [], customerSignatureObtained: false
 });
 starter.jobs.push({
-  id: 'ci-job-unassigned', jobCode: 'CI-JOB-UNASSIGNED', title: 'Unassigned private work',
+  customerId: 'ci-customer-a', id: 'ci-job-unassigned', jobCode: 'CI-JOB-UNASSIGNED', title: 'Unassigned private work',
   technicianName: 'Unassigned', customerName: 'CI Private',
   status: 'SCHEDULED', partsConsumed: [], customerSignatureObtained: false
 });
@@ -370,6 +370,44 @@ try {
   r = await api('/api/rma', { cookie: sessions.field });
   check('Direct RMA list cannot bypass customer B revocation', () =>
     assert.ok(!r.data.data.some(a => a.id === rmaBId)));
+  r = await api('/api/tickets', { method: 'POST', cookie: sessions.owner,
+    body: { customerId: customerB, title: 'Customer B restricted incident', category: 'Network Outage',
+      priority: 'HIGH', requesterName: 'Private B' } });
+  check('Owner creates a linked customer B ticket', () => assert.equal(r.status, 201));
+  const ticketBId = r.data.data.id;
+  r = await api('/api/jobs', { method: 'POST', cookie: sessions.owner,
+    body: { customerId: customerB, title: 'Customer B restricted field work', customerName: 'Fake Customer A' } });
+  check('Customer B field job binds actual registry name instead of client forgery', () => {
+    assert.equal(r.status, 201);
+    assert.equal(r.data.data.customerName, 'Customer B');
+  });
+  const jobBId = r.data.data.id;
+  r = await api('/api/tickets', { cookie: sessions.ithead });
+  check('IT head without B grant cannot enumerate B tickets', () =>
+    assert.ok(!r.data.data.some(t => t.id === ticketBId)));
+  r = await api('/api/jobs', { cookie: sessions.ithead });
+  check('IT head without B grant cannot enumerate B jobs', () =>
+    assert.ok(!r.data.data.some(j => j.id === jobBId)));
+  r = await api('/api/jobs/' + jobBId + '/assign', { method: 'PATCH',
+    cookie: sessions.ithead, body: { assignedUserId: 'ci-field' } });
+  check('IT head cannot assign another customer job', () => assert.equal(r.status, 404));
+  r = await api('/api/tickets/' + ticketBId + '/assign', { method: 'PATCH',
+    cookie: sessions.owner, body: { assignedUserId: 'ci-field' } });
+  check('Even owner cannot give B ticket to field without customer membership', () =>
+    assert.equal(r.status, 403));
+  r = await api('/api/crm', { method: 'POST', cookie: sessions.sales,
+    body: { customerId: customerB, clientName: 'Customer B', title: 'Private B deal', value: 200 } });
+  check('Sales cannot create CRM for B before customer grant', () => assert.equal(r.status, 404));
+  r = await api('/api/crm', { method: 'POST', cookie: sessions.owner,
+    body: { customerId: customerB, clientName: 'Customer B', title: 'Owner B deal', value: 300 } });
+  check('Owner can create B CRM opportunity', () => assert.equal(r.status, 201));
+  const crmBId = r.data.data.id;
+  r = await api('/api/crm', { cookie: sessions.sales });
+  check('Sales CRM list hides B customer opportunity before grant', () =>
+    assert.ok(!r.data.data.some(op => op.id === crmBId)));
+  r = await api('/api/state', { cookie: sessions.sales });
+  check('Sales /api/state hides ungranted B CRM opportunities', () =>
+    assert.ok(!r.data.data.crmOpportunities.some(op => op.id === crmBId)));
   r = await api('/api/projects', { method: 'POST', cookie: sessions.owner,
     body: { customerId: customerB, title: 'Customer B private project',
       clientName: 'Role CI Client', budget: 50 } });
@@ -386,7 +424,7 @@ try {
 
   r = await api('/api/invoices', { method: 'POST', cookie: sessions.procurement, body: { customer: 'Fraud', amount: 1 } });
   check('Procurement cannot create invoices', () => assert.equal(r.status, 403));
-  r = await api('/api/crm', { method: 'POST', cookie: sessions.sales, body: { title: 'CI Sale', clientName: 'CI Customer', value: 100 } });
+  r = await api('/api/crm', { method: 'POST', cookie: sessions.sales, body: { customerId: 'ci-customer-a', title: 'CI Sale', clientName: 'Role CI Client', value: 100 } });
   check('Sales can create a real CRM record', () => assert.equal(r.status, 201));
   r = await api('/api/assets', { method: 'POST', cookie: sessions.field, body: { assetTag: 'NOT-AUTHORIZED', name: 'Fake Asset' } });
   check('Field engineer cannot modify asset registry', () => assert.equal(r.status, 403));

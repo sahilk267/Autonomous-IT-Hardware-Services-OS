@@ -207,6 +207,7 @@ export interface RFQItem {
 
 export interface ITSMTicket {
   id: string;
+  customerId?: string; // verified owner-managed customer reference
   ticketNumber: string;
   title: string;
   category: 'Hardware Fault' | 'Network Outage' | 'Access Request' | 'Asset Procurement' | 'Software License';
@@ -244,6 +245,7 @@ export interface EndpointHealth {
 
 export interface FieldJob {
   id: string;
+  customerId?: string; // immutable service customer association
   jobCode: string;
   title: string;
   customerName: string;
@@ -375,6 +377,7 @@ export interface SoftwareLicense {
 
 export interface AMCContract {
   id: string;
+  customerId?: string; // linked managed service customer
   contractNumber: string;
   clientName: string;
   type: 'COMPREHENSIVE' | 'NON_COMPREHENSIVE' | 'PER_DEVICE_ONCALL';
@@ -466,6 +469,7 @@ export interface KnowledgeArticle {
 
 export interface CRMOpportunity {
   id: string;
+  customerId?: string; // actual customer registry ID
   title: string;
   clientName: string;
   contactPerson: string;

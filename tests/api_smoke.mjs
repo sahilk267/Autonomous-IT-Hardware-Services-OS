@@ -139,7 +139,7 @@ try {
   verify('Owner creates warehouse product', () => assert.equal(result.response.status, 201));
   const productId = result.body.data.id;
 
-  result = await post('/api/jobs', {
+  result = await post('/api/jobs', { customerId,
     title: 'CI laptop repair', customerName: 'Test Client', address: 'Test Site',
     technicianName: 'Test Engineer', technicianPhone: '', partsConsumed: []
   }, cookie);
@@ -323,7 +323,7 @@ try {
   result = await patch(`/api/knowledge/${kbId}`, { solvedCount: 999 }, cookie);
   verify('Client cannot forge KB solved count', () => assert.equal(result.body.data.solvedCount, 1));
 
-  result = await post('/api/crm', { title: 'Data Center Refresh', clientName: 'CI Customer', value: 78000, winProbability: 99 }, cookie);
+  result = await post('/api/crm', { customerId, title: 'Data Center Refresh', clientName: 'CI Customer', value: 78000, winProbability: 99 }, cookie);
   verify('CRM create cannot fabricate win probability', () => {
     assert.equal(result.response.status, 201);
     assert.equal(result.body.data.stage, 'LEAD');

@@ -147,8 +147,9 @@ const visibleEndpoint = (endpoint: { customerId?: string; assignedUserId?: strin
   canAccessCustomer(endpoint.customerId, actor) &&
   (actor.role !== 'FIELD_ENGINEER' || (!!endpoint.assignedUserId && endpoint.assignedUserId === actor.userId));
 const visibleRMA = (claim: { assetId?: string; customerId?: string }, actor: LocalActor) =>
-  !!claim.assetId && dbStore.getState().assets.some(asset =>
-    asset.id === claim.assetId && asset.customerId === claim.customerId && visibleAsset(asset, actor));
+  actor.role === 'BUSINESS_OWNER' ||
+  (!!claim.assetId && dbStore.getState().assets.some(asset =>
+    asset.id === claim.assetId && asset.customerId === claim.customerId && visibleAsset(asset, actor)));
 const visibleProject = (project: Project, actor: LocalActor) =>
   canAccessCustomer(project.customerId, actor) &&
   (actor.role === 'BUSINESS_OWNER' ||
@@ -506,15 +507,14 @@ app.get('/api/state', requireAuth, (req, res) => {
       if (Array.isArray(value) && key !== 'users' && !allowed.has(key)) safeState[key] = [];
     }
     if (allowed.has('customers')) safeState.customers = visibleCustomers(actor);
-    if (allowed.has('tickets') && actor.role === 'FIELD_ENGINEER') {
-      safeState.tickets = rawState.tickets.filter(t => visibleTicket(t, actor));
-    }
-    if (allowed.has('jobs') && actor.role === 'FIELD_ENGINEER') {
-      safeState.jobs = rawState.jobs.filter(j => visibleJob(j, actor));
-    }
+    if (allowed.has('tickets')) safeState.tickets = rawState.tickets.filter(t => visibleTicket(t, actor));
+    if (allowed.has('jobs')) safeState.jobs = rawState.jobs.filter(j => visibleJob(j, actor));
     if (allowed.has('assets')) safeState.assets = rawState.assets.filter(a => visibleAsset(a, actor));
     if (allowed.has('endpoints')) safeState.endpoints = rawState.endpoints.filter(e => visibleEndpoint(e, actor));
     if (allowed.has('rmaClaims')) safeState.rmaClaims = rawState.rmaClaims.filter(r => visibleRMA(r, actor));
+    if (allowed.has('amcs')) safeState.amcs = rawState.amcs.filter(a => canAccessCustomer(a.customerId, actor));
+    if (allowed.has('crmOpportunities')) safeState.crmOpportunities =
+      rawState.crmOpportunities.filter(c => canAccessCustomer(c.customerId, actor));
     if (allowed.has('projects')) safeState.projects = visibleProjects(actor);
     if (allowed.has('proposals')) safeState.proposals = visibleProposals(actor);
     res.json({ success: true, data: safeState });
@@ -955,13 +955,14 @@ app.patch('/api/invoices/:invoiceNo/settle', requireAuth, requireRole('BUSINESS_
 });
 
 // Identity-based assignments. A display name is never an authorization credential.
-const visibleTicket = (ticket: { assignedUserId?: string; reportedByUserId?: string },
-  actor: { role: UserRole; userId: string }) =>
-  actor.role !== 'FIELD_ENGINEER' ||
-  ticket.assignedUserId === actor.userId || ticket.reportedByUserId === actor.userId;
-const visibleJob = (job: { assignedUserId?: string },
-  actor: { role: UserRole; userId: string }) =>
-  actor.role !== 'FIELD_ENGINEER' || job.assignedUserId === actor.userId;
+const visibleTicket = (ticket: { customerId?: string; assignedUserId?: string; reportedByUserId?: string },
+  actor: LocalActor) =>
+  canAccessCustomer(ticket.customerId, actor) &&
+  (actor.role !== 'FIELD_ENGINEER' ||
+   ticket.assignedUserId === actor.userId || ticket.reportedByUserId === actor.userId);
+const visibleJob = (job: { customerId?: string; assignedUserId?: string }, actor: LocalActor) =>
+  canAccessCustomer(job.customerId, actor) &&
+  (actor.role !== 'FIELD_ENGINEER' || job.assignedUserId === actor.userId);
 const validateAssignment = (userId: unknown): boolean => {
   if (userId === undefined || userId === null || userId === '') return true;
   if (typeof userId !== 'string') return false;
@@ -990,17 +991,23 @@ app.get('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_I
 app.post('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
     const ticket = req.body;
-    if (!ticket || !ticket.title) {
+    if (!ticket || typeof ticket.title !== 'string' || !ticket.title.trim()) {
       return res.status(400).json({ success: false, error: 'Ticket title is required' });
     }
-    const actor = (req as any).user as { userId: string; role: UserRole };
+    const actor = (req as any).user as LocalActor;
+    const customer = customerFromInput(ticket.customerId, actor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
     const requestedAssignee = actor.role === 'FIELD_ENGINEER' ? null : (ticket.assignedUserId || null);
     if (!validateAssignment(requestedAssignee)) {
       return res.status(400).json({ success: false, error: 'Unknown or inactive assigned field engineer.' });
     }
+    if (requestedAssignee && !canAccessCustomer(customer.id, { role: 'FIELD_ENGINEER', userId: requestedAssignee })) {
+      return res.status(403).json({ success: false, error: 'Assigned engineer has no access to this customer.' });
+    }
     const assignee = requestedAssignee ? dbStore.getUserById(requestedAssignee) : null;
     const created = dbStore.addTicket({
       ...ticket,
+      customerId: customer.id,
       id: `tkt-${crypto.randomUUID()}`,
       ticketNumber: `INC-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
       createdAt: new Date().toISOString().slice(0, 10),
@@ -1051,6 +1058,11 @@ app.patch('/api/tickets/:id/assign', requireAuth,
     if (!validateAssignment(userId)) {
       return res.status(400).json({ success: false, error: 'Select an active local field engineer ID.' });
     }
+    const actor = (req as any).user as LocalActor;
+    const ticket = dbStore.getState().tickets.find(t => t.id === req.params.id);
+    if (!ticket || !visibleTicket(ticket, actor)) return res.status(404).json({ success: false, error: 'Ticket not found.' });
+    if (userId && !canAccessCustomer(ticket.customerId, { role: 'FIELD_ENGINEER', userId }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
     try {
       const updated = dbStore.assignTicket(req.params.id, userId || null, (req as any).user.username);
       return updated ? res.json({ success: true, data: updated, externalNotificationSent: false }) :
@@ -1140,15 +1152,21 @@ app.get('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_H
 app.post('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const job = req.body;
-    if (!job || !job.title) {
+    if (!job || typeof job.title !== 'string' || !job.title.trim()) {
       return res.status(400).json({ success: false, error: 'Job title is required' });
     }
+    const customer = customerFromInput(job.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
     if (!validateAssignment(job.assignedUserId)) {
       return res.status(400).json({ success: false, error: 'Select an active local field engineer ID.' });
     }
+    if (job.assignedUserId && !canAccessCustomer(customer.id, { role: 'FIELD_ENGINEER', userId: job.assignedUserId }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
     const assignee = job.assignedUserId ? dbStore.getUserById(job.assignedUserId) : null;
     const created = dbStore.addJob({
       ...job,
+      customerId: customer.id,
+      customerName: customer.name,
       id: `job-${crypto.randomUUID()}`,
       jobCode: `JOB-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
       status: 'SCHEDULED',
@@ -1199,6 +1217,11 @@ app.patch('/api/jobs/:id/assign', requireAuth,
     if (!validateAssignment(userId)) {
       return res.status(400).json({ success: false, error: 'Select an active local field engineer ID.' });
     }
+    const actor = (req as any).user as LocalActor;
+    const job = dbStore.getState().jobs.find(j => j.id === req.params.id);
+    if (!job || !visibleJob(job, actor)) return res.status(404).json({ success: false, error: 'Job not found.' });
+    if (userId && !canAccessCustomer(job.customerId, { role: 'FIELD_ENGINEER', userId }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
     try {
       const updated = dbStore.assignJob(req.params.id, userId || null, (req as any).user.username);
       return updated ? res.json({ success: true, data: updated, externalDispatchSent: false }) :
@@ -1296,6 +1319,9 @@ app.patch('/api/assets/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPR
     return res.status(400).json({ success: false,
       error: 'Only an allowed status may be changed here. Staff assignment uses the dedicated endpoint.' });
   }
+  const asset = dbStore.getState().assets.find(a => a.id === req.params.id);
+  if (!asset || !visibleAsset(asset, (req as any).user as LocalActor))
+    return res.status(404).json({ success: false, error: 'Asset not found.' });
   const updated = dbStore.updateAsset(req.params.id, { status: body.status });
   return updated ? res.json({ success: true, data: updated }) :
     res.status(404).json({ success: false, error: 'Asset not found.' });
@@ -1370,7 +1396,8 @@ app.patch('/api/licenses/:id/reclaim', requireAuth, requireRole('BUSINESS_OWNER'
 
 // AMC Contracts CRUD (Protected)
 app.get('/api/amcs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().amcs });
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().amcs.filter(a => canAccessCustomer(a.customerId, actor)) });
 });
 
 app.post('/api/amcs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
@@ -1379,10 +1406,15 @@ app.post('/api/amcs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_
     if (!amc || !amc.clientName) {
       return res.status(400).json({ success: false, error: 'clientName is required' });
     }
+    const customer = customerFromInput(amc.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
+    if (amc.clientName !== customer.name) return res.status(400).json({ success: false, error: 'AMC client name must match the registered customer.' });
     const created = dbStore.addAMC({
       ...amc,
-      id: amc.id || `amc-${crypto.randomUUID()}`,
-      contractNumber: amc.contractNumber || `AMC-${Date.now().toString().slice(-6)}`
+      customerId: customer.id,
+      clientName: customer.name,
+      id: `amc-${crypto.randomUUID()}`,
+      contractNumber: `AMC-${crypto.randomUUID().slice(0, 10).toUpperCase()}`
     });
 
     res.status(201).json({ success: true, data: created });
@@ -1782,17 +1814,20 @@ app.post('/api/knowledge/:id/solve', requireAuth, requireRole('BUSINESS_OWNER', 
 });
 
 app.get('/api/crm', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().crmOpportunities });
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().crmOpportunities.filter(c => canAccessCustomer(c.customerId, actor)) });
 });
 app.post('/api/crm', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
     const title = stringField(req.body?.title), clientName = stringField(req.body?.clientName);
     const value = Number(req.body?.value);
-    if (!title || !clientName || !Number.isFinite(value) || value < 0) {
+    const customer = customerFromInput(req.body?.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
+    if (!title || clientName !== customer.name || !Number.isFinite(value) || value < 0) {
       return res.status(400).json({ success: false, error: 'Real client, opportunity title and valid deal value required.' });
     }
     const created = dbStore.addCRMOpportunity({
-      id: 'crm-' + crypto.randomUUID(), title, clientName, value,
+      id: 'crm-' + crypto.randomUUID(), customerId: customer.id, title, clientName: customer.name, value,
       stage: 'LEAD', winProbability: 0,
       contactPerson: stringField(req.body?.contactPerson),
       expectedCloseDate: stringField(req.body?.expectedCloseDate),
@@ -1804,7 +1839,8 @@ app.post('/api/crm', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER')
 app.patch('/api/crm/:id', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
     const current = dbStore.getState().crmOpportunities.find(o => o.id === req.params.id);
-    if (!current) return res.status(404).json({ success: false, error: 'CRM opportunity not found.' });
+    if (!current || !canAccessCustomer(current.customerId, (req as any).user as LocalActor))
+      return res.status(404).json({ success: false, error: 'CRM opportunity not found.' });
     const next = stringField(req.body?.stage);
     const idx = crmStages.indexOf(current.stage as typeof crmStages[number]);
     if (idx === -1 || next !== crmStages[idx + 1]) {
