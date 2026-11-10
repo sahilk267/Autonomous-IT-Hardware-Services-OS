@@ -29,9 +29,10 @@ import {
   FolderGit2,
   X
 } from 'lucide-react';
-import { Project, Proposal, ProviderProfile, ProjectMilestone, CRMOpportunity, MarketplaceDispute } from '../types';
+import { Project, Proposal, ProviderProfile, ProjectMilestone, CRMOpportunity, MarketplaceDispute, CustomerAccount } from '../types';
 
 interface ProjectMarketplaceProps {
+  customers: CustomerAccount[];
   projects: Project[];
   proposals: Proposal[];
   providers: ProviderProfile[];
@@ -52,6 +53,7 @@ interface ProjectMarketplaceProps {
 }
 
 export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
+  customers,
   projects,
   proposals,
   providers,
@@ -98,7 +100,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
   // CRM Pipeline State - starts empty
   const [showNewOppModal, setShowNewOppModal] = useState(false);
-  const [newOppClient, setNewOppClient] = useState('');
+  const [newOppCustomerId, setNewOppCustomerId] = useState('');
   const [newOppTitle, setNewOppTitle] = useState('');
   const [newOppValue, setNewOppValue] = useState(0);
   const [newOppProvider, setNewOppProvider] = useState('');
@@ -198,7 +200,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   // New Project Modal State
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newClient, setNewClient] = useState('');
+  const [newCustomerId, setNewCustomerId] = useState('');
   const [newBudget, setNewBudget] = useState('');
   const [newCategory, setNewCategory] = useState<Project['category']>('Cloud Migration');
   const [newScope, setNewScope] = useState('');
@@ -265,8 +267,9 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
   const handleCreateProjectSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim() || !newClient.trim()) {
-      setMpNotice('Project title and client organization name are required.');
+    const customer = customers.find(c => c.id === newCustomerId);
+    if (!newTitle.trim() || !customer) {
+      setMpNotice('Project title and registered customer are required.');
       return;
     }
 
@@ -283,8 +286,9 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
       return;
     }
     const newProj: Partial<Project> = {
+      customerId: customer.id,
       title: newTitle.trim(),
-      clientName: newClient.trim(),
+      clientName: customer.name,
       clientLocation: '',
       budget: budgetNum,
       category: newCategory,
@@ -300,6 +304,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
     onCreateProject(newProj);
     setShowNewProjectModal(false);
     setNewTitle('');
+    setNewCustomerId('');
     setNewScope('');
     setNewMilestoneTitle('');
     setNewMilestoneAmount('');
@@ -1273,14 +1278,13 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Client Company</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Reliance Retail Logistics"
-                      value={newOppClient}
-                      onChange={e => setNewOppClient(e.target.value)}
-                      className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
-                    />
+                    <label className="block text-slate-300 font-semibold mb-1">Registered Customer</label>
+                    <select aria-label="CRM customer" required value={newOppCustomerId}
+                      onChange={e => setNewOppCustomerId(e.target.value)}
+                      className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white">
+                      <option value="">Select customer</option>
+                      {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
                   </div>
 
                   <div>
@@ -1303,12 +1307,12 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                   </button>
                   <button
                     onClick={async () => {
-                      if (!newOppTitle.trim() || !newOppClient.trim() || !Number.isFinite(newOppValue) || newOppValue < 0) {
+                      if (!newOppTitle.trim() || !newOppCustomerId || !Number.isFinite(newOppValue) || newOppValue < 0) {
                         setMpNotice('Enter the real client, deal title and valid amount.');
                         return;
                       }
                       const saved = await onCreateCRM({
-                        clientName: newOppClient.trim(), title: newOppTitle.trim(), value: newOppValue
+                        customerId: newOppCustomerId, clientName: customers.find(c => c.id === newOppCustomerId)?.name || '', title: newOppTitle.trim(), value: newOppValue
                       });
                       if (!saved) {
                         setMpNotice('CRM opportunity not saved. Please review server validation.');
@@ -1316,7 +1320,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                       }
                       setShowNewOppModal(false);
                       setNewOppTitle('');
-                      setNewOppClient('');
+                      setNewOppCustomerId('');
                       setNewOppValue(0);
                       setMpNotice(`CRM Opportunity "${saved.title}" saved to the server.`);
                     }}
@@ -1625,14 +1629,13 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-400 block mb-1 font-semibold">Client Company</label>
-                  <input
-                    type="text"
-                    value={newClient}
-                    onChange={(e) => setNewClient(e.target.value)}
-                    placeholder="e.g. Nexus FinTech Tower"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
-                  />
+                  <label className="text-slate-400 block mb-1 font-semibold">Registered Customer</label>
+                  <select aria-label="Project customer" required value={newCustomerId}
+                    onChange={e => setNewCustomerId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+                    <option value="">Select customer</option>
+                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
                 </div>
 
                 <div>
