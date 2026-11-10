@@ -18,7 +18,9 @@
     "test:auth": "tsx tests/auth_limit.test.ts",
     "smoke:browser": "playwright test --config=playwright.config.ts",
     "preflight:customers": "node scripts/customer_migration_preflight.mjs",
-    "smoke:preflight": "node tests/customer_preflight_smoke.mjs"
+    "smoke:preflight": "node tests/customer_preflight_smoke.mjs",
+    "smoke:postgres": "node tests/postgres/staging_rls_smoke.mjs",
+    "stage:postgres": "node scripts/postgres/stage_json_to_pg.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -29,6 +31,7 @@
     "react-dom": "^19.0.1",
     "vite": "^6.2.3",
     "express": "^4.21.2",
+    "pg": "^8.13.1",
     "dotenv": "^17.2.3",
     "motion": "^12.23.24"
   },
