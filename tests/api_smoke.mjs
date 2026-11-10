@@ -154,7 +154,7 @@ try {
   verify('Warehouse stock is actually reduced', () => assert.equal(result.body.data.find(p => p.id === productId).stockAvailable, 1));
 
   result = await post('/api/quotes', {
-    customerName: 'Test Client', solutionName: 'Test Solution',
+    customerId, customerName: 'CI Customer', solutionName: 'Test Solution',
     items: [{ qty: 2, purchaseCost: 100, sellingPrice: 200 }],
     services: [{ name: 'Install', price: 50 }],
     discountAmount: 50
@@ -171,7 +171,7 @@ try {
 
   // Phase 3: explicit line tax rates and proportional discount allocation.
   result = await post('/api/quotes', {
-    customerName: 'Mixed Tax CI Customer', solutionName: 'Hardware + Installation',
+    customerId, customerName: 'CI Customer', solutionName: 'Hardware + Installation',
     items: [{ qty: 2, purchaseCost: 100, sellingPrice: 200, hsn: '8471', gstPercent: 18 }],
     services: [{ id: 'service-1', name: 'Installation', price: 50, sac: '9987', gstPercent: 5 }],
     discountAmount: 50, gstAmount: 999999, totalAmount: 1
@@ -186,13 +186,25 @@ try {
     assert.equal(result.body.data.taxBreakdown[1].taxableAmount, 44.44);
   });
   result = await post('/api/quotes', {
-    customerName: 'Invalid Tax CI Customer',
+    customerId, customerName: 'CI Customer',
     items: [{ qty: 1, purchaseCost: 10, sellingPrice: 100, hsn: '8471', gstPercent: 999 }],
     services: [], discountAmount: 0
   }, cookie);
   verify('Quote rejects invalid declared GST rate rather than hardcoding 18%', () => {
     assert.equal(result.response.status, 400);
   });
+
+  result = await post('/api/quotes', {
+    customerId, customerName: 'Another Customer',
+    services: [{ name: 'Test', price: 100 }]
+  }, cookie);
+  verify('Quote cannot attach spoofed customer display name to registered ID', () =>
+    assert.equal(result.response.status, 400));
+  result = await post('/api/quotes', {
+    customerName: 'CI Customer', services: [{ name: 'Test', price: 100 }]
+  }, cookie);
+  verify('Quote cannot bypass customer identity by omitting customerId', () =>
+    assert.equal(result.response.status, 404));
 
   // Phase 3: PO preparation is a real internal ledger record, not an external dispatch.
   result = await post('/api/rfqs', { productName: 'CI SSD', requiredQty: 3, urgency: 'MEDIUM', status: 'PO_DISPATCHED' }, cookie);

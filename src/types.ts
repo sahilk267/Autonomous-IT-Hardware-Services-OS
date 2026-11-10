@@ -49,6 +49,7 @@ export interface TenantInfo {
 
 export interface Lead {
   id: string;
+  customerId?: string; // unmapped legacy leads are owner-only
   companyName: string;
   contactPerson: string;
   email: string;
@@ -124,6 +125,7 @@ export interface BOMSolution {
 
 export interface Quotation {
   id: string;
+  customerId?: string; // server-validated local customer registry binding
   quoteNumber: string;
   customerName: string;
   customerGstin: string;

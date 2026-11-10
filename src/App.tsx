@@ -446,9 +446,10 @@ export default function App() {
   };
 
   // Handle Quotation Generation from BOM Builder
-  const handleGenerateQuote = async (solution: BOMSolution, customerName: string, customerGstin: string, discount: number) => {
-    if (!customerName?.trim()) {
-      showToast('Real customer name is required before creating a quotation draft.');
+  const handleGenerateQuote = async (solution: BOMSolution, customerId: string, customerGstin: string, discount: number) => {
+    const customer = customers.find(c => c.id === customerId);
+    if (!customer) {
+      showToast('Choose a registered customer before creating a quotation draft.');
       return;
     }
     if (solution.items.length + solution.servicesIncluded.length === 0) {
@@ -467,7 +468,8 @@ export default function App() {
     const newQuote: Quotation = {
       id: `quote-${Date.now()}`,
       quoteNumber: `QT-${Date.now().toString().slice(-6)}`,
-      customerName: customerName.trim(),
+      customerId: customer.id,
+      customerName: customer.name,
       customerGstin: customerGstin || '',
       customerState: tenant.state,
       solutionName: solution.solutionName,
@@ -1154,6 +1156,7 @@ export default function App() {
 
         {activeTab === 'bom' && (
           <BOMBuilder
+            customers={customers}
             products={products}
             tenant={tenant}
             onGenerateQuote={handleGenerateQuote}

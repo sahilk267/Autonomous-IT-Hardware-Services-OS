@@ -17,7 +17,7 @@ import {
   ChevronDown,
   X
 } from 'lucide-react';
-import { BOMSolution, BOMItem, Quotation, ProductItem, TenantInfo } from '../types';
+import { BOMSolution, BOMItem, Quotation, ProductItem, TenantInfo, CustomerAccount } from '../types';
 
 const emptyBOMSolution: BOMSolution = {
   id: 'sol-blank',
@@ -35,14 +35,16 @@ const emptyBOMSolution: BOMSolution = {
 };
 
 interface BOMBuilderProps {
+  customers: CustomerAccount[];
   products: ProductItem[];
   tenant: TenantInfo;
-  onGenerateQuote: (solution: BOMSolution, customerName: string, customerGstin: string, discount: number) => void;
+  onGenerateQuote: (solution: BOMSolution, customerId: string, customerGstin: string, discount: number) => void;
   onRequestTelegramApproval: (quote: Quotation) => void;
   isCleanSlate?: boolean;
 }
 
 export const BOMBuilder: React.FC<BOMBuilderProps> = ({
+  customers,
   products,
   tenant,
   onGenerateQuote,
@@ -57,7 +59,8 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
   const [currentSolution, setCurrentSolution] = useState<BOMSolution>(emptyBOMSolution);
 
   // Client Details Modal & Negotiation
-  const [customerName, setCustomerName] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const customerName = customers.find(c => c.id === selectedCustomerId)?.name || 'No customer selected';
   const [customerGstin, setCustomerGstin] = useState('');
   const [discountAmount, setDiscountAmount] = useState(0);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
@@ -547,12 +550,21 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
 
             {/* Action Buttons */}
             <div className="space-y-2 pt-2">
-              <button
-                onClick={() => onGenerateQuote(currentSolution, customerName, customerGstin, discountAmount)}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg transition active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+              <label className="block text-xs text-slate-300 font-semibold">
+                Registered customer for quotation
+                <select aria-label="Quotation customer" value={selectedCustomerId}
+                  onChange={e => setSelectedCustomerId(e.target.value)}
+                  className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-white">
+                  <option value="">Select registered customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <button disabled={!selectedCustomerId}
+                onClick={() => onGenerateQuote(currentSolution, selectedCustomerId, customerGstin, discountAmount)}
+                className="w-full disabled:opacity-50 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg transition active:scale-95 cursor-pointer flex items-center justify-center gap-2"
               >
                 <FileText className="w-4 h-4" />
-                {isMarginException ? 'Submit to Telegram for Owner Approval' : 'Dispatch Quotation to Customer'}
+                {isMarginException ? 'Save Draft Pending Owner Approval' : 'Save Internal Quotation Draft'}
               </button>
             </div>
           </div>

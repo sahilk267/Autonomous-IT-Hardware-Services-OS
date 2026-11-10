@@ -515,6 +515,8 @@ app.get('/api/state', requireAuth, (req, res) => {
     if (allowed.has('amcs')) safeState.amcs = rawState.amcs.filter(a => canAccessCustomer(a.customerId, actor));
     if (allowed.has('crmOpportunities')) safeState.crmOpportunities =
       rawState.crmOpportunities.filter(c => canAccessCustomer(c.customerId, actor));
+    if (allowed.has('leads')) safeState.leads = rawState.leads.filter(l => canAccessCustomer(l.customerId, actor));
+    if (allowed.has('quotes')) safeState.quotes = rawState.quotes.filter(q => canAccessCustomer(q.customerId, actor));
     if (allowed.has('projects')) safeState.projects = visibleProjects(actor);
     if (allowed.has('proposals')) safeState.proposals = visibleProposals(actor);
     res.json({ success: true, data: safeState });
@@ -704,14 +706,17 @@ app.post('/api/rfqs/:id/dispatch-po', requireAuth, requireRole('BUSINESS_OWNER',
 
 // Quotations CRUD (Protected, P3.2 Server-side Recalculation)
 app.get('/api/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'PROCUREMENT_LEAD'), (req, res) => {
-  res.json({ success: true, data: dbStore.getState().quotes });
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().quotes.filter(q => canAccessCustomer(q.customerId, actor)) });
 });
 
 app.post('/api/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
     const quote = req.body || {};
-    if (typeof quote.customerName !== 'string' || !quote.customerName.trim()) {
-      return res.status(400).json({ success: false, error: 'A real customer name is required.' });
+    const customer = customerFromInput(quote.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose a registered customer with an authorized staff grant.' });
+    if (quote.customerName !== undefined && quote.customerName !== customer.name) {
+      return res.status(400).json({ success: false, error: 'Customer name must match the authoritative registered customer.' });
     }
     const items = Array.isArray(quote.items) ? quote.items : [];
     const services = Array.isArray(quote.services) ? quote.services : [];
@@ -802,7 +807,8 @@ app.post('/api/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGE
       ...quote,
       id: `quote-${crypto.randomUUID()}`,
       quoteNumber: `QT-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
-      customerName: quote.customerName.trim(),
+      customerId: customer.id,
+      customerName: customer.name,
       items, services, subtotal, discountAmount,
       marginPercent, gstAmount, totalAmount, grandTotal: totalAmount,
       taxStatus, taxBreakdown: breakdown,

@@ -319,6 +319,36 @@ try {
   r = await api('/api/customers', { cookie: sessions.sales });
   check('Sales cannot enumerate ungranted customer B', () =>
     assert.ok(!r.data.data.some(c => c.id === customerB)));
+  r = await api('/api/quotes', { method: 'POST', cookie: sessions.owner, body: {
+    customerId: customerB, customerName: 'Customer B',
+    services: [{ name: 'Private B draft service', price: 250 }],
+    discountAmount: 0
+  } });
+  check('Owner can create customer B quote with authoritative identity', () => assert.equal(r.status, 201));
+  const privateQuoteId = r.data.data.id;
+  r = await api('/api/quotes', { cookie: sessions.sales });
+  check('Sales direct quote list does not reveal customer B', () =>
+    assert.ok(!r.data.data.some(q => q.id === privateQuoteId)));
+  r = await api('/api/quotes', { cookie: sessions.procurement });
+  check('Procurement direct quote list does not reveal customer B', () =>
+    assert.ok(!r.data.data.some(q => q.id === privateQuoteId)));
+  r = await api('/api/state', { cookie: sessions.sales });
+  check('Sales state cannot bypass private customer B quote boundary', () =>
+    assert.ok(!r.data.data.quotes.some(q => q.id === privateQuoteId)));
+  r = await api('/api/quotes', { method: 'POST', cookie: sessions.sales, body: {
+    customerId: customerB, customerName: 'Customer B',
+    services: [{ name: 'Fraud B draft', price: 100 }]
+  } });
+  check('Sales cannot forge quote against another customer ID', () => assert.equal(r.status, 404));
+  r = await api('/api/quotes', { method: 'POST', cookie: sessions.sales, body: {
+    customerId: 'ci-customer-a', customerName: 'Role CI Client',
+    services: [{ name: 'Authorized A draft', price: 100 }]
+  } });
+  check('Sales can create quotation for granted customer A', () => assert.equal(r.status, 201));
+  r = await api('/api/quotes', { cookie: sessions.sales });
+  check('Sales direct quote list includes authorized A but excludes B', () =>
+    assert.ok(r.data.data.some(q => q.customerId === 'ci-customer-a') &&
+      !r.data.data.some(q => q.id === privateQuoteId)));
   r = await api('/api/projects', { method: 'POST', cookie: sessions.ithead,
     body: { customerId: customerB, title: 'Cross-customer project', clientName: 'Customer B', budget: 250 } });
   check('IT head cannot create a project for unauthorized customer B', () => assert.equal(r.status, 404));
