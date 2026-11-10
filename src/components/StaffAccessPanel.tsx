@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldCheck, UserPlus, UserX, KeyRound } from 'lucide-react';
-import { UserAccount, UserRole } from '../types';
+import { UserAccount, UserRole, CustomerAccount } from '../types';
 
 type StaffRole = Exclude<UserRole, 'BUSINESS_OWNER'>;
 const assignableRoles: { value: StaffRole; label: string }[] = [
@@ -13,10 +13,14 @@ const assignableRoles: { value: StaffRole; label: string }[] = [
 interface StaffAccessPanelProps {
   isOwner: boolean;
   onReauthRequired: () => Promise<void>;
+  onCustomersChanged: () => Promise<void>;
 }
 
-export const StaffAccessPanel: React.FC<StaffAccessPanelProps> = ({ isOwner, onReauthRequired }) => {
+export const StaffAccessPanel: React.FC<StaffAccessPanelProps> = ({ isOwner, onReauthRequired, onCustomersChanged }) => {
   const [staff, setStaff] = useState<UserAccount[]>([]);
+  const [customers, setCustomers] = useState<CustomerAccount[]>([]);
+  const [customerName, setCustomerName] = useState('');
+  const [grantByCustomer, setGrantByCustomer] = useState<Record<string,string>>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [username, setUsername] = useState('');
@@ -83,6 +87,52 @@ export const StaffAccessPanel: React.FC<StaffAccessPanelProps> = ({ isOwner, onR
     }
   };
 
+
+  const loadCustomers = async () => {
+    if (!isOwner) return;
+    try {
+      const response = await fetch('/api/customers');
+      const result = await response.json();
+      if (response.ok && result.success && Array.isArray(result.data)) setCustomers(result.data);
+      else setMessage(result.error || 'Customer registry unavailable.');
+    } catch { setMessage('Unable to load customer registry.'); }
+  };
+  useEffect(() => { void loadCustomers(); }, [isOwner]);
+
+  const registerCustomer = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!isOwner || !customerName.trim()) return;
+    setLoading(true);
+    try {
+      const response = await fetch('/api/customers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: customerName.trim() })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Customer registration failed.');
+      setCustomerName('');
+      await loadCustomers(); await onCustomersChanged();
+      setMessage('Customer registered internally. No external login was provisioned.');
+    } catch (error: any) { setMessage(error?.message || 'Unable to create customer.'); }
+    finally { setLoading(false); }
+  };
+  const changeCustomerAccess = async (customerId: string, userId: string, grant: boolean) => {
+    if (!isOwner || !userId) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(customerId)}/access`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, grant })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Staff grant not saved.');
+      setGrantByCustomer(prev => ({ ...prev, [customerId]: '' }));
+      await loadCustomers(); await onCustomersChanged();
+      setMessage(`Customer staff access ${grant ? 'granted' : 'revoked'} locally. This is not a portal login.`);
+    } catch (error: any) { setMessage(error?.message || 'Unable to change customer access.'); }
+    finally { setLoading(false); }
+  };
+
   const changePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -130,6 +180,46 @@ export const StaffAccessPanel: React.FC<StaffAccessPanelProps> = ({ isOwner, onR
       </section>
       {isOwner && (
         <>
+
+          <section className="rounded-xl border border-slate-700 bg-slate-900 p-5 space-y-3">
+            <h2 className="font-bold text-white">Customer Registry &amp; Internal Staff Access</h2>
+            <p className="text-xs text-slate-400">Owner-managed customer IDs and staff grants. No customer portal, real multi-tenancy or external SSO is provisioned. Legacy records must be explicitly mapped.</p>
+            <form onSubmit={registerCustomer} className="flex flex-wrap gap-2">
+              <input aria-label="New customer organization" required maxLength={160}
+                value={customerName} onChange={e => setCustomerName(e.target.value)}
+                placeholder="Real customer organization" className="flex-1 min-w-[180px] rounded bg-slate-950 border border-slate-700 p-2 text-white text-sm" />
+              <button type="submit" disabled={loading} className="rounded bg-emerald-700 px-3 py-2 text-white text-xs disabled:opacity-50">Register Customer</button>
+            </form>
+            {customers.length === 0 && <p className="text-amber-300 text-xs">Create a customer before opening a new project, ticket, asset or job.</p>}
+            {customers.map(customer => (
+              <div key={customer.id} className="rounded border border-slate-800 p-3 space-y-2">
+                <p className="text-white text-sm font-bold">{customer.name}</p>
+                <p className="text-slate-500 font-mono text-[10px]">{customer.id}</p>
+                <div className="flex gap-2 flex-wrap">
+                  <select aria-label={`Select staff for ${customer.name}`}
+                    value={grantByCustomer[customer.id] || ''}
+                    onChange={e => setGrantByCustomer(prev => ({ ...prev, [customer.id]: e.target.value }))}
+                    className="flex-1 min-w-[180px] rounded bg-slate-950 text-white border border-slate-700 p-2 text-xs">
+                    <option value="">Choose staff identity</option>
+                    {staff.filter(u => u.role !== 'BUSINESS_OWNER' && !u.disabledAt && !customer.staffUserIds.includes(u.id))
+                      .map(u => <option key={u.id} value={u.id}>{u.name} ({u.role})</option>)}
+                  </select>
+                  <button disabled={loading || !grantByCustomer[customer.id]} type="button"
+                    onClick={() => void changeCustomerAccess(customer.id, grantByCustomer[customer.id], true)}
+                    className="rounded bg-indigo-700 text-white text-xs px-3 py-2 disabled:opacity-50">Grant</button>
+                </div>
+                {customer.staffUserIds.map(id => {
+                  const user = staff.find(u => u.id === id);
+                  return <div key={id} className="flex justify-between gap-3 border-t border-slate-800 pt-2 text-xs">
+                    <span className="text-slate-300">{user ? user.name + ' (' + user.role + ')' : id}</span>
+                    <button type="button" disabled={loading}
+                      onClick={() => void changeCustomerAccess(customer.id, id, false)}
+                      className="text-rose-300 underline disabled:opacity-50">Revoke</button>
+                  </div>;
+                })}
+              </div>
+            ))}
+          </section>
           <section className="rounded-xl border border-slate-700 bg-slate-900 p-5 space-y-4">
             <h2 className="font-bold text-white flex items-center gap-2"><UserPlus className="w-5 h-5" /> Create Staff Account</h2>
             <p className="text-xs text-amber-300">Owner-only. The password is not emailed or stored in plain text; deliver it through a private secure channel and have the staff member change it.</p>

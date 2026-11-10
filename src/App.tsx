@@ -20,6 +20,7 @@ import { StaffAccessPanel } from './components/StaffAccessPanel';
 import {
   UserRole,
   TenantInfo,
+  CustomerAccount,
   ProductItem,
   Lead,
   Quotation,
@@ -65,6 +66,7 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Application State Collections (ZERO MOCK DATA - ALL EMPTY BY DEFAULT)
+  const [customers, setCustomers] = useState<CustomerAccount[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [quotes, setQuotes] = useState<Quotation[]>([]);
@@ -118,6 +120,7 @@ export default function App() {
       if (data.success && data.data) {
         const s = data.data;
         if (s.tenant) setTenant(s.tenant);
+        setCustomers(s.customers || []);
         if (s.products) setProducts(s.products);
         if (s.leads) setLeads(s.leads);
         if (s.quotes) setQuotes(s.quotes);
@@ -200,7 +203,7 @@ export default function App() {
     }
     setCurrentUser(null);
     // Remove cached confidential operational data from the previous session.
-    setQuotes([]); setLeads([]); setInvoices([]); setSuppliers([]);
+    setCustomers([]); setQuotes([]); setLeads([]); setInvoices([]); setSuppliers([]);
     setRfqs([]); setTickets([]); setEndpoints([]); setJobs([]);
     setFieldEngineers([]);
     setAssets([]); setLicenses([]); setAMCs([]); setProjects([]);
@@ -242,6 +245,7 @@ export default function App() {
       const data = await res.json();
       if (res.ok && data.success && data.data) {
         const s = data.data;
+        setCustomers(s.customers || []);
         setProducts(s.products || []);
         setLeads(s.leads || []);
         setQuotes(s.quotes || []);
@@ -1170,6 +1174,7 @@ export default function App() {
 
         {activeTab === 'itsm' && (
           <ITSMDesk
+            customers={customers}
             tickets={tickets}
             endpoints={endpoints}
             cmdbNodes={cmdbNodes}
@@ -1189,6 +1194,7 @@ export default function App() {
 
         {activeTab === 'projects' && (
           <ProjectMarketplace
+            customers={customers}
             projects={projects}
             proposals={proposals}
             providers={providers}
@@ -1210,6 +1216,7 @@ export default function App() {
 
         {activeTab === 'field' && (
           <FieldServiceMarketplace
+            customers={customers}
             jobs={jobs}
             onUpdateJobStatus={handleUpdateJobStatus}
             onConsumePart={handleConsumePart}
@@ -1224,6 +1231,7 @@ export default function App() {
 
         {activeTab === 'assets' && (
           <AssetAMCManager
+            customers={customers}
             assets={assets}
             licenses={licenses}
             amcs={amcs}
@@ -1244,6 +1252,7 @@ export default function App() {
         {activeTab === 'staff' && currentUser && (
           <StaffAccessPanel
             isOwner={currentUser.role === 'BUSINESS_OWNER'}
+            onCustomersChanged={loadState}
             onReauthRequired={handleLogout}
           />
         )}
