@@ -160,3 +160,13 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 
 - Green [GitHub Actions push run #42719314182](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42719314182) and [PR run #42719323407](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42719323407) for `a23e8d4`: TypeScript/build PASS; isolated tests **16/16**, auth **7/7**, API **91/91**, role **95/95**, data-safety **9/9**.
 - CI acceptance is **not production sign-off**. Keep PR #1 draft and `main` unchanged; next gates are customer ownership, browser end-to-end access tests, database-level tenancy and recovery.
+
+## Phase 9 — 11 November 2026 (customer-bound access, read-only migration preflight and real browser checks)
+
+- **CUSTOMER-09 (P0):** Owner-registered `customers` with UUID identifiers, existing tenant ID, staff grants and server-authored audit. Member data returned only to owner/granted staff; no external customer accounts created.
+- **AUTH-09 (P0):** Customer membership AND object assignment/creator grants checked on projects, proposals, assets, endpoints, linked RMA, jobs, tickets, CRM, AMC and quotations across direct endpoints and `/api/state`. Lead state is hidden from nonowners if missing customer IDs; legacy rows remain owner-visible, never automatically relabeled. Staff grant revocation immediately removes visibility and project collaborator grants.
+- **UI-09 (P1):** Owner registry/grant/revoke controls; registered-customer dropdowns in project/CRM/BOM, asset/AMC, ticket/endpoint and dispatch forms. RMM still non-executing.
+- **TEST-09 (P1):** Two-customer negative access tests with disposable HTTP stores; real Chromium role-based UI tests using ephemeral production-mode server; read-only migration preflight detects orphan/missing customer IDs, RMA link inconsistency and dangling proposals with source SHA256 without mutation.
+- **MIGRATE-09 (P0):** PostgreSQL/RLS cutover is only a documented blueprint, **not implemented**. See [Phase 9 implementation report](PHASE_9_CUSTOMER_ISOLATION_2026-11-11.md) and [PostgreSQL architecture plan](POSTGRESQL_MIGRATION_BLUEPRINT.md). No Hostinger/live migration and no customer data rewritten.
+- **RELEASE GATES OPEN:** Customer-facing authentication, tenant-level DB isolation, remaining auxiliary customer references, rollback rehearsal and restore verification, in-browser end-user approval/denial scenarios, and external provider integration acceptance. CI run evidence is recorded separately after successful completion.
+

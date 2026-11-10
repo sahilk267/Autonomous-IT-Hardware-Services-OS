@@ -40,7 +40,7 @@ for (const customer of customers) {
     if (!users.some(u => u.id === id && u.tenantId === data.tenant.id && !u.disabledAt)) invalidStaffGrants++;
   }
 }
-const targetCollections = ['projects','assets','endpoints','tickets','jobs','amcs','crmOpportunities'];
+const targetCollections = ['projects','assets','endpoints','tickets','jobs','amcs','crmOpportunities','quotes','leads'];
 const bindings = {};
 let unmapped = 0, orphaned = 0;
 for (const name of targetCollections) {

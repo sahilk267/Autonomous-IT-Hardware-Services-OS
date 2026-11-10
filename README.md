@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-10): Phases 1–7 have CI-verified increments; Phase 8 staff-level object access controls have passed isolated CI on the draft development branch, NOT production-certified.** Single-tenant JSON store only. Genuine multi-tenancy, verified provider adapters, Hostinger migration, production CSRF threat review, browser E2E tests, MFA and scalable durable storage are **pending**. See [implementation tracker](docs/IMPLEMENTATION_TRACKER.md), [Phase 4 report](docs/PHASE_4_IMPLEMENTATION_2026-11-08.md) [Phase 5 security report](docs/PHASE_5_IMPLEMENTATION_2026-11-09.md), [Phase 6 integrity report](docs/PHASE_6_IMPLEMENTATION_2026-11-10.md), [Phase 8 access report](docs/PHASE_8_OBJECT_AUTHORIZATION_2026-11-10.md) and [private data migration instructions](docs/DEPLOYMENT_DATA_SAFETY.md). CI is isolated; passing tests is not a third-party integration acceptance.
+> **Current status (2026-11-11): Phases 1–8 verified, Phase 9 implemented as incremental customer-bound access controls; NOT production-certified.** Single-tenant JSON store only. Owner-managed customer records, role/customer grants, project/proposal, service, CRM and quotation scoping, real Chromium UI tests and read-only customer migration preflight are on a draft branch. True multi-tenant database enforcement, encrypted/restore-tested backups, live provider acceptance, Hostinger migration and customer portal identity remain pending. See [Phase 9 report](docs/PHASE_9_CUSTOMER_ISOLATION_2026-11-11.md), [PostgreSQL migration blueprint](docs/POSTGRESQL_MIGRATION_BLUEPRINT.md), [tracker](docs/IMPLEMENTATION_TRACKER.md) and [private data migration notes](docs/DEPLOYMENT_DATA_SAFETY.md). CI uses isolated fixtures and is not production sign-off.
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -11,7 +11,7 @@ Apex is an **evolving single-tenant prototype** for IT hardware distributors, sy
 1. **Strict Zero Mock Data Guarantee**:
    - Clean initial business records and no fabricated live provider confirmations. Some legacy UI samples/provider claims remain under review; source test fixtures are isolated.
    - A fresh development install can start empty; any existing deployed customer store must be preserved during upgrades.
-   - Single-process atomic JSON file commits; no automatic pre-mutation backups. Operator-only offline backups via `npm run backup:data` (service must be stopped).
+   - Single-process JSON commits; no automatic pre-mutation backups. Owner-only customer grants are application-enforced, not database RLS. Operator-only offline backups via `npm run backup:data` (service must be stopped).
 
 2. **IT Operations & Proposed Automation Rules**:
    - **Executive CIO Hub**: Dynamic metrics calculated on real catalog, procurement, and active ledger balances.
@@ -97,3 +97,10 @@ Detailed architectural and compliance documentation is available in `docs/`:
 - [Database Schema](docs/DATABASE_SCHEMA.md) — Relational & document schema definitions.
 - [Production Readiness](docs/PRODUCTION_READINESS.md) — Deployment checklist and security hardening.
 - [Hostinger Shared Hosting Guide](HOSTINGER_DEPLOYMENT_GUIDE.md) — Step-by-step cPanel/hPanel deployment.
+
+## Phase 9: customer controls and verification
+
+- Owner: use **Account Security & Staff → Customer Registry & Internal Staff Access** to register a real customer and grant staff visibility. New projects, CRM opportunities, assets, endpoints, ITSM tickets, jobs, AMC contracts and BOM quotations require an existing customer selection. Revocation hides customer-bound records.
+- Existing records with no trusted `customerId` are preserved untouched and not silently assigned to customers. Nonowners cannot infer ownership from a display name. Review a read-only report before any manual migration: `node scripts/customer_migration_preflight.mjs --source /absolute/private/app-store.json`. A nonzero exit code indicates missing/orphan mapping or integrity issues. **This command does not migrate or fix any records.**
+- Test `npm run smoke:preflight` for fixture-only preflight regressions and `npm run smoke:browser` after installing Playwright Chromium locally; GitHub Actions has separate backend and real Chromium jobs. See [Phase 9 report](docs/PHASE_9_CUSTOMER_ISOLATION_2026-11-11.md).
+- This is not customer login, multi-tenant RLS, an external payment workflow or an authorization audit for every historical auxiliary collection. Deployment is blocked until migration, restore and tenant-level isolation acceptance.
