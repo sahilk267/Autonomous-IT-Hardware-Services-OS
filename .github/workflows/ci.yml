@@ -39,7 +39,7 @@ jobs:
         run: npm run smoke:data
       - name: Customer migration preflight (read-only, isolated fixtures)
         run: npm run smoke:preflight
-browser:
+  browser:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
