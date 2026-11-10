@@ -15,7 +15,8 @@
     "smoke:roles": "node tests/role_access_smoke.mjs",
     "smoke:data": "node tests/data_safety_smoke.mjs",
     "backup:data": "node scripts/backup_data.mjs",
-    "test:auth": "tsx tests/auth_limit.test.ts"
+    "test:auth": "tsx tests/auth_limit.test.ts",
+    "smoke:browser": "playwright test --config=playwright.config.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -31,6 +32,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@playwright/test": "1.56.1",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
