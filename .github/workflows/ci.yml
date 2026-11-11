@@ -109,6 +109,14 @@ jobs:
           psql -v ON_ERROR_STOP=1 -f migrations/postgres/002_staging_authenticated_pilot.sql
           psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE apex_pilot_login LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD 'pilot_only_local_ci_password'"
           psql -d postgres -v ON_ERROR_STOP=1 -c "GRANT apex_pilot_writer TO apex_pilot_login"
+      - name: Install signed per-transaction actor context and project/ticket SQL policies
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f migrations/postgres/003_staging_signed_context_domains.sql
+          key="$(openssl rand -hex 32)"
+          echo "::add-mask::$key"
+          echo "APEX_PG_PILOT_CONTEXT_KEY=$key" >> "$GITHUB_ENV"
+          psql -v ON_ERROR_STOP=1 -c "INSERT INTO apex.pilot_context_secrets(key_id,secret) VALUES('active',decode('$key','hex'))"
       - name: Authenticated SQL-backed staging CRUD and audit HTTP checks
         env:
           APEX_PG_PILOT_HOST: 127.0.0.1
