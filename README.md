@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-Apex is a Node.js/React IT hardware and services platform intended for enterprise use. **Current runtime supports one organization per deployment only**; its JSON datastore is not a production multi-tenant database. Phase K/L security fixes are under review, and public multi-tenant production deployment is **not approved**.
+Apex is a Node.js/React IT hardware and services platform intended for enterprise use. **Current deployment model supports one organization per running instance.** Stage 2 adds an opt-in real PostgreSQL tenant-scoped runtime, with database membership authentication, revocable hashed sessions and PostgreSQL transactions. Business records still use a tenant-owned JSONB compatibility snapshot; normalized multi-tenant production design remains incomplete. Public multi-tenant production deployment is **not approved**.
 
 ---
 
@@ -9,7 +9,7 @@ Apex is a Node.js/React IT hardware and services platform intended for enterpris
 1. **Strict Zero Mock Data Guarantee**:
    - Zero hardcoded metrics, zero fake transaction records, and zero simulated telemetry.
    - Initial application startup boots with a clean slate (0 business records across all 12 modules).
-   - Single-process JSON persistence with atomic file replacement. Backups are **operator-invoked** using `scripts/backup-data.mjs`; automatic point-in-time recovery is not implemented.
+   - Legacy `single` mode uses private JSON persistence; opt-in `postgres` mode uses RLS-protected, transactionally updated tenant-owned JSONB workspace records. Backups remain an operator responsibility.
 
 2. **Autonomous IT Operations & Workflows**:
    - **Executive CIO Hub**: Dynamic metrics calculated on real catalog, procurement, and active ledger balances.
@@ -28,9 +28,9 @@ Apex is a Node.js/React IT hardware and services platform intended for enterpris
    - Unconfigured payment/tax gateways return honest HTTP 503 status codes rather than fabricated transaction IDs.
 
 4. **Single-tenant pilot deployment constraints**:
-   - One process, one tenant, private persistent `APEX_DATA_DIR`, exact HTTPS `APP_URL`, and strict write-origin validation.
+   - One running instance per provisioned tenant, exact HTTPS `APP_URL`, and strict write-origin validation. JSON mode requires private `APEX_DATA_DIR`; PostgreSQL mode requires runtime-only `DATABASE_URL` and `APEX_TENANT_ID`.
    - Bundled CommonJS server (`dist/server.cjs`) supporting dynamic port binding (`PORT = Number(process.env.PORT) || 3000`).
-   - See [Phase L migration and release blockers](docs/PHASE_L_TENANCY_AND_MIGRATION.md) before any external deployment.
+   - See [Phase L Stage 2 runtime guide](docs/PHASE_L_STAGE2_POSTGRES_RUNTIME.md) and its open release gates before any external deployment.
 
 ---
 
@@ -53,8 +53,10 @@ cp .env.example .env
 | `NODE_ENV` | `development` or `production` | Environment runtime |
 | `APP_URL` | Exact public origin; **HTTPS in production** | CSRF/origin enforcement |
 | `APEX_ALLOWED_ORIGINS` | Optional list of explicit permitted public HTTPS origins | Multi-domain deployments |
-| `APEX_STORAGE_MODE` | Must be `single`; multi-tenant runtime is deliberately blocked | Database safety |
-| `APEX_DATA_DIR` | Absolute private durable directory, **required in production** | Data retention and safety |
+| `APEX_STORAGE_MODE` | `single` (private JSON) or `postgres` (RLS database) | Storage runtime |
+| `DATABASE_URL` | Limited runtime-role PostgreSQL connection, only for `postgres` mode | Database |
+| `APEX_TENANT_ID` | Pre-provisioned tenant UUID for `postgres` mode | Tenant isolation |
+| `APEX_DATA_DIR` | Absolute private durable directory, required for production **JSON** mode | Data retention and safety |
 | `APEX_SETUP_TOKEN` | Server-side random 32+ character token for initial admin enrollment | First-run security |
 | `GEMINI_API_KEY` | Google Gemini API Key | BOM Builder, Ticket Diagnosis, Copilot |
 | `GEMINI_MODEL` | Gemini Model Alias (Default: `gemini-2.5-flash`) | Gemini API calls |
@@ -91,5 +93,6 @@ Detailed architectural and compliance documentation is available in `docs/`:
 - [Database Schema](docs/DATABASE_SCHEMA.md) — Relational & document schema definitions.
 - [Production Readiness](docs/PRODUCTION_READINESS.md) — Historical deployment checklist; validate with Phase K/L gates.
 - [Phase K Security Audit](docs/PHASE_K_SECURITY_AUDIT.md) — High-risk fixes and remaining blockers.
-- [Phase L Tenancy & Migration](docs/PHASE_L_TENANCY_AND_MIGRATION.md) — Safe single-tenant operation, PostgreSQL RLS target and migration gates.
+- [Phase L Tenancy & Migration](docs/PHASE_L_TENANCY_AND_MIGRATION.md) — Legacy JSON and PostgreSQL RLS baseline.
+- [Phase L Stage 2 PostgreSQL Runtime](docs/PHASE_L_STAGE2_POSTGRES_RUNTIME.md) — Backend connection, provisioning, safe import and open release gates.
 - [Hostinger Shared Hosting Guide](HOSTINGER_DEPLOYMENT_GUIDE.md) — Step-by-step cPanel/hPanel deployment.
