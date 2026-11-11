@@ -46,7 +46,8 @@ async function fingerprint(client, tenantId) {
   const rows = {};
   for (const table of tables) {
     // Hardcoded table names; never derived from user input.
-    const result = await client.query(`SELECT to_jsonb(t) AS row FROM ${table} t WHERE tenant_id=$1`, [tenantId]);
+    const filter = table === 'apex_tenants' ? 'id' : 'tenant_id';
+    const result = await client.query(`SELECT to_jsonb(t) AS row FROM ${table} t WHERE ${filter}=$1`, [tenantId]);
     const records = result.rows.map(x => JSON.stringify(x.row)).sort();
     counts[table] = records.length;
     rows[table] = sha(JSON.stringify(records));
