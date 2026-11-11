@@ -1,0 +1,26 @@
+name: Phase M — Hostinger HTTPS staging acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_url:
+        description: Public HTTPS origin already deployed on Hostinger (no credentials)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  public-https-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test only the explicitly supplied staging origin
+        env:
+          TARGET_URL: ${{ inputs.staging_url }}
+        run: node scripts/hostinger-acceptance.mjs "$TARGET_URL"
