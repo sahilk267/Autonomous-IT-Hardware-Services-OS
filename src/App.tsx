@@ -192,10 +192,11 @@ export default function App() {
     setTenant(defaultTenant);
     setProducts([]); setLeads([]); setQuotes([]); setTelegramMessages([]);
     setSuppliers([]); setRfqs([]); setTickets([]); setEndpoints([]);
-    setJobs([]); setAssets([]); setLicenses([]); setAMCs([]);
+    setJobs([]); setCmdbNodes([]); setAssets([]); setLicenses([]); setAMCs([]);
     setProjects([]); setProposals([]); setProviders([]); setEvents([]);
     setInvoices([]); setWorkflows([]); setConnectors([]);
     setIsSetupRequired(false);
+    setCurrentRole('BUSINESS_OWNER');
     setIsAuthModalOpen(true);
     showToast('Session closed. Select a workspace and sign in again.');
   };
