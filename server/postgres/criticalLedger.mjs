@@ -371,13 +371,15 @@ export async function backfillCriticalLedgers(client, tenantId) {
   const summary = await syncCriticalState(client, tenantId, before, state, {
     allowHistorical: true, actorId: null,
   });
-  await markEmptyCriticalLedgerReadyForBackfill(client, tenantId, result.rows[0].revision);
   const safe = scrubWorkspaceCriticalCollections(state);
   await client.query(
     `UPDATE apex_records SET payload=$2::jsonb,revision=revision+1,updated_at=now()
      WHERE tenant_id=$1 AND record_type='workspace_state' AND record_id='current'`,
     [tenantId, JSON.stringify(safe)]
   );
+  // Mark readiness only AFTER the duplicate legacy arrays are scrubbed.
+  // The DB trigger independently denies marking unbackfilled collections.
+  await markEmptyCriticalLedgerReadyForBackfill(client, tenantId, result.rows[0].revision);
   await client.query(
     `INSERT INTO apex_audit (tenant_id,action,target_type,target_id,details)
      VALUES ($1,'migration.critical_ledgers','workspace_state','current',$2::jsonb)`,
