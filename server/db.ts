@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
 import { assertSupportedStorageMode, enforceSingleTenantIntegrity, TenantScopeError } from './tenantIntegrity.ts';
+import { acquireStoreLock } from './runtimeLock.ts';
 import {
   ProductItem,
   Lead,
@@ -233,6 +234,10 @@ export class PersistentStore {
   constructor(dbFile: string = DB_FILE) {
     this.dbFile = dbFile;
     this.dataDir = path.dirname(dbFile);
+    if (process.env.NODE_ENV === 'production') {
+      fs.mkdirSync(this.dataDir, { recursive: true, mode: 0o700 });
+      acquireStoreLock(dbFile);
+    }
     this.state = this.loadFromDisk();
   }
 
