@@ -238,6 +238,29 @@ export class PostgresRuntime {
         client = await this.begin();
         const token = readRequestToken(req);
         const account = await this.verifySession(client, token);
+        const webhook = req.originalUrl.split('?')[0] === '/api/telegram/webhook';
+        if (!account) {
+          if (!webhook) {
+            await client.query('ROLLBACK');
+            client.release();
+            client = undefined;
+            return res.status(401).json({ success: false, error: 'Authentication required' });
+          }
+          // Authenticate Telegram's secret before loading or locking ANY
+          // business state. The original route still checks owner/chat IDs.
+          const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
+          const provided = req.get('x-telegram-bot-api-secret-token') || '';
+          const valid = !!expected && crypto.timingSafeEqual(
+            crypto.createHash('sha256').update(provided).digest(),
+            crypto.createHash('sha256').update(expected).digest(),
+          );
+          if (!valid) {
+            await client.query('ROLLBACK');
+            client.release();
+            client = undefined;
+            return res.status(401).json({ success: false, error: 'Invalid Telegram webhook authorization' });
+          }
+        }
         const unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase());
         const state = await this.loadBusinessState(client, unsafe, account, token);
         const criticalBefore = captureCriticalState(state);
