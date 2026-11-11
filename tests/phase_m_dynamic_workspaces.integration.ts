@@ -146,6 +146,16 @@ test('one Node server handles two PostgreSQL workspaces without cross-workspace 
     assert.equal(stillB.status, 200);
     const noWebhookTenant = await ask(base, '/api/telegram/webhook', 'POST', {});
     assert.equal(noWebhookTenant.status, 503);
+
+    // Administrative workspace suspension immediately invalidates outstanding
+    // sessions and blocks future logins (including valid passwords).
+    await owner.query('UPDATE apex_tenants SET disabled_at = now() WHERE id = $1', [b.id]);
+    const blockedSession = await ask(base, '/api/products', 'GET', undefined, bSetup.cookie);
+    assert.equal(blockedSession.status, 401);
+    const blockedLogin = await ask(base, '/api/auth/login', 'POST', {
+      workspaceId: b.id, username: 'owner', password: 'valid-pass-B-2026',
+    });
+    assert.equal(blockedLogin.status, 401);
   } catch (error) {
     throw new Error(error.message + '\nSERVER LOG:\n' + output.slice(-5000));
   } finally {
