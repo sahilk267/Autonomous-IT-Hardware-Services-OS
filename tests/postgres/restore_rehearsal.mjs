@@ -103,5 +103,50 @@ try {
   check('Restored provenance retains the original JSON SHA256',()=>{
     assert.match(importHash.rows[0].sha256,/^[0-9a-f]{64}$/);
   });
+  const commerceMarker=await b.query(
+    "SELECT stage_only FROM apex.schema_versions WHERE version='10.4a-commerce-drafts'");
+  check('Commerce staging schema marker survived independent restore',()=>{
+    assert.equal(commerceMarker.rows.length,1);
+    assert.equal(commerceMarker.rows[0].stage_only,true);
+  });
+  async function commerceAs(tenant,actor,sql) {
+    await b.query('BEGIN');
+    try {
+      if(tenant && actor){
+        const nonce=await b.query(
+          'SELECT txid_current()::text AS txid,pg_backend_pid()::text AS backend');
+        const payload=[tenant,actor,nonce.rows[0].txid,nonce.rows[0].backend].join('\n');
+        const signature=crypto.createHmac('sha256',
+          Buffer.from(process.env.APEX_PG_PILOT_CONTEXT_KEY,'hex')).update(payload).digest('hex');
+        await b.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
+      }
+      await b.query('SET LOCAL ROLE apex_pilot_writer');
+      if(tenant)await b.query("SELECT set_config('apex.tenant_id',$1,true)",[tenant]);
+      if(actor)await b.query("SELECT set_config('apex.actor_id',$1,true)",[actor]);
+      const rows=(await b.query(sql)).rows;
+      await b.query('ROLLBACK');
+      return rows;
+    }catch(error){await b.query('ROLLBACK');throw error;}
+  }
+  const ledgerCount=async(tenant,actor,table)=>Number((await commerceAs(
+    tenant,actor,'SELECT count(*)::integer n FROM apex.'+table))[0].n);
+  const restoredFinance=await ledgerCount('tenant-fixture-a','owner-a','pilot_finance_previews');
+  check('Owner can read restored unissued finance previews with signed SQL identity',()=>{
+    assert.ok(restoredFinance>=2);
+  });
+  const restrictedFinance=await ledgerCount('tenant-fixture-a','sales-a','pilot_finance_previews');
+  check('Nonowner cannot see restored finance preview ledger',()=>assert.equal(restrictedFinance,0));
+  const restoredProc=await ledgerCount('tenant-fixture-a','owner-a','pilot_procurement_drafts');
+  check('Owner can read restored procurement drafts for same tenant',()=>{
+    assert.ok(restoredProc>=1);
+  });
+  const revokedProc=await ledgerCount('tenant-fixture-a','proc-a','pilot_procurement_drafts');
+  check('Restored customer grant revocation hides former procurement draft',()=>{
+    assert.equal(revokedProc,0);
+  });
+  const unsignedProc=await ledgerCount(null,null,'pilot_procurement_drafts');
+  check('Restored procurement RLS denies all access without signed session',()=>{
+    assert.equal(unsignedProc,0);
+  });
   console.log('POSTGRES RESTORE SUMMARY: '+passed+'/'+passed+' PASSED');
 }finally{await a.end().catch(()=>{});await b.end().catch(()=>{});}
