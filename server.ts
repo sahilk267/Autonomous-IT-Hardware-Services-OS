@@ -1764,15 +1764,16 @@ async function setupVite() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = process.env.APEX_DIST_DIR ? path.resolve(process.env.APEX_DIST_DIR) : path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Apex Autonomous IT Hardware & Services OS running on http://0.0.0.0:${PORT}`);
+  const host = process.env.APEX_DESKTOP_MODE === '1' ? '127.0.0.1' : (process.env.APEX_BIND_HOST || '0.0.0.0');
+  app.listen(PORT, host, () => {
+    console.log(`Apex Autonomous IT Hardware & Services OS running on http://${host}:${PORT}`);
   });
 }
 
