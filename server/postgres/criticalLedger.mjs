@@ -357,6 +357,13 @@ export async function backfillCriticalLedgers(client, tenantId) {
   );
   if (result.rowCount !== 1) throw new Error('Legacy workspace missing; cannot backfill');
   const state = result.rows[0].payload;
+  for (const table of [
+    'apex_catalog_products', 'apex_finance_invoices', 'apex_finance_quotes',
+    'apex_inventory_movements', 'apex_invoice_settlements',
+  ]) {
+    const rows = await client.query(`SELECT 1 FROM ${table} WHERE tenant_id=$1 LIMIT 1`, [tenantId]);
+    if (rows.rowCount) throw new Error(`Refusing backfill into populated ${table}`);
+  }
   if (state.tenant?.id !== tenantId || state.tenantId !== tenantId) {
     throw new Error('Legacy tenant identity mismatch; manual reconciliation required');
   }
