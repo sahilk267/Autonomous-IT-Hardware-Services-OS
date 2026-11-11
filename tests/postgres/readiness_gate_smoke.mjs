@@ -28,13 +28,13 @@ try {
     assert.equal(result.stderr,'');
   });
   const report=JSON.parse(result.stdout);
-  check('All 7 staging migration markers and 15 FORCE-RLS tables verified',()=>{
+  check('All 8 staging migration markers and 16 FORCE-RLS tables verified',()=>{
     assert.equal(report.stagingChecksPassed,true);
     assert.equal(report.checks.postgresMajor16,true);
-    assert.equal(report.checks.requiredMigrationMarkers,7);
-    assert.equal(report.checks.migrationMarkersPresent,7);
-    assert.equal(report.checks.forcedRlsTables,15);
-    assert.equal(report.checks.expectedForcedRlsTables,15);
+    assert.equal(report.checks.requiredMigrationMarkers,8);
+    assert.equal(report.checks.migrationMarkersPresent,8);
+    assert.equal(report.checks.forcedRlsTables,16);
+    assert.equal(report.checks.expectedForcedRlsTables,16);
   });
   check('Readiness report rejects production runtime, finance and deployment',()=>{
     assert.equal(report.gate,'BLOCKED');

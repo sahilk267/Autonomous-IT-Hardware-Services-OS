@@ -89,7 +89,7 @@ export function registerPostgresPilotRoutes(
         await client.query("SELECT set_config('apex.actor_id',$1,true)",[actor.userId]);
         await client.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
         const version=await client.query(
-          "SELECT stage_only FROM apex.schema_versions WHERE version='10.5b-normalized-service'");
+          "SELECT stage_only FROM apex.schema_versions WHERE version='10.5c-shadow-outbox'");
         if(version.rows.length!==1 || !version.rows[0].stage_only)
           reject(503,'The required staging pilot schema is not installed.');
         const sqlUser=await client.query(
@@ -173,7 +173,7 @@ export function registerPostgresPilotRoutes(
 
   app.get('/api/pg-pilot/status',requireAuth,handler(async()=>({
     status:200,data:{stageOnly:true,storage:'postgres',applicationStorage:'json',
-      writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets','assets','jobs','quotes','proposals','rmaClaims','pilot_procurement_drafts','pilot_finance_previews','pilot_service_work_orders','pilot_service_work_order_events'],externalTransactionsEnabled:false}
+      writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets','assets','jobs','quotes','proposals','rmaClaims','pilot_procurement_drafts','pilot_finance_previews','pilot_service_work_orders','pilot_service_work_order_events','pilot_service_outbox'],externalTransactionsEnabled:false}
   })));
   app.get('/api/pg-pilot/customers',requireAuth,handler(async client=>{
     const result=await client.query(
@@ -865,6 +865,18 @@ export function registerPostgresPilotRoutes(
         'FROM apex.pilot_service_work_order_events WHERE order_id=$1 ORDER BY revision',
         [req.params.id]);
       return {status:200,data:events.rows};
+    }));
+
+
+  // Outbox is an internal, inert pending-review ledger. No dispatcher exists.
+  app.get('/api/pg-pilot/service-outbox',requireAuth,
+    requireRole('BUSINESS_OWNER'),handler(async client=>{
+      const rows=await client.query(
+        'SELECT order_id AS "orderId",revision,event_type AS "eventType",'+
+        'event_data AS data,delivery_state AS "deliveryState",'+
+        'delivery_enabled AS "deliveryEnabled",delivery_attempts AS "deliveryAttempts" '+
+        'FROM apex.pilot_service_outbox ORDER BY order_id,revision');
+      return {status:200,data:rows.rows};
     }));
 
   app.get('/api/pg-pilot/audit',requireAuth,requireRole('BUSINESS_OWNER'),

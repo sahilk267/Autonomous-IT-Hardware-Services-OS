@@ -39,6 +39,14 @@ baseline.users=[
   user('field-a','FIELD_ENGINEER'),
   user('disabled-a','SALES_MANAGER',true)
 ];
+// Only the outside-checkout isolated JSON fixture contains test password hashes.
+// SQL importer does not persist staff hashes, salts or session identities.
+const shadowPassword='EphemeralShadowReconciliation!2026';
+for(const u of baseline.users){
+  if(u.disabledAt)continue;
+  u.salt=crypto.randomBytes(16).toString('hex');
+  u.passwordHash=crypto.scryptSync(shadowPassword,u.salt,64).toString('hex');
+}
 baseline.customers=[
   {id:'cust-a',tenantId:tenant,name:'Customer A',staffUserIds:['sales-a','proc-a','it-a','field-a']},
   {id:'cust-b',tenantId:tenant,name:'Customer B',staffUserIds:['it-a']}
@@ -107,6 +115,24 @@ try {
     assert.equal(report.sourceModified,false);
     assert.ok(report.customerRecords>=baseline.projects.length+baseline.assets.length);
   });
+  const shadow=(extraEnv={})=>spawnSync(process.execPath,
+    ['scripts/postgres/shadow_route_parity.mjs','--source',source],
+    {encoding:'utf8',env:{...process.env,
+      APEX_SHADOW_TEST_PASSWORD:shadowPassword,...extraEnv},timeout:25000});
+  let shadowResult=shadow();
+  test('18 actual authenticated JSON GET role/route views match PostgreSQL RLS read-only',()=>{
+    assert.equal(shadowResult.status,0,shadowResult.stderr);
+    const report=JSON.parse(shadowResult.stdout);
+    assert.equal(report.routeRoleComparisons,18);
+    assert.equal(report.sourceSha256,expectedSha);
+    assert.equal(report.matched,true);
+    assert.equal(report.sqlBusinessWrites,false);
+  });
+  shadowResult=shadow({PGDATABASE:'postgres'});
+  test('Shadow comparator refuses dangerous non-staging database',()=>{
+    assert.equal(shadowResult.status,2,shadowResult.stderr);
+    assert.match(shadowResult.stderr,/SHADOW REFUSED/);
+  });
   parityResult=parity({PGDATABASE:'postgres'});
   test('Parity checker refuses default or non-staging database',()=>{
     assert.equal(parityResult.status,2);
@@ -130,6 +156,11 @@ try {
   test('Exact row parity detects DB payload corruption even when source SHA matches',()=>{
     assert.equal(parityResult.status,1);
     assert.match(parityResult.stderr,/staged row mismatch/);
+  });
+  shadowResult=shadow();
+  test('Authenticated route shadow comparison detects SQL JSONB tampering',()=>{
+    assert.equal(shadowResult.status,1);
+    assert.match(shadowResult.stderr,/SHADOW MISMATCH/);
   });
   await db.query("UPDATE apex.customer_records SET payload=$1::jsonb WHERE kind='crmOpportunities' AND source_id='crm-a'",
     [JSON.stringify(previousPayload)]);

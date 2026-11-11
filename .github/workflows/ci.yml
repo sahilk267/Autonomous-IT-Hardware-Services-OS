@@ -106,6 +106,8 @@ jobs:
         run: psql -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE apex_stage_ci'
       - name: Install forced RLS + tenant/customer FK schema
         run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/001_staging_rls.sql
+      - name: Build compiled JSON HTTP routes for isolated shadow comparison
+        run: npm run build
       - name: Real PostgreSQL isolation and transactional import tests
         run: npm run smoke:postgres
       - name: Install authenticated staged-write RLS, trigger audit, and local pilot login
@@ -129,6 +131,8 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/006_staging_idempotent_drafts.sql
       - name: Install normalized work-order and append-only transition schema
         run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/007_staging_normalized_service_orders.sql
+      - name: Install immutable internal service outbox with zero delivery capability
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/008_staging_shadow_outbox.sql
       - name: Authenticated SQL-backed staging CRUD and audit HTTP checks
         env:
           APEX_PG_PILOT_HOST: 127.0.0.1
