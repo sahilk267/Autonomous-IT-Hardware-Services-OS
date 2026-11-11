@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-Apex is a Node.js/React IT hardware and services platform intended for enterprise use. **Current deployment model supports one organization per running instance.** Stage 2 added an opt-in RLS-scoped PostgreSQL runtime with membership authentication and hashed revocable sessions. **Stage 3 now stores products, stock movements, quotations, invoices and immutable settlement proofs in normalized PostgreSQL tables**. Remaining noncritical modules retain a tenant-owned JSONB workspace for compatibility. Production-scale dynamic multi-tenancy is not yet implemented. Public multi-tenant production deployment is **not approved**.
+Apex is a Node.js/React IT hardware and services platform intended for enterprise use. **Phase M adds optional dynamic PostgreSQL workspace selection inside one Node process, with individually authenticated workspace sessions and RLS isolation.** Stage 2 added an opt-in RLS-scoped PostgreSQL runtime with membership authentication and hashed revocable sessions. **Stage 3 now stores products, stock movements, quotations, invoices and immutable settlement proofs in normalized PostgreSQL tables**. Remaining noncritical modules retain a tenant-owned JSONB workspace for compatibility. Cross-workspace SSO, membership discovery and tenant-specific background jobs are still pending. Public multi-tenant production deployment is **not approved**.
 
 ---
 
@@ -28,9 +28,9 @@ Apex is a Node.js/React IT hardware and services platform intended for enterpris
    - Unconfigured payment/tax gateways return honest HTTP 503 status codes rather than fabricated transaction IDs.
 
 4. **Single-tenant pilot deployment constraints**:
-   - One running instance per provisioned tenant, exact HTTPS `APP_URL`, and strict write-origin validation. JSON mode requires private `APEX_DATA_DIR`; PostgreSQL mode requires runtime-only `DATABASE_URL` and `APEX_TENANT_ID`.
+   - Fixed tenant or dynamic authenticated workspace selection on PostgreSQL; exact HTTPS `APP_URL` and strict write-origin validation for hosted sites. JSON mode requires private `APEX_DATA_DIR`; fixed PostgreSQL requires runtime-only `DATABASE_URL` and `APEX_TENANT_ID`, while dynamic mode has no configured tenant UUID.
    - Bundled CommonJS server (`dist/server.cjs`) supporting dynamic port binding (`PORT = Number(process.env.PORT) || 3000`).
-   - See [Phase L Stage 3 database hardening guide](docs/PHASE_L_STAGE3_DATABASE_HARDENING.md) for **required migrations/backfill** and release gates before any external deployment.
+   - See [Phase M Windows + Hostinger deployment readiness](docs/PHASE_M_RELEASE_READINESS.md) for installer, private setup, PostgreSQL restore, and **required release gates**.
 
 ---
 
@@ -55,7 +55,8 @@ cp .env.example .env
 | `APEX_ALLOWED_ORIGINS` | Optional list of explicit permitted public HTTPS origins | Multi-domain deployments |
 | `APEX_STORAGE_MODE` | `single` (private JSON) or `postgres` (RLS database) | Storage runtime |
 | `DATABASE_URL` | Limited runtime-role PostgreSQL connection, only for `postgres` mode | Database |
-| `APEX_TENANT_ID` | Pre-provisioned tenant UUID for `postgres` mode | Tenant isolation |
+| `APEX_TENANT_MODE` | `fixed` (default) or `dynamic` for interactive workspace selection | PostgreSQL sessions |
+| `APEX_TENANT_ID` | Pre-provisioned tenant UUID for `fixed` PostgreSQL; must be empty in dynamic mode | Tenant isolation |
 | `APEX_DATA_DIR` | Absolute private durable directory, required for production **JSON** mode | Data retention and safety |
 | `APEX_SETUP_TOKEN` | Server-side random 32+ character token for initial admin enrollment | First-run security |
 | `GEMINI_API_KEY` | Google Gemini API Key | BOM Builder, Ticket Diagnosis, Copilot |
@@ -103,4 +104,5 @@ Detailed architectural and compliance documentation is available in `docs/`:
 - [Phase L Tenancy & Migration](docs/PHASE_L_TENANCY_AND_MIGRATION.md) — Legacy JSON and PostgreSQL RLS baseline.
 - [Phase L Stage 2 PostgreSQL Runtime](docs/PHASE_L_STAGE2_POSTGRES_RUNTIME.md) — Historical Stage 2 runtime/migration baseline.
 - [Phase L Stage 3 Database Hardening](docs/PHASE_L_STAGE3_DATABASE_HARDENING.md) — Normalized finance/inventory, required backfill, reconciliation and release gates.
+- [Phase M Deployment Readiness](docs/PHASE_M_RELEASE_READINESS.md) — Windows NSIS preview installer, editable setup wizard, dynamic workspace login, pg_dump/pg_restore rehearsal and Hostinger staging acceptance.
 - [Hostinger Shared Hosting Guide](HOSTINGER_DEPLOYMENT_GUIDE.md) — Step-by-step cPanel/hPanel deployment.
