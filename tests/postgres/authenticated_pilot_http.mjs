@@ -198,6 +198,73 @@ try {
     assert.ok(events.every(e=>e.actor==='owner-a'||e.actor==='sales-a'));
   });
   await client.connect();
+  // Production-style CSRF and request-provided actor/tenant hints cannot override session authority.
+  const foreign=await fetch(base+'/api/pg-pilot/customers',{
+    method:'POST',headers:{cookie:owner,'content-type':'application/json',
+      origin:'https://unrelated.example.invalid'},
+    body:JSON.stringify({name:'Forged Cross-Origin Customer'})
+  });
+  test('Cross-origin cookie-authenticated PostgreSQL mutation rejected before SQL',()=>{
+    assert.equal(foreign.status,403);
+  });
+  const impersonation=await fetch(base+'/api/pg-pilot/customers',{
+    headers:{cookie:sales,'x-apex-user-id':'owner-a','x-apex-tenant-id':'tenant-fixture-b'}
+  });
+  const impersonationBody=await impersonation.json();
+  test('Untrusted user/tenant request headers cannot override authenticated SQL RLS identity',()=>{
+    assert.equal(impersonation.status,200);
+    assert.deepEqual(impersonationBody.data.map(c=>c.id),[customerC]);
+  });
+  r=await post('/api/pg-pilot/crm',{
+    customerId:customerC,title:'Mass assignment rejected',value:1,
+    createdByUserId:'owner-a'
+  },sales);
+  test('Client cannot mass-assign CRM actor metadata',()=>assert.equal(r.status,400));
+  await client.query("UPDATE apex.staff SET role='BUSINESS_OWNER' WHERE tenant_id='tenant-fixture-a' AND staff_id='sales-a'");
+  try {
+    r=await api('/api/pg-pilot/customers',{cookie:sales});
+    test('JSON-to-SQL role drift fails closed even when SQL role is elevated',()=>{
+      assert.equal(r.status,403);
+    });
+  }finally{
+    await client.query("UPDATE apex.staff SET role='SALES_MANAGER' WHERE tenant_id='tenant-fixture-a' AND staff_id='sales-a'");
+  }
+  await client.query("UPDATE apex.staff SET disabled_at=now() WHERE tenant_id='tenant-fixture-a' AND staff_id='sales-a'");
+  try{
+    r=await api('/api/pg-pilot/customers',{cookie:sales});
+    test('Existing authenticated session cannot read as SQL-disabled user',()=>assert.equal(r.status,403));
+  }finally{
+    await client.query("UPDATE apex.staff SET disabled_at=NULL WHERE tenant_id='tenant-fixture-a' AND staff_id='sales-a'");
+  }
+  const restricted=new pg.Client({
+    host:process.env.APEX_PG_PILOT_HOST,port:Number(process.env.PGPORT||5432),
+    user:process.env.APEX_PG_PILOT_USER,password:process.env.APEX_PG_PILOT_PASSWORD,
+    database:process.env.APEX_PG_PILOT_DB
+  });
+  await restricted.connect();
+  try{
+    await restricted.query('BEGIN');
+    await restricted.query('SET LOCAL ROLE apex_pilot_writer');
+    const anonymousSql=await restricted.query('SELECT count(*)::integer n FROM apex.customer_records');
+    test('Dedicated SQL login without trusted transaction context sees zero customer data',()=>{
+      assert.equal(anonymousSql.rows[0].n,0);
+    });
+    await assert.rejects(restricted.query(
+      "INSERT INTO apex.customers(tenant_id,customer_id,display_name) VALUES ('tenant-fixture-a','forged-without-context','FORGED')"),
+      err=>err.code==='42501');
+    test('Dedicated SQL login cannot create customer without actor context',()=>{});
+    await restricted.query('ROLLBACK');
+    await restricted.query('BEGIN');
+    await restricted.query('SET LOCAL ROLE apex_pilot_writer');
+    await assert.rejects(restricted.query(
+      "INSERT INTO apex.pilot_audit_events(tenant_id,event_id,actor_staff_id,operation,entity,object_id) "+
+      "VALUES('tenant-fixture-a','forged-audit','owner-a','INSERT','customers','fake')"),
+      err=>err.code==='42501');
+    test('Pilot SQL writer has no direct audit ledger insertion privilege',()=>{});
+    await restricted.query('ROLLBACK');
+  }finally{
+    await restricted.end();
+  }
   const before=await count('customers');
   // Deliberately fail the audit trigger. The row insert must roll back atomically.
   await client.query("ALTER TABLE apex.pilot_audit_events ADD CONSTRAINT test_reject_new_customer_audit CHECK (entity <> 'customers') NOT VALID");
