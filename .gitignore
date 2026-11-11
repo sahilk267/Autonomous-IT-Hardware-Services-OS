@@ -6,3 +6,9 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Runtime application state must never be committed (users, hashes, sessions, business data)
+data/app-store.json
+data/app-store*.json
+data/*.backup*
+data/*.corrupted.*
