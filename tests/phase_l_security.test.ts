@@ -6,6 +6,7 @@ import path from 'node:path';
 import { allowedOrigins, isOriginAllowed, isUnsafeMethod, writeOriginGuard } from '../server/writeOrigin.ts';
 import { TenantScopeError, assertSupportedStorageMode } from '../server/tenantIntegrity.ts';
 import { PersistentStore, getInitialCleanState } from '../server/db.ts';
+import { acquireStoreLock } from '../server/runtimeLock.ts';
 import type { Request, Response, NextFunction } from 'express';
 
 test('production origin allowlist accepts HTTPS only and no paths or credentials', () => {
@@ -105,6 +106,21 @@ test('existing legacy single-tenant data remains loadable without tenant reassig
     fs.writeFileSync(file, JSON.stringify(legacy));
     const store = new PersistentStore(file);
     assert.equal(store.getState().tenant.id, 'tenant-1');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('legacy JSON single-writer lock prevents concurrent access and allows released lock', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-phase-l-lock-'));
+  try {
+    const file = path.join(dir, 'app-store.json');
+    const release = acquireStoreLock(file);
+    assert.throws(() => acquireStoreLock(file), /Another Apex instance may own/);
+    release();
+    const releaseAgain = acquireStoreLock(file);
+    releaseAgain();
+    assert.equal(fs.existsSync(file + '.lock'), false);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
