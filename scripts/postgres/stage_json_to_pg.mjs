@@ -42,6 +42,15 @@ const rowsByKind=Object.fromEntries(scopedKinds.map(k=>[k,Array.isArray(state[k]
 const validUsers=new Map((state.users||[]).map(u=>[u.id,u]));
 const customers=new Map((state.customers||[]).map(c=>[c.id,c]));
 const seen=new Set();
+// Never copy credential-shaped fields from historical connector/business payloads.
+// This is a conservative fail-closed check, NOT a full DLP/content classification.
+const sensitiveField=/^(password|passwordhash|salt|apikey|secret|clientsecret|privatekey|secretkey|accesstoken|refreshtoken|idtoken|authtoken|sessiontoken|token)$/i;
+const containsCredential=(value)=>{
+  if(Array.isArray(value))return value.some(containsCredential);
+  if(value && typeof value==='object')return Object.entries(value).some(
+    ([key,child])=>sensitiveField.test(key)||containsCredential(child));
+  return false;
+};
 const ensure=(ok,why)=>{if(!ok)throw Error('Import refused: '+why);};
 const staffId=(v,kind,id,field)=>{
   if(v==null || v==='')return null;
@@ -66,6 +75,7 @@ function validate() {
     ensure(row && typeof row.id==='string' && row.id && !seen.has(kind+':'+row.id),
       'duplicate/missing '+kind+' record ID');
     seen.add(kind+':'+row.id);
+    ensure(!containsCredential(row),'credential-shaped field in '+kind+'/'+row.id);
     const parent=kind==='proposals'?rowsByKind.projects.find(p=>p.id===row.projectId):
       kind==='rmaClaims'?rowsByKind.assets.find(a=>a.id===row.assetId):null;
     const cust=parent?.customerId || row.customerId;
@@ -93,11 +103,13 @@ function validate() {
     ensure(row && typeof row.id==='string' && row.id && !seen.has(kind+':'+row.id),
       'duplicate/missing owner-only '+kind+' ID');
     seen.add(kind+':'+row.id);
+    ensure(!containsCredential(row),'credential-shaped field in owner-only '+kind+'/'+row.id);
   }
   for(const row of state.events||[]){
     ensure(row && typeof row.id==='string' && row.id && !seen.has('event:'+row.id),
       'duplicate/missing event ID');
     seen.add('event:'+row.id);
+    ensure(!containsCredential(row),'credential-shaped field in event '+row.id);
   }
 }
 try{validate();}catch(err){console.error(err.message+'; no DB was accessed.');process.exit(1);}

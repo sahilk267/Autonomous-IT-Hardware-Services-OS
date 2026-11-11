@@ -237,6 +237,14 @@ try {
     assert.match(response.stderr,/forged tenantId/);
   });
   baseline.jobs[0].tenantId=undefined;
+  baseline.connectors[0].apiKey='FORBIDDEN_FIXTURE_SECRET_DO_NOT_STAGE';
+  fs.writeFileSync(source,JSON.stringify(baseline),{mode:0o600});
+  response=cli(['--apply']);
+  test('Credential-shaped connector data never enters the staging database',()=>{
+    assert.equal(response.status,1);
+    assert.match(response.stderr,/credential-shaped field/);
+  });
+  delete baseline.connectors[0].apiKey;
 
   // Construct a second isolated staging database to force a LATE SQL integrity failure.
   // A duplicate granted staff identity passes the read-only structural preflight but
