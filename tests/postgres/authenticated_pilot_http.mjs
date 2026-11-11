@@ -630,6 +630,278 @@ try {
   test('Revoked field member cannot update job despite historical assignment',()=>{
     assert.equal(r.status,404);
   });
+
+  // Phase 10.4 — real restricted PostgreSQL quote/proposal/RMA and internal
+  // procurement/finance draft acceptance. No customer-facing dispatch occurs.
+  r=await api('/api/pg-pilot/finance-previews',{cookie:sales});
+  test('Sales cannot enumerate owner-only unissued finance previews',()=>assert.equal(r.status,403));
+  r=await api('/api/pg-pilot/procurement-drafts',{cookie:ithead});
+  test('IT Head cannot enumerate procurement requests',()=>assert.equal(r.status,403));
+  r=await api('/api/pg-pilot/quotes',{cookie:field});
+  test('Field engineer cannot access commercial quotations',()=>assert.equal(r.status,403));
+  r=await post('/api/pg-pilot/quotes',{
+    customerId:'cust-b',title:'Unauthorized sales quote',subtotal:123.45
+  },sales);
+  test('Sales cannot draft a quotation outside customer grant',()=>assert.equal(r.status,404));
+  r=await post('/api/pg-pilot/quotes',{
+    customerId:'cust-b',title:'Staging router replacement estimate',subtotal:1250.25
+  },owner);
+  test('Owner creates strictly DRAFT quotation with unverified tax',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.customerName,'Customer B');
+    assert.equal(r.data.data.taxStatus,'PENDING_CLASSIFICATION');
+    assert.equal(r.data.data.status,'DRAFT');
+    assert.equal(r.data.data.gstAmount,0);
+  });
+  const quoteBId=r.data.data.id;
+  r=await post('/api/pg-pilot/quotes',{
+    customerId:'cust-b',title:'Spoofed GST quotation',subtotal:1,taxStatus:'GST_VERIFIED'
+  },owner);
+  test('Client cannot forge tax verification or payment status on quotation',()=>{
+    assert.equal(r.status,400);
+  });
+  r=await post('/api/pg-pilot/quotes',{
+    customerId:'cust-b',title:'Negative quotation',subtotal:-2
+  },owner);
+  test('Negative quotation subtotal rejected before SQL',()=>assert.equal(r.status,400));
+  r=await api('/api/pg-pilot/quotes',{cookie:proc});
+  test('Procurement without B membership sees only A quote rows',()=>{
+    assert.equal(r.status,200);
+    assert.ok(!r.data.data.some(q=>q.id===quoteBId));
+  });
+  r=await post('/api/pg-pilot/finance-previews',{quoteId:quoteBId},sales);
+  test('Sales cannot turn a quote into any finance preview',()=>assert.equal(r.status,403));
+  r=await post('/api/pg-pilot/finance-previews',{quoteId:quoteBId},owner);
+  test('Owner creates unissued preview linked to same-customer draft quote',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.quoteId,quoteBId);
+    assert.equal(r.data.data.customerId,'cust-b');
+    assert.equal(r.data.data.status,'PREVIEW_UNISSUED');
+    assert.equal(r.data.data.taxStatus,'PENDING_CLASSIFICATION');
+    assert.equal(Number(r.data.data.subtotal),1250.25);
+  });
+  const financePreviewId=r.data.data.id;
+  r=await post('/api/pg-pilot/finance-previews',{quoteId:quoteBId},owner);
+  test('Same quote cannot create duplicate finance previews',()=>assert.equal(r.status,409));
+  r=await post('/api/pg-pilot/finance-previews',{
+    quoteId:quoteBId,status:'SETTLED',paymentReference:'fake'
+  },owner);
+  test('Owner cannot self-assert payment settlement or invoice issuance',()=>assert.equal(r.status,400));
+  r=await api('/api/pg-pilot/finance-previews',{cookie:owner});
+  test('Unissued previews are readable only by authenticated owner',()=>{
+    assert.equal(r.status,200);
+    assert.ok(r.data.data.some(f=>f.id===financePreviewId));
+  });
+  r=await post('/api/pg-pilot/proposals',{
+    projectId:sqlProjectB,commercialBid:250,providerVerified:true
+  },owner);
+  test('Internal proposal cannot claim third-party provider verification',()=>assert.equal(r.status,400));
+  r=await post('/api/pg-pilot/proposals',{
+    projectId:sqlProjectB,commercialBid:250
+  },sales);
+  test('Sales cannot submit bid to ungranted private project',()=>assert.equal(r.status,404));
+  r=await patch('/api/pg-pilot/customers/cust-b/access',{
+    userId:'sales-a',grant:true
+  },owner);
+  test('Owner can explicitly re-grant sales access for proposal fixture',()=>assert.equal(r.status,200));
+  r=await post('/api/pg-pilot/proposals',{
+    projectId:sqlProjectB,commercialBid:250
+  },sales);
+  test('Customer membership alone cannot submit to an unshared private project',()=>{
+    assert.equal(r.status,404);
+  });
+  r=await patch('/api/pg-pilot/projects/'+sqlProjectB+'/access',{
+    userId:'sales-a',grant:true
+  },owner);
+  test('Owner shares project with customer-granted sales staff',()=>assert.equal(r.status,200));
+  r=await post('/api/pg-pilot/proposals',{
+    projectId:sqlProjectB,commercialBid:250,
+    technicalApproach:'Internal technical scoping only'
+  },sales);
+  test('Authorized sales creates composite-FK-linked INTERNAL unverified proposal',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.customerId,'cust-b');
+    assert.equal(r.data.data.projectId,sqlProjectB);
+    assert.equal(r.data.data.submittedByUserId,'sales-a');
+    assert.equal(r.data.data.providerVerified,false);
+    assert.equal(r.data.data.externalSubmission,false);
+  });
+  const proposalId=r.data.data.id;
+  r=await api('/api/pg-pilot/proposals',{cookie:sales});
+  test('Sales can read a proposal only when project/customer sharing allows it',()=>{
+    assert.ok(r.data.data.some(p=>p.id===proposalId));
+  });
+  r=await patch('/api/pg-pilot/customers/cust-b/access',{
+    userId:'sales-a',grant:false
+  },owner);
+  test('Revoking B customer membership cascades project shares',()=>assert.equal(r.status,200));
+  r=await api('/api/pg-pilot/proposals',{cookie:sales});
+  test('Revoking customer access immediately hides linked B proposal',()=>{
+    assert.ok(!r.data.data.some(p=>p.id===proposalId));
+  });
+  r=await post('/api/pg-pilot/rma',{
+    assetId:newAssetId,faultSymptom:'B router needs hardware inspection'
+  },field);
+  test('Field cannot log RMA on B asset after customer-B membership revoked',()=>{
+    assert.equal(r.status,404);
+  });
+  r=await post('/api/pg-pilot/rma',{
+    assetId:'asset-a',faultSymptom:'A asset remains in testing'
+  },field);
+  test('Assigned field engineer logs own-customer RMA with no OEM claim',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.customerId,'cust-a');
+    assert.equal(r.data.data.assetId,'asset-a');
+    assert.equal(r.data.data.stage,'FAULT_LOGGED');
+    assert.equal(r.data.data.warrantyStatus,'UNVERIFIED');
+    assert.equal(r.data.data.oemCaseNumber,'');
+  });
+  const rmaAId=r.data.data.id;
+  r=await post('/api/pg-pilot/rma',{
+    assetId:newAssetId,faultSymptom:'Router intermittent power'
+  },ithead);
+  test('IT head logs B customer asset RMA under composite asset FK',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.customerId,'cust-b');
+    assert.equal(r.data.data.assetId,newAssetId);
+    assert.equal(r.data.data.externalOemCaseOpened,false);
+  });
+  const rmaBId=r.data.data.id;
+  r=await post('/api/pg-pilot/rma',{
+    assetId:newAssetId,faultSymptom:'Spoof',stage:'OEM_APPROVED'
+  },owner);
+  test('RMA API refuses unsupported external OEM approval',()=>assert.equal(r.status,400));
+  r=await api('/api/pg-pilot/rma',{cookie:field});
+  test('Field engineer sees only its own authorized asset-linked RMA',()=>{
+    assert.ok(r.data.data.some(x=>x.id===rmaAId));
+    assert.ok(!r.data.data.some(x=>x.id===rmaBId));
+  });
+  r=await post('/api/pg-pilot/procurement-drafts',{
+    customerId:'cust-b',productName:'Replacement router PSU',qty:2,estimatedUnitCost:112.75
+  },proc);
+  test('Procurement lead cannot draft purchase request for ungranted B customer',()=>{
+    assert.equal(r.status,404);
+  });
+  r=await patch('/api/pg-pilot/customers/cust-b/access',{
+    userId:'proc-a',grant:true
+  },owner);
+  test('Owner grants procurement customer-B scope explicitly',()=>assert.equal(r.status,200));
+  r=await post('/api/pg-pilot/procurement-drafts',{
+    customerId:'cust-b',productName:'Replacement router PSU',qty:2,estimatedUnitCost:112.75
+  },proc);
+  test('Procurement lead saves internal REQUEST_DRAFT without sending PO',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.customerId,'cust-b');
+    assert.equal(r.data.data.status,'REQUEST_DRAFT');
+    assert.equal(r.data.data.qty,2);
+    assert.equal(Number(r.data.data.estimatedUnitCost),112.75);
+  });
+  const procurementDraftId=r.data.data.id;
+  r=await post('/api/pg-pilot/procurement-drafts',{
+    customerId:'cust-b',productName:'Fake dispatch',qty:2,estimatedUnitCost:112.75,
+    status:'PO_DISPATCHED'
+  },proc);
+  test('Procurement drafts cannot spoof PO dispatch through request body',()=>{
+    assert.equal(r.status,400);
+  });
+  r=await post('/api/pg-pilot/procurement-drafts',{
+    customerId:'cust-b',productName:'Invalid quantity',qty:0,estimatedUnitCost:10
+  },proc);
+  test('Invalid procurement quantity rejected',()=>assert.equal(r.status,400));
+  r=await api('/api/pg-pilot/procurement-drafts',{cookie:proc});
+  test('Procurement lead sees own customer-bound internal request draft',()=>{
+    assert.ok(r.data.data.some(x=>x.id===procurementDraftId));
+  });
+  r=await api('/api/pg-pilot/procurement-drafts',{cookie:sales});
+  test('Sales cannot see procurement draft ledger',()=>assert.equal(r.status,403));
+  const rawProbe=new pg.Client({
+    host:process.env.APEX_PG_PILOT_HOST,port:Number(process.env.PGPORT||5432),
+    user:process.env.APEX_PG_PILOT_USER,password:process.env.APEX_PG_PILOT_PASSWORD,
+    database:process.env.APEX_PG_PILOT_DB
+  });
+  await rawProbe.connect();
+  try {
+    await rawProbe.query('BEGIN');
+    await rawProbe.query('SET LOCAL ROLE apex_pilot_writer');
+    await assert.rejects(rawProbe.query(
+      "UPDATE apex.pilot_procurement_drafts SET status='PO_DISPATCHED' WHERE draft_id=$1",
+      [procurementDraftId]),err=>err.code==='42501');
+    test('Restricted SQL writer has no procurement dispatch/update capability',()=>{});
+    await rawProbe.query('ROLLBACK');
+    await rawProbe.query('BEGIN');
+    await rawProbe.query('SET LOCAL ROLE apex_pilot_writer');
+    await assert.rejects(rawProbe.query(
+      "UPDATE apex.pilot_finance_previews SET status='SETTLED' WHERE preview_id=$1",
+      [financePreviewId]),err=>err.code==='42501');
+    test('Restricted SQL writer cannot mark finance preview settled',()=>{});
+    await rawProbe.query('ROLLBACK');
+  }finally {await rawProbe.end();}
+  const wrongProject=await client.query(
+    "INSERT INTO apex.customer_records "+
+    "(tenant_id,customer_id,kind,source_id,payload,related_kind,related_id) "+
+    "VALUES ('tenant-fixture-a','cust-a','proposals','illegal-cross-customer-proposal',"+
+    "'{}'::jsonb,'projects',$1) ON CONFLICT DO NOTHING",
+    [sqlProjectB]).then(()=>null,err=>err);
+  test('Composite SQL FK forbids linking proposal across customers',()=>{
+    assert.equal(wrongProject?.code,'23503');
+  });
+  const wrongAsset=await client.query(
+    "INSERT INTO apex.customer_records "+
+    "(tenant_id,customer_id,kind,source_id,payload,related_kind,related_id) "+
+    "VALUES ('tenant-fixture-a','cust-a','rmaClaims','illegal-cross-customer-rma',"+
+    "'{}'::jsonb,'assets',$1) ON CONFLICT DO NOTHING",
+    [newAssetId]).then(()=>null,err=>err);
+  test('Composite SQL FK forbids RMA linked to different customer asset',()=>{
+    assert.equal(wrongAsset?.code,'23503');
+  });
+  r=await api('/api/pg-pilot/audit',{cookie:owner});
+  test('Commercial, RMA, procurement and finance draft inserts are trigger audited',()=>{
+    assert.equal(r.status,200);
+    const ev=r.data.data;
+    assert.ok(ev.some(e=>e.object===quoteBId&&e.entity==='customer_records'));
+    assert.ok(ev.some(e=>e.object===proposalId&&e.entity==='customer_records'));
+    assert.ok(ev.some(e=>e.object===rmaAId&&e.entity==='customer_records'));
+    assert.ok(ev.some(e=>e.object===rmaBId&&e.entity==='customer_records'));
+    assert.ok(ev.some(e=>e.object===financePreviewId&&e.entity==='pilot_finance_previews'));
+    assert.ok(ev.some(e=>e.object===procurementDraftId&&e.entity==='pilot_procurement_drafts'));
+  });
+  r=await post('/api/pg-pilot/quotes',{
+    customerId:'cust-b',title:'Audit failure staging preview',subtotal:19.99
+  },owner);
+  test('Owner can prepare second finance source draft for forced rollback',()=>{
+    assert.equal(r.status,201);
+  });
+  const rollbackQuoteId=r.data.data.id;
+  const beforeFinance=await count('pilot_finance_previews');
+  await client.query(
+    "ALTER TABLE apex.pilot_audit_events ADD CONSTRAINT test_finance_audit_failure "+
+    "CHECK(entity <> 'pilot_finance_previews') NOT VALID");
+  try {
+    r=await post('/api/pg-pilot/finance-previews',{quoteId:rollbackQuoteId},owner);
+    test('Finance preview fails atomically if audit trigger rejects insert',()=>{
+      assert.equal(r.status,503);
+    });
+    const afterFinance=await count('pilot_finance_previews');
+    test('Failed finance audit leaves exactly zero extra finance drafts',()=>{
+      assert.equal(afterFinance,beforeFinance);
+    });
+  }finally {
+    await client.query('ALTER TABLE apex.pilot_audit_events DROP CONSTRAINT test_finance_audit_failure');
+  }
+  r=await post('/api/pg-pilot/finance-previews',{quoteId:rollbackQuoteId},owner);
+  test('Successful retry after removing audit fault creates one unissued preview',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.status,'PREVIEW_UNISSUED');
+  });
+  r=await patch('/api/pg-pilot/customers/cust-b/access',{
+    userId:'proc-a',grant:false
+  },owner);
+  test('Customer grant revocation removes procurement lead B visibility',()=>assert.equal(r.status,200));
+  r=await api('/api/pg-pilot/procurement-drafts',{cookie:proc});
+  test('Revoked procurement member cannot read former B draft',()=>{
+    assert.ok(!r.data.data.some(x=>x.id===procurementDraftId));
+  });
+
   console.log('PG AUTHENTICATED HTTP PILOT SUMMARY: '+passed+'/'+passed+' PASSED');
 } finally {
   if(child){
