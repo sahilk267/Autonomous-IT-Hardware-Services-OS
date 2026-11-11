@@ -236,3 +236,12 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 - **P10.4-VERIFY** Tests added for five-role/customer access, linked FK cross-customer denial, invoice/PO/provider/OEM claim refusal, failed audit atomic rollback, source-parity and independent PG16 restore comparing 12 RLS tables. Final Actions evidence to be recorded after CI finishes.
 - **P0 BLOCKERS** Production SQL repositories, actual invoices/taxes/PO/payment/OEM/provider workflows, historical customer crosswalk, secure managed database, migration rollback, DR/Hostinger signoff. PR #1 still Draft; main untouched.
 - [Detailed Phase 10.4 report](PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).
+
+## Phase 10.5A — 12 November 2026 (partial: safe staging draft retries and explicit cutover denial)
+
+- **PG-10.5A-RETRY:** `006_staging_idempotent_drafts.sql` creates a 13th FORCE-RLS table (`pilot_request_keys`) with unique tenant+authenticated actor+key and immutable operation, customer, digest and draft resource pointer. Narrow writer SELECT/INSERT only; no UPDATE/DELETE.
+- **HTTP-10.5A:** Optional Idempotency-Key for *internal procurement request drafts* and *unissued finance previews*. 201 new, 200 exact replay, 409 conflicting key reuse. Server-side SHA256 normalized request digest, server actor/tenant context; failed audit rolls back claimed key with the business draft.
+- **TX-10.5A:** Bounded PostgreSQL 40001/40P01 transaction retries with fresh per-attempt signed context. CI adds parallel same-key HTTP requests, one-record/one-audit checks, actor separation, malformed key and cross-operation rejection.
+- **GATE-10.5A:** `scripts/postgres/cutover_readiness_gate.mjs` and dedicated smoke test enforce local read-only verification: migration markers, PostgreSQL 16, thirteen FORCE-RLS tables, SQL role privileges, source SHA provenance, and static release blockers. `gate: BLOCKED` exit 3 is intentionally the **successful safe decision**, not production readiness.
+- **P0 STILL BLOCKED:** Normal JSON business runtime, production DB session/secret model, all-module SQL transactional parity, real procurement/finance external authorization, customer historical crosswalk, multi-instance sessions, migration dry-run on approved non-PII source, encrypted recovery and verified Hostinger rollback. Draft PR #1 stays unmerged.
+- [Phase 10.5A scope and safety runbook](PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md).

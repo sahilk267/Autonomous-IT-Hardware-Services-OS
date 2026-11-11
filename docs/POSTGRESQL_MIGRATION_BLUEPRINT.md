@@ -51,3 +51,7 @@ Staging migrations 003 and 004 implement a per-transaction signed PostgreSQL con
 ## Phase 10.4 staging-only draft progress
 
 Migration 005 now contains composite tenant/customer-linked RLS rules for unissued quotes, internal project proposals and asset RMAs; separate immutable procurement request and owner finance preview ledgers use FORCE RLS and SQL audit. See [Phase 10.4](PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md). These are NOT production invoices, orders, verified provider submissions or payments. Normal Express runtime remains JSON; historical migration and cutover are still blocked.
+
+## Phase 10.5A — transaction concurrency and readiness controls
+
+A staging-only immutable request key ledger (`migrations/postgres/006_staging_idempotent_drafts.sql`) allows actor-scoped safe HTTP retries for internal procurement drafts and unissued finance previews. SERIALIZABLE transaction conflicts (40001) and deadlocks (40P01) retry only after rollback and with a newly signed PostgreSQL transaction context. The **read-only** `scripts/postgres/cutover_readiness_gate.mjs` verifies PG16 schema, role grants and import provenance but **always blocks production cutover** until full historical migration, normalized repositories, sandbox providers and disaster recovery are proved. [Phase 10.5A report](PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md).

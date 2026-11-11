@@ -35,3 +35,7 @@
 Use a disposable local `apex_stage_*` PostgreSQL16 database, staging-only JSON authentication fixture outside the repository, migrations **001 → source import/parity → 002 → 003 + private 32-byte HMAC key → 004 → 005**, local non-superuser SQL pilot credentials and `NODE_ENV=staging`. Run real PostgreSQL HTTP, cross-tenant, audit failure and independent backup/restore tests. Never include customer production secrets or actual transactional payments. Rotate staging attestation keys after a copy.
 
 **Next recommended phase 10.5:** secure fully normalized PostgreSQL domain transactions and validated external sandbox adapters; historical migration parity and production-grade authorization/recovery gates before any customer cutover.
+
+## Phase 10.5A follow-on (staging only)
+
+Immutable actor-scoped idempotency keys and bounded SERIALIZABLE transaction retries now protect the internal procurement draft and unissued finance preview POST operations in the isolated PostgreSQL pilot. An explicit read-only readiness gate refuses production cutover. [Phase 10.5A report](PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md).

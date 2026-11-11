@@ -58,3 +58,7 @@ The 10.3 staging SQL pilot uses a separate 32-byte HMAC secret stored in privile
 ## Phase 10.4 commerce pilot safety
 
 All PG pilot procurement items are `REQUEST_DRAFT` and finance rows `PREVIEW_UNISSUED` with tax `PENDING_CLASSIFICATION`. Do not issue/send them as real POs or invoices, charge funds or initiate OEM returns. Local PG pilot continues to require private 32-byte context key, disposable outside-checkout auth data and loopback staging only. No production Hostinger deployment is authorized. See [Phase 10.4 report](PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).
+
+## Phase 10.5A — immutable staging retry keys, explicit BLOCKED cutover
+
+The `pilot_request_keys` table stores only tenant/customer, authenticated actor, operation, SHA256 request digest and draft resource reference; no payment credentials or full request bodies. It is protected by FORCE RLS and not mutable by the runtime writer. `assess:pg:cutover` is read-only and **must report BLOCKED (exit 3)**; this is not a switch, approval or deployment action. All live payment, invoice, PO, OEM and finance processing remain disabled; ordinary production data is still JSON-backed. See [Phase 10.5A operator guidance](PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md).

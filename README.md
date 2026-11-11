@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-11): Phase 10.4 PostgreSQL commerce/procurement/finance STAGING drafts implemented; NOT production-certified.** Signed RLS enforces internal quotation drafts, linked unverified proposals and RMAs, and customer-bound procurement/owner finance preview ledgers. The main application remains JSON-backed; real invoice/GST, payment, PO dispatch, provider/OEM integration, data migration and Hostinger cutover are blocked. See [Phase 10.4 report](docs/PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).
+> **Current status (2026-11-12): Phase 10.5A adds staging-only PostgreSQL transactional retry/idempotency and a fail-closed cutover-readiness gate. NOT production-certified.** Existing JSON remains the application system of record. Phase 10.4's unissued quotes/finance/procurement subset stays internal and no supplier, payment, provider or OEM APIs are enabled. See [Phase 10.5A report](docs/PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md).
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -142,3 +142,10 @@ A real PostgreSQL 16 schema with tenant/customer composite FKs and forced RLS, r
 - [PostgreSQL staging migration 005](migrations/postgres/005_staging_commerce_finance_drafts.sql) and [Phase 10.4 implementation/runbook](docs/PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).
 - Separate authenticated staging `/api/pg-pilot/quotes`, `/proposals`, `/rma`, `/procurement-drafts`, `/finance-previews` routes use real PostgreSQL RLS/foreign keys and same-transaction audit. No invoice is issued and no external payment, tax, purchase order, OEM or provider request is sent.
 - Production application and normal `/api/*` routes remain JSON-backed. Do not expose or deploy the staging pilot to live customers.
+
+## Phase 10.5A — safe concurrency and explicit no-cutover gate
+
+- [Migration 006](migrations/postgres/006_staging_idempotent_drafts.sql) adds the **13th FORCE-RLS table** for immutable, actor-scoped request keys.
+- Optional `Idempotency-Key` on two staging-only POST endpoints allows safe finance preview/procurement draft replays: first creation 201; identical replay 200 with same resource ID; conflicting reuse 409. New keys and audit rows commit atomically; serialization conflicts retry with new signed transaction context.
+- [Read-only cutover assessment](scripts/postgres/cutover_readiness_gate.mjs) (`npm run assess:pg:cutover`) verifies local PostgreSQL safeguards and **always reports BLOCKED** pending production identity, customer migration, full SQL parity, provider acceptance and recovery gates. Exit 3 is expected and means no deployment authorization.
+- [Phase 10.5A implementation, CI and limitations](docs/PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md). The normal app and `main` remain unchanged.
