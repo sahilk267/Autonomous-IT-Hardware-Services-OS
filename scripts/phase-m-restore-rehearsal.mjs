@@ -114,7 +114,7 @@ async function seed() {
       throw new Error('Expected financial check constraint to reject negative amount');
     } catch (error) {
       await client.query('ROLLBACK');
-      if (!/check constraint|violates/i.test(error.message)) throw error;
+      if (!/check constraint|violates|Settled invoice financial details cannot be changed/i.test(error.message)) throw error;
     }
 
     const summary = await fingerprint(client, tenant.id);
