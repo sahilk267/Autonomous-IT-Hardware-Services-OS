@@ -256,4 +256,89 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
       };
     }));
   });
+  // Membership management is server-side and RLS scoped. The existing React
+  // header's role switcher never grants privileges.
+  app.get('/api/admin/users', (req, res) => {
+    void send(res, async () => transact(runtime, async client => {
+      const owner = await runtime.verifySession(client, readRequestToken(req));
+      if (!owner) return { status: 401, payload: { success: false, error: 'Unauthorized' } };
+      if (owner.role !== 'BUSINESS_OWNER') return { status: 403, payload: { success: false, error: 'Owner privileges required' } };
+      const users = await client.query(
+        `SELECT user_id, username, role, display_name, email, is_active
+           FROM apex_memberships WHERE tenant_id = $1 ORDER BY created_at`,
+        [runtime.tenantId]
+      );
+      return { status: 200, payload: {
+        success: true,
+        data: users.rows.map(row => ({ ...publicUser(row, runtime.tenantId), isActive: row.is_active }))
+      } };
+    }));
+  });
+
+  app.post('/api/admin/users', (req, res) => {
+    void send(res, async () => transact(runtime, async client => {
+      const owner = await runtime.verifySession(client, readRequestToken(req));
+      if (!owner) return { status: 401, payload: { success: false, error: 'Unauthorized' } };
+      if (owner.role !== 'BUSINESS_OWNER') return { status: 403, payload: { success: false, error: 'Owner privileges required' } };
+      const { username, password, name, email, role } = req.body ?? {};
+      const validRoles = ['BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER', 'PROCUREMENT_LEAD'];
+      if (typeof username !== 'string' || username.trim().length < 3 || username.length > 128 ||
+          typeof password !== 'string' || password.length < 12 || password.length > 1024 ||
+          !validRoles.includes(role) ||
+          (name !== undefined && (typeof name !== 'string' || name.length > 256)) ||
+          (email !== undefined && (typeof email !== 'string' || email.length > 256))) {
+        return { status: 400, payload: { success: false, error: 'Invalid operator credentials or role' } };
+      }
+      const exists = await client.query(
+        'SELECT 1 FROM apex_memberships WHERE tenant_id=$1 AND lower(username)=lower($2)',
+        [runtime.tenantId, username.trim()]
+      );
+      if (exists.rowCount) return { status: 409, payload: { success: false, error: 'Username already exists in this workspace' } };
+      const id = crypto.randomUUID();
+      const { salt, hash } = hashPassword(password);
+      const created = await client.query(
+        `INSERT INTO apex_memberships
+         (tenant_id,user_id,username,password_hash,role,display_name,email)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         RETURNING user_id,username,role,display_name,email`,
+        [runtime.tenantId, id, username.trim(), `${salt}:${hash}`, role,
+         (name || '').trim() || username.trim(), (email || '').trim()]
+      );
+      await client.query(
+        `INSERT INTO apex_audit(tenant_id,actor_id,action,target_type,target_id,details)
+         VALUES($1,$2,'membership.create','membership',$3,$4::jsonb)`,
+        [runtime.tenantId, owner.userId, id, JSON.stringify({ assignedRole: role })]
+      );
+      return { status: 201, payload: { success: true, user: publicUser(created.rows[0], runtime.tenantId) } };
+    }));
+  });
+
+  app.post('/api/admin/users/:id/disable', (req, res) => {
+    void send(res, async () => transact(runtime, async client => {
+      const owner = await runtime.verifySession(client, readRequestToken(req));
+      if (!owner) return { status: 401, payload: { success: false, error: 'Unauthorized' } };
+      if (owner.role !== 'BUSINESS_OWNER') return { status: 403, payload: { success: false, error: 'Owner privileges required' } };
+      const id = req.params.id;
+      if (!/^[0-9a-f-]{36}$/i.test(id) || id === owner.userId) {
+        return { status: 400, payload: { success: false, error: 'Invalid target account or self-disable forbidden' } };
+      }
+      const result = await client.query(
+        `UPDATE apex_memberships SET is_active = false
+         WHERE tenant_id=$1 AND user_id=$2 AND is_active=true RETURNING user_id`,
+        [runtime.tenantId, id]
+      );
+      if (!result.rowCount) return { status: 404, payload: { success: false, error: 'Active user not found' } };
+      await client.query(
+        'UPDATE apex_sessions SET revoked_at = now() WHERE tenant_id=$1 AND user_id=$2 AND revoked_at IS NULL',
+        [runtime.tenantId, id]
+      );
+      await client.query(
+        `INSERT INTO apex_audit(tenant_id,actor_id,action,target_type,target_id)
+         VALUES($1,$2,'membership.disable','membership',$3)`,
+        [runtime.tenantId, owner.userId, id]
+      );
+      return { status: 200, payload: { success: true, disabledUserId: id } };
+    }));
+  });
+
 }
