@@ -7,6 +7,7 @@ import { createServer as createViteServer } from 'vite';
 import { dbStore, defaultConnectors, hashPassword, verifyPassword } from './server/db.ts';
 import { UserRole, Project, ProjectMilestone } from './src/types.ts';
 import { loginAttemptLimiter } from './server/login_limit.ts';
+import { registerPostgresPilotRoutes } from './server/postgres_pilot.ts';
 
 const app = express();
 
@@ -17,7 +18,7 @@ function resolvePort(): number {
     if (!isNaN(parsed) && parsed > 0) return parsed;
   }
   // Development server must always listen on port 3000 (port 8080 is reserved for reverse proxy)
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'staging') {
     return 3000;
   }
   return Number(process.env.PORT) || 3000;
@@ -454,6 +455,9 @@ app.post('/api/tenant', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) =
   }
 });
 
+// An explicitly enabled staging SQL pilot does not replace the JSON business APIs.
+registerPostgresPilotRoutes(app, requireAuth, requireRole, dbStore);
+
 // Customer ownership is local-only. Client-facing identity and portal login are NOT implemented.
 app.get('/api/customers', requireAuth, (req, res) => {
   const actor = (req as any).user as LocalActor;
@@ -527,7 +531,7 @@ app.get('/api/state', requireAuth, (req, res) => {
 
 // Administrative Clean State Reset (Protected, requires BUSINESS_OWNER + explicit confirmation)
 app.post('/api/state/reset', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.APEX_ALLOW_PRODUCTION_RESET !== 'true') {
+  if ((process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') && process.env.APEX_ALLOW_PRODUCTION_RESET !== 'true') {
     return res.status(403).json({ success: false, error: 'Production reset is disabled. Explicit server-side authorization required.' });
   }
   try {
@@ -2453,7 +2457,7 @@ Respond in strict JSON only without markdown formatting:
 
 // Production static serving vs Dev Vite middleware
 async function setupVite() {
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'staging') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -2467,8 +2471,9 @@ async function setupVite() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Apex Autonomous IT Hardware & Services OS running on http://0.0.0.0:${PORT}`);
+  const bindHost = process.env.NODE_ENV === 'staging' ? '127.0.0.1' : '0.0.0.0';
+  app.listen(PORT, bindHost, () => {
+    console.log(`Apex Autonomous IT Hardware & Services OS running on http://${bindHost}:${PORT}`);
   });
 }
 

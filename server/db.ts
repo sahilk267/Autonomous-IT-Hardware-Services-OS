@@ -103,7 +103,7 @@ const DB_FILE = configuredDataFile
 
 // A deployment checkout can overwrite repository-tracked data/app-store.json.
 // Production must use a separately provisioned private location outside this checkout.
-if (process.env.NODE_ENV === 'production') {
+if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
   const checkedPath = fs.existsSync(DB_FILE) ? fs.realpathSync(DB_FILE) : DB_FILE;
   const relative = path.relative(process.cwd(), checkedPath);
   const insideCheckout = relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));

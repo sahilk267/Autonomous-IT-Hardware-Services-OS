@@ -20,6 +20,7 @@
     "preflight:customers": "node scripts/customer_migration_preflight.mjs",
     "smoke:preflight": "node tests/customer_preflight_smoke.mjs",
     "smoke:postgres": "node tests/postgres/staging_rls_smoke.mjs",
+    "smoke:pg:pilot": "node tests/postgres/authenticated_pilot_http.mjs",
     "smoke:pg:restore": "node tests/postgres/restore_rehearsal.mjs",
     "stage:postgres": "node scripts/postgres/stage_json_to_pg.mjs"
   },
@@ -45,6 +46,7 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3",
-    "@types/express": "^4.17.21"
+    "@types/express": "^4.17.21",
+    "@types/pg": "^8.15.5"
   }
 }
