@@ -1,0 +1,41 @@
+name: Phase M — Windows x64 NSIS installer build
+
+on:
+  push:
+    branches:
+      - feature/phase-m-deployment-readiness-20261112
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: phase-m-win-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint
+      - run: node --test tests/phase_m_desktop_config.test.mjs
+      - run: npm run package:windows
+      - name: Verify installer artifact exists
+        shell: pwsh
+        run: |
+          $artifact = Get-ChildItem -Path "release/windows" -Filter "*Setup-x64.exe" -Recurse
+          if ($artifact.Count -lt 1) { throw "No NSIS x64 installer was created" }
+          $artifact | ForEach-Object { Write-Output "$($_.Name): $($_.Length) bytes" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apex-it-os-windows-x64-unsigned-preview
+          path: release/windows/*Setup-x64.exe
+          if-no-files-found: error
+          retention-days: 14
