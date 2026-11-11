@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { assertSupportedStorageMode, enforceSingleTenantIntegrity, TenantScopeError } from './tenantIntegrity.ts';
 import { acquireStoreLock } from './runtimeLock.ts';
 import {
@@ -94,7 +95,7 @@ export interface AppStoreState {
 }
 
 assertSupportedStorageMode(process.env.APEX_STORAGE_MODE);
-if (process.env.NODE_ENV === 'production' && (!process.env.APEX_DATA_DIR || !path.isAbsolute(process.env.APEX_DATA_DIR))) {
+if (process.env.NODE_ENV === 'production' && process.env.APEX_STORAGE_MODE !== 'postgres' && (!process.env.APEX_DATA_DIR || !path.isAbsolute(process.env.APEX_DATA_DIR))) {
   throw new Error('APEX_DATA_DIR must be an absolute, durable, private path in production');
 }
 const DATA_DIR = process.env.APEX_DATA_DIR ? path.resolve(process.env.APEX_DATA_DIR) : path.join(process.cwd(), 'data');
@@ -230,15 +231,22 @@ export class PersistentStore {
   private readonly dbFile: string;
   private readonly dataDir: string;
   private state: AppStoreState;
+  private readonly memoryOnly: boolean;
 
-  constructor(dbFile: string = DB_FILE) {
+  constructor(dbFile: string = DB_FILE, memoryState?: AppStoreState) {
     this.dbFile = dbFile;
     this.dataDir = path.dirname(dbFile);
-    if (process.env.NODE_ENV === 'production') {
-      fs.mkdirSync(this.dataDir, { recursive: true, mode: 0o700 });
-      acquireStoreLock(dbFile);
+    this.memoryOnly = memoryState !== undefined;
+    if (this.memoryOnly) {
+      this.state = structuredClone(memoryState!);
+      enforceSingleTenantIntegrity(this.state);
+    } else {
+      if (process.env.NODE_ENV === 'production') {
+        fs.mkdirSync(this.dataDir, { recursive: true, mode: 0o700 });
+        acquireStoreLock(dbFile);
+      }
+      this.state = this.loadFromDisk();
     }
-    this.state = this.loadFromDisk();
   }
 
   private loadFromDisk(): AppStoreState {
@@ -281,6 +289,10 @@ export class PersistentStore {
   }
 
   private persistToDisk(stateToSave: AppStoreState): void {
+    if (this.memoryOnly) {
+      stateToSave.lastUpdated = new Date().toISOString();
+      return; // PostgreSQL request transaction owns durability/rollback.
+    }
     if (!fs.existsSync(this.dataDir)) {
       fs.mkdirSync(this.dataDir, { recursive: true });
     }
@@ -312,6 +324,11 @@ export class PersistentStore {
   public resetToCleanSlate(): AppStoreState {
     return this.commit((draft) => {
       const clean = getInitialCleanState();
+      // Reset business records, NOT the administrator accounts, sessions or
+      // organization identity. Otherwise a reset silently re-enables bootstrap.
+      clean.tenant = draft.tenant;
+      clean.users = draft.users;
+      clean.sessions = draft.sessions;
       Object.assign(draft, clean);
       return draft;
     });
@@ -823,4 +840,19 @@ export class PersistentStore {
   }
 }
 
-export const dbStore = new PersistentStore();
+// Existing synchronous business methods are bound to an isolated store per
+// PostgreSQL HTTP transaction via AsyncLocalStorage. The proxy deliberately
+// refuses unscoped PostgreSQL business access; it never falls back to JSON.
+const storeContext = new AsyncLocalStorage<PersistentStore>();
+const localStore = process.env.APEX_STORAGE_MODE === 'postgres' ? null : new PersistentStore();
+export function runWithScopedStore<T>(store: PersistentStore, fn: () => T): T {
+  return storeContext.run(store, fn);
+}
+export const dbStore = new Proxy({} as PersistentStore, {
+  get(_target, key) {
+    const store = storeContext.getStore() ?? localStore;
+    if (!store) throw new Error('PostgreSQL API store accessed without a verified tenant transaction');
+    const value = Reflect.get(store, key, store);
+    return typeof value === 'function' ? value.bind(store) : value;
+  },
+});
