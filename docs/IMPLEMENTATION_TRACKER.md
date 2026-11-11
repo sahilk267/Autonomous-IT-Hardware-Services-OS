@@ -220,3 +220,10 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 - **CI-10.3:** PostgreSQL 16 source import/parity, five-role/staff signed context HTTP security, cross-customer object access, forced audit failure/rollback and independent restore verification added to existing Node/Chromium regression matrix.
 - **OPEN P0:** Full module SQL CRUD/transaction parity, normalized tenancy tables, production attestation/credential policy, real customer mapping + source/target data safety, workflow invariants, signed provider evidence, actual Hostinger DB deployment and rollback/restore rehearsal. Normal runtime is still JSON, PR #1 remains Draft.
 - [Detailed Phase 10.3 implementation report](PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).
+
+## Phase 10.3 verified CI evidence — 11 November 2026
+
+- **Code SHA:** [`68b0376`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/68b0376463578a439eb87d8aee6d5ee104c39262).
+- [GitHub Actions push #43042984912](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43042984912) PostgreSQL 16 staging **27/27**, authenticated SQL HTTP including project/ticket/asset/job workflows and signed context replay **93/93**, PostgreSQL dump/restore with attestation **18/18**. The same commit's existing TypeScript/build and Node backend job completed successfully.
+- Real PostgreSQL service checks include HMAC signature of tenant+actor+transaction+backend, rejection of unsigned/forged/replayed context, owner-only project sharing, field-assigned asset/job custody, customer membership grant/revoke, SQL audit and failure rollback, source SHA/parity, backup and restored RLS.
+- These verification numbers refer to **ephemeral CI fixtures, not a live Postgres deployment or a completed multi-tenant cutover**. Existing JSON application and production customer data were unchanged.

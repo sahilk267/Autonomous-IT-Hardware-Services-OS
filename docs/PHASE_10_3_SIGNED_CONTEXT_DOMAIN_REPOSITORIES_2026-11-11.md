@@ -40,3 +40,10 @@ Use **only isolated PostgreSQL 16 CI fixtures**. The GitHub workflow stages a th
 For any future environment, use a proper key-management system. Never commit or print the context secret; the SQL pilot login must not receive database ownership, BYPASSRLS, access to context secrets or direct audit write privileges. See [Phase 10.2 runbook](PHASE_10_2_AUTHENTICATED_PG_PILOT_2026-11-11.md), [Data Safety](DEPLOYMENT_DATA_SAFETY.md), and [Migration Blueprint](POSTGRESQL_MIGRATION_BLUEPRINT.md).
 
 **Next release priority:** Phase 10.4 — full PostgreSQL domain repository coverage, transactional financial/work-order invariants, provider evidence, authenticated production trust boundary, historical migration and real rollback rehearsal. Keep PR #1 Draft until completion.
+
+## Phase 10.3 verified CI evidence — 11 November 2026
+
+- **Code SHA:** [`68b0376`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/68b0376463578a439eb87d8aee6d5ee104c39262).
+- [GitHub Actions push #43042984912](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43042984912) PostgreSQL 16 staging **27/27**, authenticated SQL HTTP including project/ticket/asset/job workflows and signed context replay **93/93**, PostgreSQL dump/restore with attestation **18/18**. The same commit's existing TypeScript/build and Node backend job completed successfully.
+- Real PostgreSQL service checks include HMAC signature of tenant+actor+transaction+backend, rejection of unsigned/forged/replayed context, owner-only project sharing, field-assigned asset/job custody, customer membership grant/revoke, SQL audit and failure rollback, source SHA/parity, backup and restored RLS.
+- These verification numbers refer to **ephemeral CI fixtures, not a live Postgres deployment or a completed multi-tenant cutover**. Existing JSON application and production customer data were unchanged.
