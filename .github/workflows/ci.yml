@@ -40,7 +40,8 @@ jobs:
       - name: Customer migration preflight (read-only, isolated fixtures)
         run: npm run smoke:preflight
   browser:
-    runs-on: ubuntu-latest
+    # Ubuntu 26.04 apt DNS instability blocked --with-deps; keep browser OS stable.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
@@ -56,8 +57,8 @@ jobs:
           fi
       - name: Build production application
         run: npm run build
-      - name: Install current Chromium and OS dependencies
-        run: npx playwright install --with-deps chromium
+      - name: Install Chromium browser without system apt mirror dependency
+        run: npx playwright install chromium
       - name: Real browser login and cross-customer isolation (throwaway DB)
         run: npm run smoke:browser
 
