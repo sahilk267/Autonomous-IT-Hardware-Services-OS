@@ -12,6 +12,18 @@ import { PostgresRuntime } from './server/postgres/runtime.ts';
 import { registerPostgresAuth } from './server/postgres/auth.ts';
 
 const app = express();
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  if (process.env.NODE_ENV === 'production' && process.env.APEX_DESKTOP_MODE !== '1') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  }
+  next();
+});
 
 function resolvePort(): number {
   const portArgIndex = process.argv.indexOf('--port');
