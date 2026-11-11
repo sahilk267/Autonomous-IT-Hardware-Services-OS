@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { verifySnapshot } from './backup-data.mjs';
 import { backfillCriticalLedgers } from '../server/postgres/criticalLedger.mjs';
+import { verifyCriticalLedger } from '../server/postgres/reconcileLedger.mjs';
 
 const migrationUrl = process.env.APEX_MIGRATION_DATABASE_URL;
 const { Client } = pg;
@@ -226,6 +227,20 @@ async function main() {
         result = { role: args[0], granted: true };
         break;
       }
+      case 'verify-critical': {
+        if (args.length !== 1) throw new Error('Usage: verify-critical <tenant-uuid>');
+        const tenantId = requireUuid(args[0]);
+        await client.query('BEGIN READ ONLY');
+        try {
+          await client.query("SELECT set_config('apex.tenant_id', $1, true)", [tenantId]);
+          result = await verifyCriticalLedger(client, tenantId);
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw error;
+        }
+        break;
+      }
       case 'backfill-critical': {
         if (args.length !== 1) throw new Error('Usage: backfill-critical <tenant-uuid>');
         const tenantId = requireUuid(args[0]);
@@ -248,7 +263,7 @@ async function main() {
         result = await importBackup(client, args[0], args[1], command !== 'import-confirm');
         break;
       default:
-        throw new Error('Commands: migrate | provision <slug> <name> | grant-runtime <role> | backfill-critical <tenant-uuid> | import-dry-run <tenant-id> <manifest> | import-confirm <tenant-id> <manifest>');
+        throw new Error('Commands: migrate | provision <slug> <name> | grant-runtime <role> | verify-critical <tenant-uuid> | backfill-critical <tenant-uuid> | import-dry-run <tenant-id> <manifest> | import-confirm <tenant-id> <manifest>');
     }
     console.log(JSON.stringify(result, null, 2));
   } finally {
