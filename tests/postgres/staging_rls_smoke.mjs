@@ -133,6 +133,27 @@ try {
     assert.equal(shadowResult.status,2,shadowResult.stderr);
     assert.match(shadowResult.stderr,/SHADOW REFUSED/);
   });
+  const reconcile=(extraEnv={})=>spawnSync(process.execPath,
+    ['scripts/postgres/customer_reconciliation_manifest.mjs','--source',source],
+    {encoding:'utf8',env:{...process.env,...extraEnv},timeout:17000});
+  let reconciled=reconcile();
+  test('Per-customer immutable migration manifest validates 2 customer digests and staff grants',()=>{
+    assert.equal(reconciled.status,0,reconciled.stderr);
+    const report=JSON.parse(reconciled.stdout);
+    assert.equal(report.customerCount,2);
+    assert.equal(report.matched,true);
+    assert.equal(report.sourceSha256,expectedSha);
+    assert.equal(report.customerManifests.length,2);
+    assert.equal(report.productionCutoverReady,false);
+    assert.equal(report.ownerOnlyMappingApproved,false);
+    assert.equal(report.unmappedOwnerOnlyRecords,1);
+    assert.equal(report.databaseModified,false);
+  });
+  reconciled=reconcile({PGDATABASE:'postgres'});
+  test('Historical migration manifest refuses default/non-staging DB',()=>{
+    assert.equal(reconciled.status,2);
+    assert.match(reconciled.stderr,/RECONCILIATION REFUSED/);
+  });
   parityResult=parity({PGDATABASE:'postgres'});
   test('Parity checker refuses default or non-staging database',()=>{
     assert.equal(parityResult.status,2);
@@ -161,6 +182,11 @@ try {
   test('Authenticated route shadow comparison detects SQL JSONB tampering',()=>{
     assert.equal(shadowResult.status,1);
     assert.match(shadowResult.stderr,/SHADOW MISMATCH/);
+  });
+  reconciled=reconcile();
+  test('Per-customer historical manifest independently catches SQL payload tampering',()=>{
+    assert.equal(reconciled.status,1);
+    assert.match(reconciled.stderr,/RECONCILIATION MISMATCH/);
   });
   await db.query("UPDATE apex.customer_records SET payload=$1::jsonb WHERE kind='crmOpportunities' AND source_id='crm-a'",
     [JSON.stringify(previousPayload)]);
