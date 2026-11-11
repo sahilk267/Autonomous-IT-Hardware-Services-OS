@@ -60,9 +60,9 @@ export class LoginRateLimiter {
 }
 
 export function sessionCookie(token: string, production: boolean): string {
-  return `apex_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${production ? '; Secure' : ''}`;
+  return `apex_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${production && process.env.APEX_DESKTOP_MODE !== '1' ? '; Secure' : ''}`;
 }
 
 export function expiredSessionCookie(production: boolean): string {
-  return `apex_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${production ? '; Secure' : ''}`;
+  return `apex_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${production && process.env.APEX_DESKTOP_MODE !== '1' ? '; Secure' : ''}`;
 }
