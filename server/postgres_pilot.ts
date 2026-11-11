@@ -49,6 +49,7 @@ export function registerPostgresPilotRoutes(
     !['127.0.0.1','localhost'].includes(options.host) ||
     !/^apex_stage_[a-z0-9_]{2,60}$/.test(options.database) ||
     options.user!=='apex_pilot_login' || !options.password ||
+    !/^[0-9a-f]{64}$/.test(process.env.APEX_PG_PILOT_CONTEXT_KEY||'') ||
     !Number.isInteger(options.port) || options.port<1 || options.port>65535 ||
     !path.isAbsolute(jsonFile) || inCheckout ||
     !!process.env.DATABASE_URL || !!process.env.APEX_PG_RUNTIME_ENABLED) {
@@ -72,11 +73,19 @@ export function registerPostgresPilotRoutes(
     try {
       await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
       inTransaction=true;
-      // The caller cannot influence this SQL role or the context values.
+      // Attest this exact database transaction and backend connection to the
+      // authenticated JSON session. A standalone SQL client cannot forge actor
+      // identity by supplying its own custom PostgreSQL GUC settings.
+      const nonce=await client.query(
+        'SELECT txid_current()::text AS txid, pg_backend_pid()::text AS backend');
+      const payload=[actor.tenantId,actor.userId,nonce.rows[0].txid,nonce.rows[0].backend].join('\n');
+      const signature=crypto.createHmac('sha256',
+        Buffer.from(process.env.APEX_PG_PILOT_CONTEXT_KEY!,'hex')).update(payload).digest('hex');
       await client.query('SET LOCAL ROLE apex_pilot_writer');
       await client.query("SELECT set_config('apex.tenant_id',$1,true)",[actor.tenantId]);
       await client.query("SELECT set_config('apex.actor_id',$1,true)",[actor.userId]);
-      const version=await client.query("SELECT stage_only FROM apex.schema_versions WHERE version='10.2-pilot'");
+      await client.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
+      const version=await client.query("SELECT stage_only FROM apex.schema_versions WHERE version='10.3a-context-domain'");
       if(version.rows.length!==1 || !version.rows[0].stage_only)
         reject(503,'The required staging pilot schema is not installed.');
       // Fail closed if JSON and SQL role/tenant records ever drift.
@@ -119,7 +128,7 @@ export function registerPostgresPilotRoutes(
 
   app.get('/api/pg-pilot/status',requireAuth,handler(async()=>({
     status:200,data:{stageOnly:true,storage:'postgres',applicationStorage:'json',
-      writableKinds:['customers','customer_grants','crmOpportunities']}
+      writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets']}
   })));
   app.get('/api/pg-pilot/customers',requireAuth,handler(async client=>{
     const result=await client.query(
@@ -206,6 +215,132 @@ export function registerPostgresPilotRoutes(
       if(!row.rows.length)reject(404,'CRM record not found or not authorized.');
       return {status:200,data:row.rows[0].payload};
     }));
+
+  // Staging-only domain repository — authorization is layered: Express role,
+  // PostgreSQL signed actor context, tenant/customer membership and object RLS.
+  app.get('/api/pg-pilot/projects',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','SALES_MANAGER','PROCUREMENT_LEAD'),
+    handler(async client=>{
+      const rows=await client.query(
+        "SELECT p.payload, COALESCE((SELECT jsonb_agg(s.staff_id ORDER BY s.staff_id) "+
+        "FROM apex.project_shares s WHERE s.tenant_id=p.tenant_id AND s.customer_id=p.customer_id "+
+        "AND s.project_id=p.source_id),'[]'::jsonb) AS collaborators "+
+        "FROM apex.customer_records p WHERE p.kind='projects' ORDER BY p.source_id");
+      return {status:200,data:rows.rows.map(r=>({...r.payload,collaboratorUserIds:r.collaborators}))};
+    }));
+  app.post('/api/pg-pilot/projects',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['customerId','title','scopeDescription','budget']);
+      if(typeof body.customerId!=='string' || typeof body.title!=='string' ||
+         !body.title.trim() || body.title.trim().length>180 ||
+         (body.scopeDescription!==undefined && (typeof body.scopeDescription!=='string' ||
+           body.scopeDescription.length>4000)) ||
+         (body.budget!==undefined && (typeof body.budget!=='number' ||
+           !Number.isFinite(body.budget) || body.budget<0 || body.budget>1e12))) {
+        reject(400,'Registered customer, project title, scope and reasonable budget are required.');
+      }
+      const customer=await client.query(
+        'SELECT customer_id,display_name FROM apex.customers WHERE customer_id=$1',[body.customerId]);
+      if(customer.rows.length!==1)reject(404,'Authorized staging customer not found.');
+      const project={
+        id:'proj-'+crypto.randomUUID(),customerId:body.customerId,
+        projectCode:'STAGE-'+crypto.randomUUID().slice(0,8).toUpperCase(),
+        title:body.title.trim(),clientName:customer.rows[0].display_name,
+        createdByUserId:actor.userId,collaboratorUserIds:[],
+        scopeDescription:body.scopeDescription||'Internal staging project',
+        budget:body.budget??0,category:'Hardware Overhaul',status:'PROPOSALS_OPEN',
+        milestones:[],proposalsCount:0,deliverables:[],skillsRequired:[],
+        clientLocation:'',createdAt:new Date().toISOString()
+      };
+      const row=await client.query(
+        "INSERT INTO apex.customer_records "+
+        "(tenant_id,customer_id,kind,source_id,payload,created_by_staff_id) "+
+        "VALUES($1,$2,'projects',$3,$4::jsonb,$5) RETURNING payload",
+        [actor.tenantId,project.customerId,project.id,JSON.stringify(project),actor.userId]);
+      return {status:201,data:row.rows[0].payload};
+    }));
+  app.patch('/api/pg-pilot/projects/:id/access',requireAuth,
+    requireRole('BUSINESS_OWNER'),handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['userId','grant']);
+      if(Object.keys(body).length!==2 || typeof body.userId!=='string' ||
+        !body.userId || typeof body.grant!=='boolean')
+        reject(400,'Exact active staff userId and boolean grant are required.');
+      const project=await client.query(
+        "SELECT customer_id FROM apex.customer_records WHERE kind='projects' AND source_id=$1",
+        [req.params.id]);
+      if(project.rows.length!==1)reject(404,'Authorized staging project not found.');
+      const customerId=project.rows[0].customer_id;
+      const staff=await client.query(
+        "SELECT g.staff_id FROM apex.customer_grants g JOIN apex.staff u "+
+        "ON u.tenant_id=g.tenant_id AND u.staff_id=g.staff_id "+
+        "WHERE g.customer_id=$1 AND g.staff_id=$2 AND u.disabled_at IS NULL "+
+        "AND u.role IN ('ENTERPRISE_IT_HEAD','SALES_MANAGER','PROCUREMENT_LEAD')",
+        [customerId,body.userId]);
+      if(staff.rows.length!==1)reject(403,'Staff must have a registered customer grant.');
+      const result=body.grant
+        ?await client.query(
+          "INSERT INTO apex.project_shares(tenant_id,customer_id,project_id,staff_id) "+
+          "VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING staff_id",
+          [actor.tenantId,customerId,req.params.id,body.userId])
+        :await client.query(
+          "DELETE FROM apex.project_shares "+
+          "WHERE tenant_id=$1 AND customer_id=$2 AND project_id=$3 AND staff_id=$4 RETURNING staff_id",
+          [actor.tenantId,customerId,req.params.id,body.userId]);
+      return {status:200,data:{projectId:req.params.id,customerId,userId:body.userId,
+        grant:body.grant,changed:result.rows.length===1}};
+    }));
+  app.get('/api/pg-pilot/tickets',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','FIELD_ENGINEER'),
+    handler(async client=>{
+      const result=await client.query(
+        "SELECT payload FROM apex.customer_records WHERE kind='tickets' ORDER BY source_id");
+      return {status:200,data:result.rows.map(r=>r.payload)};
+    }));
+  app.post('/api/pg-pilot/tickets',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['customerId','title','priority']);
+      if(typeof body.customerId!=='string' || typeof body.title!=='string' ||
+        !body.title.trim() || body.title.trim().length>180 ||
+        (body.priority!==undefined &&
+          !['LOW','MEDIUM','HIGH','CRITICAL'].includes(String(body.priority)))) {
+        reject(400,'Registered customer, incident title and known priority are required.');
+      }
+      const customer=await client.query(
+        'SELECT customer_id FROM apex.customers WHERE customer_id=$1',[body.customerId]);
+      if(customer.rows.length!==1)reject(404,'Authorized staging customer not found.');
+      const ticket={
+        id:'tkt-'+crypto.randomUUID(),customerId:body.customerId,
+        ticketNumber:'STAGE-'+crypto.randomUUID().slice(0,8).toUpperCase(),
+        title:body.title.trim(),priority:body.priority||'MEDIUM',
+        status:'OPEN',category:'Hardware Fault',
+        reportedByUserId:actor.userId,assignedAgent:'Unassigned',
+        createdAt:new Date().toISOString()
+      };
+      const row=await client.query(
+        "INSERT INTO apex.customer_records "+
+        "(tenant_id,customer_id,kind,source_id,payload,created_by_staff_id,reported_by_staff_id) "+
+        "VALUES($1,$2,'tickets',$3,$4::jsonb,$5,$5) RETURNING payload",
+        [actor.tenantId,ticket.customerId,ticket.id,JSON.stringify(ticket),actor.userId]);
+      return {status:201,data:row.rows[0].payload};
+    }));
+  app.patch('/api/pg-pilot/tickets/:id/status',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD'),
+    handler(async(client,_actor,req)=>{
+      const body=strictBody(req.body,['status']);
+      if(Object.keys(body).length!==1 ||
+        typeof body.status!=='string' ||
+        !['OPEN','IN_PROGRESS','RESOLVED','CLOSED'].includes(body.status))
+        reject(400,'Only an approved ticket status is accepted.');
+      const result=await client.query(
+        "UPDATE apex.customer_records SET payload=jsonb_set(payload,'{status}',to_jsonb($1::text),true) "+
+        "WHERE kind='tickets' AND source_id=$2 RETURNING payload",
+        [body.status,req.params.id]);
+      if(result.rows.length!==1)reject(404,'Ticket is not visible or does not exist.');
+      return {status:200,data:result.rows[0].payload};
+    }));
+
   app.get('/api/pg-pilot/audit',requireAuth,requireRole('BUSINESS_OWNER'),
     handler(async client=>{
       const rows=await client.query(
