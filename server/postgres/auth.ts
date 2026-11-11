@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type { Express, Request, Response } from 'express';
 import type { PoolClient } from 'pg';
 import { hashPassword, verifyPassword } from '../db.ts';
-import { LoginRateLimiter, verifySetupToken, sessionCookie, expiredSessionCookie } from '../security.ts';
+import { LoginRateLimiter, verifySetupToken, deriveWorkspaceSetupToken, sessionCookie, expiredSessionCookie } from '../security.ts';
 import { hashSessionToken, readRequestToken, PostgresRuntime } from './runtime.ts';
 import { markEmptyCriticalLedgerReady } from './criticalLedger.mjs';
 import { issueSessionToken, sessionTenantHint, resolvedTenantHint } from './workspaceIdentity.ts';
@@ -134,7 +134,10 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
 
   app.post('/api/auth/setup', (req, res) => {
     void send(res, async (): Promise<Result> => {
-      const check = verifySetupToken(process.env.APEX_SETUP_TOKEN, req.body?.setupToken);
+      const expectedSetupToken = runtime.dynamicMode
+        ? deriveWorkspaceSetupToken(process.env.APEX_SETUP_TOKEN, runtime.tenantId)
+        : process.env.APEX_SETUP_TOKEN;
+      const check = verifySetupToken(expectedSetupToken ?? undefined, req.body?.setupToken);
       if (check === 'unconfigured') return {
         status: 503, payload: { success: false, error: 'Setup is locked. Configure a private APEX_SETUP_TOKEN of at least 32 characters.' }
       };
