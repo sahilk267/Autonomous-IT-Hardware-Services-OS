@@ -18,6 +18,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [setupToken, setSetupToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -37,8 +38,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         setError('Passwords do not match.');
         return;
       }
-      if (password.length < 8) {
-        setError('Password must be at least 8 characters.');
+      if (password.length < 12) {
+        setError('Password must be at least 12 characters.');
+        return;
+      }
+      if (!setupToken.trim()) {
+        setError('The server setup authorization token is required.');
         return;
       }
       if (username.trim().length < 3) {
@@ -52,7 +57,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const endpoint = isSetup ? '/api/auth/setup' : '/api/auth/login';
       const body = isSetup 
-        ? { username: username.trim(), password, name: name.trim(), email: email.trim() }
+        ? { username: username.trim(), password, name: name.trim(), email: email.trim(), setupToken }
         : { username: username.trim(), password };
 
       const res = await fetch(endpoint, {
@@ -105,7 +110,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <>
               <div className="p-3 rounded-lg bg-blue-950/40 border border-blue-900/60 text-blue-300 text-xs leading-relaxed">
                 <span className="font-semibold block mb-0.5">Initial Security Setup Required:</span>
-                Create the authoritative Business Owner & Lead Administrator credentials. No default or hardcoded credentials exist.
+                Enter the one-time server setup authorization token from your deployment environment, then create the Business Owner account. The token is never saved in the browser.
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">Setup Authorization Token</label>
+                <div className="relative">
+                  <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={setupToken}
+                    onChange={(e) => setSetupToken(e.target.value)}
+                    placeholder="APEX_SETUP_TOKEN configured on server"
+                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
+                    required
+                  />
+                </div>
               </div>
 
               <div>
@@ -164,7 +185,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={isSetup ? 'Min 8 characters (scrypt-hashed)' : 'Enter password'}
+                placeholder={isSetup ? 'Min 12 characters (scrypt-hashed)' : 'Enter password'}
                 className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
                 required
               />
