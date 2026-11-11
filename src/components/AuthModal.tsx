@@ -35,7 +35,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   React.useEffect(() => {
     if (isSetup && window.apexDesktop) {
-      window.apexDesktop.getSetupToken().then(value => {
+      window.apexDesktop.getSetupToken(isDynamicWorkspace ? workspaceId : undefined).then(value => {
         if (value) setSetupToken(value);
       }).catch(() => {});
     }
