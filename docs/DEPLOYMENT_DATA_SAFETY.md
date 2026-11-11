@@ -50,3 +50,7 @@ A local-only PostgreSQL staging import and forced-RLS schema now exist at `scrip
 ## Phase 10.2 PostgreSQL pilot is NOT production deployable
 
 The optional `APEX_PG_PILOT_ENABLED` path exists only for the loopback `NODE_ENV=staging` SQL pilot and a separate, disposable private authentication store. Enabling it in production aborts startup. Do not point any public Hostinger application or deployed customer data at this pilot; normal API storage still uses JSON. See [Phase 10.2 safety/runbook](PHASE_10_2_AUTHENTICATED_PG_PILOT_2026-11-11.md).
+
+## Phase 10.3 context signing and database safety
+
+The 10.3 staging SQL pilot uses a separate 32-byte HMAC secret stored in privileged PostgreSQL staging data and supplied through the application runtime environment, not HTTP headers. The key binds actor/tenant to one PostgreSQL transaction and backend. Database dump/restore includes this staging key: **rotate or destroy the key after any copy**; never place it in Git, logs, public Hostinger files or end-user data. Stage assets/projects/tickets/jobs are NOT live customer records; normal JSON APIs remain authoritative. See [Phase 10.3 runbook](PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).

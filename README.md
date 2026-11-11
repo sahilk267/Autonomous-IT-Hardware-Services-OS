@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-11): Phase 10.2 authenticated PostgreSQL staging CRUD pilot is implemented and CI-verified, NOT production-certified.** Main application remains single-tenant JSON-backed. The opt-in staging-only SQL pilot supports owner customer/grants and CRM writes with transaction-atomic audit; full SQL migration, enterprise tenancy, Hostinger deployment and external provider acceptance remain pending. See [Phase 10.2 report](docs/PHASE_10_2_AUTHENTICATED_PG_PILOT_2026-11-11.md).
+> **Current status (2026-11-11): Phase 10.3 staged PostgreSQL signed-identity and domain-repository increments implemented. NOT production-certified.** Customer/CRM/project/ticket/asset/field-job SQL pilot writes are tested in disposable databases; normal application API and customer data remain JSON-backed. Remaining service, procurement, finance and provider modules, fully normalized DB storage, production migration and Hostinger cutover are BLOCKED. See [Phase 10.3 report](docs/PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -127,3 +127,10 @@ A real PostgreSQL 16 schema with tenant/customer composite FKs and forced RLS, r
 - Isolated PostgreSQL and real HTTP tests cover RLS, CSRF, role drift, revocation and audit-trigger rollback; **this is not a production data cutover**.
 
 **Phase 10.2 staging reconciliation:** `npm run verify:pg:parity -- --source /absolute/private/staging-snapshot.json` runs read-only JSON-to-PostgreSQL row parity before any pilot mutations; it fails if source SHA or customer/audit payloads differ. This is not a production data synchronization tool. [Verified CI #42997972470](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42997972470): staging+parity **27/27**, authenticated PostgreSQL HTTP **41/41**, dump/restore **17/17**, existing backend and Chromium suites green.
+
+## Phase 10.3: signed SQL identity and customer-scoped service repositories
+
+- Added [signed context migration 003](migrations/postgres/003_staging_signed_context_domains.sql) and [asset/job custody migration 004](migrations/postgres/004_staging_assets_field_jobs.sql) to the disposable PostgreSQL 16 staging pilot.
+- Client-requested identity or SQL session settings cannot impersonate a different tenant/owner without a valid HMAC tied to the current PostgreSQL backend and transaction. Ephemeral secrets are generated in CI, not committed.
+- Staging-only API now covers project creation and owner sharing, incident/ticket creation and status, asset registry/manager assignment and field-job dispatch/progress. All changes are subject to signed actor, tenant/customer RLS and SQL-trigger audit; unverified customer completion actions are deliberately unavailable.
+- Existing JSON `/api/*` endpoints and app UI are **not** cut over. A staging pilot is not a production integration, provider workflow or source of truth. Read [Phase 10.3 implementation and security report](docs/PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).

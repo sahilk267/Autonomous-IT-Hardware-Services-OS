@@ -43,3 +43,7 @@ A staging-only and authenticated PostgreSQL write pilot is implemented using mig
 ### Staging source/target parity implemented in Phase 10.2
 
 The read-only `scripts/postgres/verify_staging_parity.mjs` now checks the staged JSON source SHA256, tenant identity, staff metadata, every customer-bound and owner-only staged payload, customer grants, project shares and original audit rows against PostgreSQL. It deliberately detects source or DB payload tampering without writing either side. **It is for quiescent, isolated staging snapshots only; production historical customer mapping and cutover parity remain unimplemented.** See [Phase 10.2 report](PHASE_10_2_AUTHENTICATED_PG_PILOT_2026-11-11.md).
+
+## Phase 10.3 verified direction (staging, not production)
+
+Staging migrations 003 and 004 implement a per-transaction signed PostgreSQL context and limited project/ticket/asset/field-job repositories with forced RLS, field assignment/customer membership, same-transaction audit and negative authorization tests. These are narrower than the full multi-tenant transactional domain repositories still required. Source/target parity remains pre-pilot-import-only. Details: [Phase 10.3 security and domain report](PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).
