@@ -1,6 +1,6 @@
 # Phase M — Windows Desktop & Hosted Deployment Acceptance
 
-**Status (2026-11-12):** Candidate implementation on a draft GitHub PR. No production deployment is authorized by this document. Release gates must be verified in your real Windows user profile, PostgreSQL infrastructure, and Hostinger account.
+**Status (2026-11-12):** Stage M automated PostgreSQL migration/restore and Windows x64 installer packaging have both **PASSED GitHub Actions**. This is a candidate implementation on a draft PR, **not production approval**. Still requires interactive Windows install/upgrade/uninstall, real-user data restore, code signing and live Hostinger staging acceptance.
 
 ## 1. Windows desktop installer and setup wizard
 
@@ -89,13 +89,20 @@ References: https://www.hostinger.com/support/how-to-deploy-a-nodejs-website-in-
 
 | Gate | Status |
 | --- | --- |
-| Dynamic tenant session isolation and two-tenant HTTP E2E | Requires green Phase M PostgreSQL CI |
-| Real pg_dump → pg_restore of disposable migrated tenant + RLS/finance reconciliation | Requires green Phase M PostgreSQL CI |
-| Windows x64 NSIS executable built and uploaded | Requires green Phase M Windows CI |
-| Local Windows wizard validation / encrypted configuration | Automated pure validation tests; requires interactive Windows smoke test |
+| Dynamic tenant session isolation and two-tenant HTTP E2E | **PASS** — PostgreSQL 16 CI on Phase M commit `e0756cb` |
+| Real pg_dump → pg_restore of disposable migrated tenant + RLS/finance reconciliation | **PASS** — real disposable database backup/restore and fingerprints on commit `e0756cb` |
+| Windows x64 NSIS executable built and uploaded | **PASS** — unsigned preview x64 NSIS installer built and uploaded on commit `e0756cb` |
+| Local Windows wizard validation / encrypted configuration | **PASS** pure desktop config tests on Windows CI; interactive application/DPAPI smoke test **NOT RUN** |
 | Signed installer, update security, SmartScreen and uninstall/data retention | **Not complete** |
 | Live Hostinger deployment + external acceptance on an actual domain | **Not executed** |
 | Real encrypted production PostgreSQL backup and restore/rollback drill | **Not executed** |
 | Dynamic workspace SSO, membership discovery, invite flow and per-tenant workers/Telegram webhooks | **Not implemented** |
 
 **Production is not approved until all applicable gates have real environment evidence.**
+
+
+## Phase M automated evidence (2026-11-12)
+
+- [PostgreSQL 16 CI / dynamic workspace + actual pg_dump/pg_restore PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43111633601): all lint/unit/build, Stage K/L 1–3, dynamic in-process tenant HTTP tests, real migration import/backfill, negative mutation rollback, custom-format backup and separate-DB restore + reconciliation PASS.
+- [Windows x64 NSIS packaging PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43111633699): Windows Node 22, lint, setup validation, packaged installer file existence, artifact upload PASS. Installer artifact name: `apex-it-os-windows-x64-unsigned-preview` (~130 MB ZIP), GitHub Actions artifact ID `13895244980`, available through the run's **Artifacts** panel until approximately 2026-11-25. GitHub artifact archive digest `sha256:dbd8cccaec919765af31baf2f352f9164f19179c386d4844e14d0a5fc0539909` (this is the artifact ZIP hash, not necessarily the EXE hash).
+- **Neither workflow executes an interactive Electron GUI launch**, a physical Windows install/uninstall, signed binary verification or Hostinger customer-domain deployment. Do not infer those outcomes from packaging success.
