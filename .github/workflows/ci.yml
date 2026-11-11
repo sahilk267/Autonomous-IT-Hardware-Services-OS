@@ -104,6 +104,21 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/001_staging_rls.sql
       - name: Real PostgreSQL isolation and transactional import tests
         run: npm run smoke:postgres
+      - name: Install authenticated staged-write RLS, trigger audit, and local pilot login
+        run: |
+          psql -v ON_ERROR_STOP=1 -f migrations/postgres/002_staging_authenticated_pilot.sql
+          psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE apex_pilot_login LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD 'pilot_only_local_ci_password'"
+          psql -d postgres -v ON_ERROR_STOP=1 -c "GRANT apex_pilot_writer TO apex_pilot_login"
+      - name: Authenticated SQL-backed staging CRUD and audit HTTP checks
+        env:
+          APEX_PG_PILOT_HOST: 127.0.0.1
+          APEX_PG_PILOT_DB: apex_stage_ci
+          APEX_PG_PILOT_USER: apex_pilot_login
+          APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
+          APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
+        run: |
+          npm run build
+          npm run smoke:pg:pilot
       - name: Isolated PostgreSQL snapshot and restore rehearsal
         run: |
           set -euo pipefail

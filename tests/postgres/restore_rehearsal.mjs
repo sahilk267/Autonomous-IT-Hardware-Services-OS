@@ -31,7 +31,8 @@ try {
     ['project_shares','tenant_id,project_id,staff_id'],
     ['owner_legacy_records','tenant_id,kind,source_id'],
     ['audit_events','tenant_id,event_id'],
-    ['staging_imports','tenant_id']
+    ['staging_imports','tenant_id'],
+    ['pilot_audit_events','tenant_id,event_id']
   ]){
     const sql='SELECT row_to_json(r)::text AS row FROM (SELECT * FROM apex.'+table+' ORDER BY '+sort+') r';
     const [source,target]=await Promise.all([a.query(sql),b.query(sql)]);
@@ -50,9 +51,9 @@ try {
     "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='apex' "+
     "AND c.relkind='r' AND c.relname IN "+
     "('tenants','staff','customers','customer_grants','customer_records','project_shares',"+
-    "'owner_legacy_records','audit_events','staging_imports')");
+    "'owner_legacy_records','audit_events','staging_imports','pilot_audit_events')");
   check('Every restored business table still has FORCE RLS enabled',()=>{
-    assert.equal(force.rows.length,9);
+    assert.equal(force.rows.length,10);
     assert.ok(force.rows.every(r=>r.relrowsecurity && r.relforcerowsecurity));
   });
   const reader=async(tenant,actor,query)=>{
