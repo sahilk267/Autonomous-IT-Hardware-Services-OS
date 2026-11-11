@@ -89,7 +89,7 @@ export function registerPostgresPilotRoutes(
         await client.query("SELECT set_config('apex.actor_id',$1,true)",[actor.userId]);
         await client.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
         const version=await client.query(
-          "SELECT stage_only FROM apex.schema_versions WHERE version='10.5a-idempotent-drafts'");
+          "SELECT stage_only FROM apex.schema_versions WHERE version='10.5b-normalized-service'");
         if(version.rows.length!==1 || !version.rows[0].stage_only)
           reject(503,'The required staging pilot schema is not installed.');
         const sqlUser=await client.query(
@@ -173,7 +173,7 @@ export function registerPostgresPilotRoutes(
 
   app.get('/api/pg-pilot/status',requireAuth,handler(async()=>({
     status:200,data:{stageOnly:true,storage:'postgres',applicationStorage:'json',
-      writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets','assets','jobs','quotes','proposals','rmaClaims','pilot_procurement_drafts','pilot_finance_previews'],externalTransactionsEnabled:false}
+      writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets','assets','jobs','quotes','proposals','rmaClaims','pilot_procurement_drafts','pilot_finance_previews','pilot_service_work_orders','pilot_service_work_order_events'],externalTransactionsEnabled:false}
   })));
   app.get('/api/pg-pilot/customers',requireAuth,handler(async client=>{
     const result=await client.query(
@@ -759,6 +759,112 @@ export function registerPostgresPilotRoutes(
         "subtotal,status,tax_status AS \"taxStatus\",created_by_staff_id AS \"createdByUserId\"",
         [actor.tenantId,quote.customer_id,id,actor.userId,body.quoteId,quote.payload.subtotal]);
       return {status:201,data:inserted.rows[0]};
+    }));
+
+
+  // Phase 10.5B — first normalized service repository. Two independent staging
+  // Express instances may share this SQL DB, without sharing JSON business state.
+  const serviceProjection=
+    'order_id AS id,customer_id AS "customerId",title,'+
+    'created_by_staff_id AS "createdByUserId",assigned_staff_id AS "assignedUserId",'+
+    'status,revision,created_at AS "createdAt",changed_at AS "changedAt"';
+  app.get('/api/pg-pilot/service-work-orders',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','FIELD_ENGINEER'),
+    handler(async client=>{
+      const rows=await client.query(
+        'SELECT '+serviceProjection+' FROM apex.pilot_service_work_orders ORDER BY order_id');
+      return {status:200,data:rows.rows};
+    }));
+  app.post('/api/pg-pilot/service-work-orders',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['customerId','title']);
+      if(Object.keys(body).length!==2 ||
+        typeof body.customerId!=='string' ||
+        typeof body.title!=='string' || !body.title.trim() ||
+        body.title.trim().length>180)
+        reject(400,'Registered customer and nonempty service title required.');
+      const customer=await client.query(
+        'SELECT customer_id FROM apex.customers WHERE customer_id=$1',[body.customerId]);
+      if(customer.rows.length!==1)reject(404,'Customer not visible or unregistered.');
+      const id='wko-'+crypto.randomUUID();
+      const created=await client.query(
+        'INSERT INTO apex.pilot_service_work_orders '+
+        '(tenant_id,customer_id,order_id,title,created_by_staff_id) '+
+        'VALUES($1,$2,$3,$4,$5) RETURNING '+serviceProjection,
+        [actor.tenantId,body.customerId,id,body.title.trim(),actor.userId]);
+      return {status:201,data:created.rows[0]};
+    }));
+  app.patch('/api/pg-pilot/service-work-orders/:id/assign',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['userId','expectedVersion']);
+      if(Object.keys(body).length!==2 ||
+        !(body.userId===null || (typeof body.userId==='string'&&body.userId.length>0)) ||
+        !Number.isSafeInteger(body.expectedVersion) || (body.expectedVersion as number)<1)
+        reject(400,'Provide active engineer userId (or null) and expectedVersion.');
+      const existing=await client.query(
+        'SELECT customer_id,assigned_staff_id,revision FROM apex.pilot_service_work_orders WHERE order_id=$1',
+        [req.params.id]);
+      if(existing.rows.length!==1)reject(404,'Service order not visible.');
+      if(existing.rows[0].revision!==body.expectedVersion)
+        reject(409,'Stale service revision; reload before applying the change.');
+      if(existing.rows[0].assigned_staff_id===body.userId)
+        reject(409,'Service assignment is unchanged.');
+      if(body.userId!==null){
+        const allowed=await client.query(
+          'SELECT apex.is_active_customer_field_staff($1,$2,$3) AS ok',
+          [actor.tenantId,existing.rows[0].customer_id,body.userId]);
+        if(!allowed.rows[0]?.ok)reject(403,'Engineer must have active customer membership.');
+      }
+      const updated=await client.query(
+        'UPDATE apex.pilot_service_work_orders SET assigned_staff_id=$1 '+
+        'WHERE order_id=$2 AND revision=$3 RETURNING '+serviceProjection,
+        [body.userId,req.params.id,body.expectedVersion]);
+      if(updated.rows.length!==1)reject(409,'Concurrent service update; reload revision.');
+      return {status:200,data:updated.rows[0]};
+    }));
+  app.patch('/api/pg-pilot/service-work-orders/:id/status',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','FIELD_ENGINEER'),
+    handler(async(client,_actor,req)=>{
+      const body=strictBody(req.body,['status','expectedVersion']);
+      if(Object.keys(body).length!==2 ||
+        typeof body.status!=='string' ||
+        !['EN_ROUTE','CHECKED_IN','DIAGNOSING'].includes(body.status) ||
+        !Number.isSafeInteger(body.expectedVersion) || (body.expectedVersion as number)<1)
+        reject(400,'Provide next internal service state and expectedVersion.');
+      const current=await client.query(
+        'SELECT status,revision,assigned_staff_id FROM apex.pilot_service_work_orders WHERE order_id=$1',
+        [req.params.id]);
+      if(current.rows.length!==1)reject(404,'Service order not visible or assigned.');
+      if(current.rows[0].revision!==body.expectedVersion)
+        reject(409,'Stale service revision; reload before applying the change.');
+      const next:Record<string,string>={
+        SCHEDULED:'EN_ROUTE',EN_ROUTE:'CHECKED_IN',CHECKED_IN:'DIAGNOSING'
+      };
+      if(next[current.rows[0].status]!==body.status || !current.rows[0].assigned_staff_id)
+        reject(409,'A verified engineer assignment and next sequential internal state are required.');
+      const result=await client.query(
+        'UPDATE apex.pilot_service_work_orders SET status=$1 '+
+        'WHERE order_id=$2 AND revision=$3 RETURNING '+serviceProjection,
+        [body.status,req.params.id,body.expectedVersion]);
+      if(result.rows.length!==1)reject(409,'Concurrent service progress update; reload revision.');
+      return {status:200,data:result.rows[0]};
+    }));
+  app.get('/api/pg-pilot/service-work-orders/:id/history',requireAuth,
+    requireRole('BUSINESS_OWNER'),
+    handler(async(client,_actor,req)=>{
+      const visible=await client.query(
+        'SELECT order_id FROM apex.pilot_service_work_orders WHERE order_id=$1',
+        [req.params.id]);
+      if(visible.rows.length!==1)reject(404,'Service order not visible.');
+      const events=await client.query(
+        'SELECT order_id AS "orderId",revision,changed_by_staff_id AS "changedByUserId",'+
+        'operation,previous_status AS "previousStatus",next_status AS "nextStatus",'+
+        'assigned_staff_id AS "assignedUserId",occurred_at AS "occurredAt" '+
+        'FROM apex.pilot_service_work_order_events WHERE order_id=$1 ORDER BY revision',
+        [req.params.id]);
+      return {status:200,data:events.rows};
     }));
 
   app.get('/api/pg-pilot/audit',requireAuth,requireRole('BUSINESS_OWNER'),
