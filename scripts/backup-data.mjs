@@ -19,7 +19,7 @@ function safeJson(bytes) {
   const data = JSON.parse(bytes.toString('utf8'));
   if (!data || typeof data !== 'object' || Array.isArray(data) ||
       !data.tenant || typeof data.tenant.id !== 'string' ||
-      !Array.isArray(data.users) || !Array.isArray(data.sessions)) {
+      !Array.isArray(data.users) || (data.sessions !== undefined && !Array.isArray(data.sessions))) {
     throw new Error('Invalid Apex datastore shape');
   }
   return data;
