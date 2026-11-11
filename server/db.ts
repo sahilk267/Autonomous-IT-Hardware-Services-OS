@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'node:crypto';
+import { assertSupportedStorageMode, enforceSingleTenantIntegrity, TenantScopeError } from './tenantIntegrity.ts';
 import {
   ProductItem,
   Lead,
@@ -91,7 +92,11 @@ export interface AppStoreState {
   lastUpdated: string;
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+assertSupportedStorageMode(process.env.APEX_STORAGE_MODE);
+if (process.env.NODE_ENV === 'production' && (!process.env.APEX_DATA_DIR || !path.isAbsolute(process.env.APEX_DATA_DIR))) {
+  throw new Error('APEX_DATA_DIR must be an absolute, durable, private path in production');
+}
+const DATA_DIR = process.env.APEX_DATA_DIR ? path.resolve(process.env.APEX_DATA_DIR) : path.join(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'app-store.json');
 
 export const defaultConnectors: IntegrationConnector[] = [
@@ -182,7 +187,7 @@ export function verifyPassword(password: string, salt: string, storedHash: strin
 export function getInitialCleanState(): AppStoreState {
   return {
     tenant: {
-      id: 'tenant-1',
+      id: `tenant-${crypto.randomUUID()}`,
       name: 'Apex Autonomous IT Operating System',
       gstin: '',
       state: 'Maharashtra (27)',
@@ -237,6 +242,7 @@ export class PersistentStore {
         fs.mkdirSync(this.dataDir, { recursive: true });
       }
       const cleanState = getInitialCleanState();
+      enforceSingleTenantIntegrity(cleanState);
       this.persistToDisk(cleanState);
       return cleanState;
     }
@@ -260,11 +266,13 @@ export class PersistentStore {
     }
 
     const base = getInitialCleanState();
-    return {
+    const merged: AppStoreState = {
       ...base,
       ...parsed,
       connectors: defaultConnectors
     };
+    enforceSingleTenantIntegrity(merged);
+    return merged;
   }
 
   private persistToDisk(stateToSave: AppStoreState): void {
@@ -273,13 +281,20 @@ export class PersistentStore {
     }
     stateToSave.lastUpdated = new Date().toISOString();
     const tmpFile = `${this.dbFile}.tmp.${Date.now()}.${crypto.randomBytes(4).toString('hex')}`;
-    fs.writeFileSync(tmpFile, JSON.stringify(stateToSave, null, 2), 'utf-8');
+    const fd = fs.openSync(tmpFile, 'wx', 0o600);
+    try {
+      fs.writeFileSync(fd, JSON.stringify(stateToSave, null, 2), 'utf-8');
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
     fs.renameSync(tmpFile, this.dbFile);
   }
 
   public commit<T>(operation: (draft: AppStoreState) => T): T {
     const draft = structuredClone(this.state);
     const result = operation(draft);
+    enforceSingleTenantIntegrity(draft);
     this.persistToDisk(draft);
     this.state = draft;
     return result;
@@ -300,6 +315,9 @@ export class PersistentStore {
   // Tenant
   public updateTenant(updates: Partial<TenantInfo>): TenantInfo {
     return this.commit((draft) => {
+      if (updates.id !== undefined && updates.id !== draft.tenant.id) {
+        throw new TenantScopeError('Tenant identity cannot be changed through a profile update');
+      }
       draft.tenant = { ...draft.tenant, ...updates };
       return draft.tenant;
     });
