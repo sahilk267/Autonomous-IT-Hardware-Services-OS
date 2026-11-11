@@ -467,6 +467,134 @@ try {
     assert.equal(r.status,200);
     assert.equal(r.data.data.changed,true);
   });
+
+  // Phase 10.3B: field asset/job custody is customer-scoped AND object-assigned.
+  r=await api('/api/pg-pilot/assets',{cookie:proc});
+  test('Procurement only sees granted customer A assets',()=>{
+    assert.equal(r.status,200);
+    assert.ok(r.data.data.some(a=>a.id==='asset-a'));
+    assert.ok(!r.data.data.some(a=>a.id==='asset-b'));
+  });
+  r=await post('/api/pg-pilot/assets',{
+    customerId:'cust-b',assetTag:'CI-B-ASSET-01',name:'Isolated staging router',category:'Switch'
+  },ithead);
+  test('IT head records B asset with server identity and unassigned custody',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.customerId,'cust-b');
+    assert.equal(r.data.data.status,'AVAILABLE_IN_STOCK');
+    assert.equal(r.data.data.assignedUserId,undefined);
+  });
+  const newAssetId=r.data.data.id;
+  r=await post('/api/pg-pilot/assets',{
+    customerId:'cust-b',assetTag:'ci-b-asset-01',name:'Tag collision casefold',category:'Switch'
+  },owner);
+  test('Database enforces tenant-wide case-folded unique assetTag',()=>assert.equal(r.status,409));
+  r=await post('/api/pg-pilot/assets',{
+    customerId:'cust-b',assetTag:'FORGED',name:'Private asset'
+  },field);
+  test('Field staff cannot invent a customer asset',()=>assert.equal(r.status,403));
+  r=await post('/api/pg-pilot/jobs',{
+    customerId:'cust-b',title:'On-site staging router diagnostic',address:'Site B'
+  },ithead);
+  test('IT head dispatches customer-bound staged job, not marked completed',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.customerName,'Customer B');
+    assert.equal(r.data.data.status,'SCHEDULED');
+  });
+  const newJobId=r.data.data.id;
+  r=await post('/api/pg-pilot/jobs',{
+    customerId:'cust-b',title:'Fake client job',customerName:'Customer A'
+  },ithead);
+  test('Field job cannot spoof a client name',()=>assert.equal(r.status,400));
+  r=await api('/api/pg-pilot/assets',{cookie:field});
+  test('Field cannot enumerate unassigned B asset before customer grant',()=>{
+    assert.ok(!r.data.data.some(a=>a.id===newAssetId));
+  });
+  r=await api('/api/pg-pilot/jobs',{cookie:field});
+  test('Field cannot enumerate unassigned B job',()=>{
+    assert.ok(!r.data.data.some(j=>j.id===newJobId));
+  });
+  r=await patch('/api/pg-pilot/assets/'+newAssetId+'/assign',{
+    userId:'field-a'
+  },owner);
+  test('Owner cannot assign B asset to field without B customer membership',()=>{
+    assert.equal(r.status,403);
+  });
+  r=await patch('/api/pg-pilot/jobs/'+newJobId+'/assign',{
+    userId:'field-a'
+  },ithead);
+  test('IT head cannot dispatch B job to ungranted engineer',()=>{
+    assert.equal(r.status,403);
+  });
+  r=await patch('/api/pg-pilot/customers/cust-b/access',{
+    userId:'field-a',grant:true
+  },owner);
+  test('Owner grants engineer customer-B membership explicitly',()=>assert.equal(r.status,200));
+  r=await patch('/api/pg-pilot/assets/'+newAssetId+'/assign',{
+    userId:'field-a'
+  },ithead);
+  test('IT head makes real SQL asset assignment after customer grant',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.assignedUserId,'field-a');
+  });
+  r=await patch('/api/pg-pilot/jobs/'+newJobId+'/assign',{
+    userId:'field-a'
+  },owner);
+  test('Owner assigns field job atomically with stable staff identity',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.assignedUserId,'field-a');
+    assert.equal(r.data.data.technicianName,'field-a');
+  });
+  r=await api('/api/pg-pilot/assets',{cookie:field});
+  test('Assigned engineer sees B asset and A asset with per-customer grants',()=>{
+    assert.ok(r.data.data.some(a=>a.id===newAssetId));
+    assert.ok(r.data.data.some(a=>a.id==='asset-a'));
+  });
+  r=await api('/api/pg-pilot/jobs',{cookie:field});
+  test('Assigned engineer sees B field job only after assignment',()=>{
+    assert.ok(r.data.data.some(j=>j.id===newJobId));
+  });
+  r=await patch('/api/pg-pilot/assets/'+newAssetId+'/status',{
+    status:'UNDER_REPAIR'
+  },field);
+  test('Assigned engineer can change only internal asset status',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.status,'UNDER_REPAIR');
+  });
+  r=await patch('/api/pg-pilot/jobs/'+newJobId+'/status',{
+    status:'EN_ROUTE'
+  },field);
+  test('Assigned engineer records an internal job progress state',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.status,'EN_ROUTE');
+  });
+  r=await patch('/api/pg-pilot/jobs/'+newJobId+'/status',{
+    status:'COMPLETED'
+  },field);
+  test('Field cannot claim completed customer work without verification',()=>assert.equal(r.status,400));
+  r=await api('/api/pg-pilot/audit',{cookie:owner});
+  test('Asset and job creation, assignment and progress are SQL trigger-audited',()=>{
+    assert.ok(r.data.data.some(e=>e.object===newAssetId&&e.operation==='INSERT'));
+    assert.ok(r.data.data.some(e=>e.object===newAssetId&&e.operation==='UPDATE'));
+    assert.ok(r.data.data.some(e=>e.object===newJobId&&e.operation==='INSERT'));
+    assert.ok(r.data.data.some(e=>e.object===newJobId&&e.operation==='UPDATE'));
+  });
+  r=await patch('/api/pg-pilot/customers/cust-b/access',{
+    userId:'field-a',grant:false
+  },owner);
+  test('Owner revokes B field grant in database',()=>assert.equal(r.status,200));
+  r=await api('/api/pg-pilot/assets',{cookie:field});
+  test('Revocation instantly hides previously assigned customer-B asset',()=>{
+    assert.ok(!r.data.data.some(a=>a.id===newAssetId));
+  });
+  r=await api('/api/pg-pilot/jobs',{cookie:field});
+  test('Revocation instantly hides previously assigned customer-B job',()=>{
+    assert.ok(!r.data.data.some(j=>j.id===newJobId));
+  });
+  r=await patch('/api/pg-pilot/jobs/'+newJobId+'/status',{status:'CHECKED_IN'},field);
+  test('Revoked field member cannot update job despite historical assignment',()=>{
+    assert.equal(r.status,404);
+  });
   console.log('PG AUTHENTICATED HTTP PILOT SUMMARY: '+passed+'/'+passed+' PASSED');
 } finally {
   if(child){
