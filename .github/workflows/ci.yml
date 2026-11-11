@@ -127,6 +127,8 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/005_staging_commerce_finance_drafts.sql
       - name: Install immutable request deduplication ledger and forced RLS
         run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/006_staging_idempotent_drafts.sql
+      - name: Install normalized work-order and append-only transition schema
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/007_staging_normalized_service_orders.sql
       - name: Authenticated SQL-backed staging CRUD and audit HTTP checks
         env:
           APEX_PG_PILOT_HOST: 127.0.0.1
@@ -137,6 +139,14 @@ jobs:
         run: |
           npm run build
           npm run smoke:pg:pilot
+      - name: Real two-process optimistic concurrency and SQL audit checks
+        env:
+          APEX_PG_PILOT_HOST: 127.0.0.1
+          APEX_PG_PILOT_DB: apex_stage_ci
+          APEX_PG_PILOT_USER: apex_pilot_login
+          APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
+          APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
+        run: npm run smoke:pg:multi-instance
       - name: Fail-closed PostgreSQL production cutover readiness assessment
         run: npm run smoke:pg:cutover
       - name: Isolated PostgreSQL snapshot and restore rehearsal

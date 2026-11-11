@@ -37,7 +37,9 @@ try {
     ['pilot_audit_events','tenant_id,event_id'],
     ['pilot_procurement_drafts','tenant_id,draft_id'],
     ['pilot_finance_previews','tenant_id,preview_id'],
-    ['pilot_request_keys','tenant_id,actor_staff_id,request_key']
+    ['pilot_request_keys','tenant_id,actor_staff_id,request_key'],
+    ['pilot_service_work_orders','tenant_id,order_id'],
+    ['pilot_service_work_order_events','tenant_id,order_id,revision']
   ]){
     const sql='SELECT row_to_json(r)::text AS row FROM (SELECT * FROM apex.'+table+' ORDER BY '+sort+') r';
     const [source,target]=await Promise.all([a.query(sql),b.query(sql)]);
@@ -56,9 +58,9 @@ try {
     "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='apex' "+
     "AND c.relkind='r' AND c.relname IN "+
     "('tenants','staff','customers','customer_grants','customer_records','project_shares',"+
-    "'owner_legacy_records','audit_events','staging_imports','pilot_audit_events','pilot_procurement_drafts','pilot_finance_previews','pilot_request_keys')");
+    "'owner_legacy_records','audit_events','staging_imports','pilot_audit_events','pilot_procurement_drafts','pilot_finance_previews','pilot_request_keys','pilot_service_work_orders','pilot_service_work_order_events')");
   check('Every restored business table still has FORCE RLS enabled',()=>{
-    assert.equal(force.rows.length,13);
+    assert.equal(force.rows.length,15);
     assert.ok(force.rows.every(r=>r.relrowsecurity && r.relforcerowsecurity));
   });
   const reader=async(tenant,actor,query)=>{

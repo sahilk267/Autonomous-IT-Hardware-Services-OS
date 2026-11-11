@@ -14,13 +14,14 @@ if(process.argv.length!==2 ||
 }
 const requiredVersions=[
   '10.1-staging','10.2-pilot','10.3a-context-domain',
-  '10.3b-field-assets','10.4a-commerce-drafts','10.5a-idempotent-drafts'
+  '10.3b-field-assets','10.4a-commerce-drafts','10.5a-idempotent-drafts',
+  '10.5b-normalized-service'
 ];
 const names=[
   'tenants','staff','customers','customer_grants','customer_records',
   'project_shares','owner_legacy_records','audit_events','staging_imports',
   'pilot_audit_events','pilot_procurement_drafts','pilot_finance_previews',
-  'pilot_request_keys'
+  'pilot_request_keys','pilot_service_work_orders','pilot_service_work_order_events'
 ];
 const hardBlockers=[
   'JSON_BUSINESS_RUNTIME_IS_SYSTEM_OF_RECORD',

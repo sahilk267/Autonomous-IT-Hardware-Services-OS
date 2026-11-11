@@ -25,7 +25,8 @@
     "stage:postgres": "node scripts/postgres/stage_json_to_pg.mjs",
     "verify:pg:parity": "node scripts/postgres/verify_staging_parity.mjs",
     "assess:pg:cutover": "node scripts/postgres/cutover_readiness_gate.mjs",
-    "smoke:pg:cutover": "node tests/postgres/readiness_gate_smoke.mjs"
+    "smoke:pg:cutover": "node tests/postgres/readiness_gate_smoke.mjs",
+    "smoke:pg:multi-instance": "node tests/postgres/multi_instance_workorders.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
