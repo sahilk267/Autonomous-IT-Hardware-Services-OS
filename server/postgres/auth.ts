@@ -112,9 +112,12 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
       }
 
       return transact(runtime, async client => {
-        // Lock the tenant row so two racing setup requests cannot both enroll.
+        // Serializable first-run enrollment without granting the application
+        // UPDATE permission on tenants. Advisory xact lock is keyed to the
+        // server-verified tenant UUID and released automatically on commit.
+        await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))', [runtime.tenantId]);
         const tenant = await client.query(
-          'SELECT id, display_name FROM apex_tenants WHERE id = $1 AND disabled_at IS NULL FOR UPDATE',
+          'SELECT id, display_name FROM apex_tenants WHERE id = $1 AND disabled_at IS NULL',
           [runtime.tenantId]
         );
         if (tenant.rowCount !== 1) return {
