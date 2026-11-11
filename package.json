@@ -22,7 +22,8 @@
     "smoke:postgres": "node tests/postgres/staging_rls_smoke.mjs",
     "smoke:pg:pilot": "node tests/postgres/authenticated_pilot_http.mjs",
     "smoke:pg:restore": "node tests/postgres/restore_rehearsal.mjs",
-    "stage:postgres": "node scripts/postgres/stage_json_to_pg.mjs"
+    "stage:postgres": "node scripts/postgres/stage_json_to_pg.mjs",
+    "verify:pg:parity": "node scripts/postgres/verify_staging_parity.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
