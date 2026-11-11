@@ -39,7 +39,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (value) setSetupToken(value);
       }).catch(() => {});
     }
-  }, [isSetup]);
+  }, [isSetup, isDynamicWorkspace, workspaceId]);
 
   const checkWorkspace = async () => {
     setError(null);
