@@ -116,3 +116,5 @@ A real PostgreSQL 16 schema with tenant/customer composite FKs and forced RLS, r
 - `npm run stage:postgres -- --source /absolute/private/snapshot.json` is dry-run by default (no DB connection); see the runbook for explicit local-only staging `--apply`.
 - `npm run smoke:postgres` and `npm run smoke:pg:restore` require the isolated PostgreSQL 16 CI fixture/database; normal application operation does not require PostgreSQL.
 - **No production cutover approval** until SQL-backed API authentication, every customer/tenant record, audit, data backup and verified restore are end-to-end tested.
+
+**Phase 10.1 isolated CI evidence:** [Push run #42929292843](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42929292843), [PR run #42929301929](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42929301929) — PostgreSQL 16 RLS/staging **23/23**, PostgreSQL 16 dump/restore rehearsal **16/16**, TypeScript/build PASS, existing API **96/96**, roles **133/133**, auth **7/7**, other regression **16/16**, data safety **9/9**, preflight **5/5** and Chromium **7/7**. **Not production-ready.**

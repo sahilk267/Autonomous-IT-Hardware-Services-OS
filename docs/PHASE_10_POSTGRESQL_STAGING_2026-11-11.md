@@ -44,3 +44,11 @@ Pass the database password through your secret manager/process environment, neve
 ## What the code DOES NOT do
 
 It does not migrate current production users/data, expose new PostgreSQL login, enable SQL storage for Express, perform rollback of a production service, certify legal audit immutability, or prove tenant isolation for the rest of the JSON runtime. A successful staging restore is **not** a production restore drill.
+
+### Phase 10.1 CI verification — 11 November 2026
+
+- Code commit [`38a570c`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/38a570c76907c0c8a64b3a6d9e22ed4d42aa52b0) passed [push Actions #42929292843](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42929292843) and [PR Actions #42929301929](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42929301929). Both include backend, Chromium and actual PostgreSQL 16 service jobs.
+- **PostgreSQL 16 staging 23/23:** source SHA256, no DB dry-run, denied unsafe targets and spoofed tenant/customer/credential fields, nonempty-target refusal, explicit atomic import, real SQL RLS under five roles, disabled actor denial, unauthorized cross-tenant/cross-customer joins, grant revocation and SQL-induced full transaction rollback.
+- **Separate dump/restore 16/16:** matching PG16 client binaries, backup taken from staging DB, restored into another disposable PG16 DB; nine table rowsets compared, `FORCE RLS` verified on nine tables, revoke/tenant scope tests replayed and staging import provenance checked.
+- **Original runtime CI:** TypeScript/build PASS; regression **16/16**, authentication **7/7**, HTTP API **96/96**, role/customer API **133/133**, data safety **9/9**, customer source preflight **5/5**, Node22 Chromium browser **7/7**.
+- No production PostgreSQL instance, customer records, Hostinger credentials, real payment provider or live deployment was used. These numbers are evidence of isolated source/CI acceptance only.
