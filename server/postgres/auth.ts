@@ -4,6 +4,7 @@ import type { PoolClient } from 'pg';
 import { hashPassword, verifyPassword } from '../db.ts';
 import { LoginRateLimiter, verifySetupToken, sessionCookie, expiredSessionCookie } from '../security.ts';
 import { hashSessionToken, readRequestToken, PostgresRuntime } from './runtime.ts';
+import { markEmptyCriticalLedgerReady } from './criticalLedger.mjs';
 
 interface Result {
   status: number;
@@ -149,6 +150,15 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
              VALUES ($1,'workspace_state','current',$2::jsonb)`,
             [runtime.tenantId, JSON.stringify(state)]
           );
+          // A brand-new organization starts with empty normalized ledgers.
+          // Legacy imports require the offline backfill command instead.
+          await markEmptyCriticalLedgerReady(client, runtime.tenantId);
+        } else {
+          const ready = await client.query(
+            'SELECT 1 FROM apex_critical_ledger_ready WHERE tenant_id=$1 AND schema_version=3',
+            [runtime.tenantId]
+          );
+          if (!ready.rowCount) throw new Error('Imported workspace requires reviewed critical-ledger backfill');
         }
         const token = await createSession(client, runtime, id);
         await client.query(
@@ -256,6 +266,15 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
       };
     }));
   });
+  // Prevent destructive reset of legal/financial journals and invoice history.
+  // Offline retention-aware archival must be an explicit operator workflow.
+  app.post('/api/state/reset', (_req, res) => {
+    res.status(409).json({
+      success: false,
+      error: 'PostgreSQL financial and inventory ledgers cannot be reset from the web UI.',
+    });
+  });
+
   // Membership management is server-side and RLS scoped. The existing React
   // header's role switcher never grants privileges.
   app.get('/api/admin/users', (req, res) => {
