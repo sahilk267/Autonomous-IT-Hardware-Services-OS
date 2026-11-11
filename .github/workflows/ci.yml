@@ -122,6 +122,8 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/004_staging_assets_field_jobs.sql
       - name: Install unissued procurement, finance, proposal and RMA staging policies
         run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/005_staging_commerce_finance_drafts.sql
+      - name: Install immutable request deduplication ledger and forced RLS
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/006_staging_idempotent_drafts.sql
       - name: Authenticated SQL-backed staging CRUD and audit HTTP checks
         env:
           APEX_PG_PILOT_HOST: 127.0.0.1
@@ -132,6 +134,8 @@ jobs:
         run: |
           npm run build
           npm run smoke:pg:pilot
+      - name: Fail-closed PostgreSQL production cutover readiness assessment
+        run: npm run smoke:pg:cutover
       - name: Isolated PostgreSQL snapshot and restore rehearsal
         run: |
           set -euo pipefail

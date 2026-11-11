@@ -23,7 +23,9 @@
     "smoke:pg:pilot": "node tests/postgres/authenticated_pilot_http.mjs",
     "smoke:pg:restore": "node tests/postgres/restore_rehearsal.mjs",
     "stage:postgres": "node scripts/postgres/stage_json_to_pg.mjs",
-    "verify:pg:parity": "node scripts/postgres/verify_staging_parity.mjs"
+    "verify:pg:parity": "node scripts/postgres/verify_staging_parity.mjs",
+    "assess:pg:cutover": "node scripts/postgres/cutover_readiness_gate.mjs",
+    "smoke:pg:cutover": "node tests/postgres/readiness_gate_smoke.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
