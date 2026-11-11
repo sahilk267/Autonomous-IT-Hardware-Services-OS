@@ -60,7 +60,10 @@ try {
     "has_table_privilege('apex_pilot_writer','apex.pilot_procurement_drafts','UPDATE') AS procurement_update,"+
     "has_table_privilege('apex_pilot_writer','apex.pilot_request_keys','UPDATE') AS key_update,"+
     "has_table_privilege('apex_pilot_writer','apex.pilot_request_keys','DELETE') AS key_delete,"+
-    "has_table_privilege('apex_pilot_writer','apex.pilot_audit_events','INSERT') AS audit_insert");
+    "has_table_privilege('apex_pilot_writer','apex.pilot_audit_events','INSERT') AS audit_insert,"+
+    "has_table_privilege('apex_pilot_writer','apex.pilot_service_outbox','INSERT') AS outbox_insert,"+
+    "has_table_privilege('apex_pilot_writer','apex.pilot_service_outbox','UPDATE') AS outbox_update,"+
+    "has_table_privilege('apex_pilot_writer','apex.pilot_service_outbox','DELETE') AS outbox_delete");
   const provenance=(await client.query(
     'SELECT tenant_id,sha256 FROM apex.staging_imports')).rows;
   const countRecords=await client.query('SELECT count(*)::integer n FROM apex.customer_records');
@@ -68,6 +71,11 @@ try {
     'SELECT (SELECT count(*)::integer FROM apex.pilot_procurement_drafts) AS procurement,'+
     '(SELECT count(*)::integer FROM apex.pilot_finance_previews) AS finance,'+
     '(SELECT count(*)::integer FROM apex.pilot_request_keys) AS retry_keys');
+  const outbox=(await client.query(
+    "SELECT count(*)::integer AS n,"+
+    "count(*) FILTER (WHERE delivery_state<>'PENDING_REVIEW' OR delivery_enabled "+
+    "OR delivery_attempts<>0)::integer AS unsafe FROM apex.pilot_service_outbox")).rows[0];
+  const outboxDeliveryLocked=outbox.unsafe===0;
   const schemaOk=requiredVersions.every(x=>versions.includes(x)) &&
     rls.length===names.length &&
     rls.every(x=>x.relrowsecurity && x.relforcerowsecurity);
@@ -78,7 +86,8 @@ try {
   const provenanceOk=provenance.length===1 &&
     provenance.every(x=>/^[0-9a-f]{64}$/.test(x.sha256));
   const pg16=version.rows[0].num>=160000 && version.rows[0].num<170000;
-  const stagingChecksPassed=pg16 && schemaOk && restrictedWriter && provenanceOk;
+  const stagingChecksPassed=pg16 && schemaOk && restrictedWriter &&
+    provenanceOk && outboxDeliveryLocked;
   const report={
     gate:'BLOCKED',
     mode:'READ_ONLY_STAGING_PRE_CUTOVER_ASSESSMENT',
@@ -95,7 +104,9 @@ try {
       scopedRecordCount:countRecords.rows[0].n,
       internalProcurementDrafts:countDrafts.rows[0].procurement,
       unissuedFinancePreviews:countDrafts.rows[0].finance,
-      immutableRetryKeys:countDrafts.rows[0].retry_keys
+      immutableRetryKeys:countDrafts.rows[0].retry_keys,
+      pendingInternalOutboxEvents:outbox.n,
+      outboxDeliveryLocked
     },
     blockers:hardBlockers
   };

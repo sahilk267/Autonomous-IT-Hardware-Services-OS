@@ -46,6 +46,8 @@ try {
   check('Restricted signed writer lacks update/delete and direct audit privileges',()=>{
     assert.equal(report.checks.writerHasNoElevatedOrMutationPrivileges,true);
     assert.equal(report.checks.sourceImportProvenanceValid,true);
+    assert.equal(report.checks.outboxDeliveryLocked,true);
+    assert.ok(report.checks.pendingInternalOutboxEvents>=5);
   });
   check('Gate report includes no database passwords, actor tokens or signing key',()=>{
     assert.ok(!result.stdout.includes(env.PGPASSWORD));
