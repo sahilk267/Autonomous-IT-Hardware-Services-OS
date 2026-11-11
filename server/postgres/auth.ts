@@ -136,12 +136,20 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
           [runtime.tenantId, id, username.trim(), `${salt}:${hash}`,
            (name || '').trim() || 'System Administrator', (email || '').trim()]
         );
-        const state = runtime.freshWorkspaceState(tenant.rows[0].display_name);
-        await client.query(
-          `INSERT INTO apex_records (tenant_id,record_type,record_id,payload)
-           VALUES ($1,'workspace_state','current',$2::jsonb)`,
-          [runtime.tenantId, JSON.stringify(state)]
+        // A verified legacy import may contain business records but zero
+        // usable accounts. Bootstrap must never overwrite that imported data.
+        const existingWorkspace = await client.query(
+          "SELECT 1 FROM apex_records WHERE tenant_id=$1 AND record_type='workspace_state' AND record_id='current'",
+          [runtime.tenantId]
         );
+        if (existingWorkspace.rowCount === 0) {
+          const state = runtime.freshWorkspaceState(tenant.rows[0].display_name);
+          await client.query(
+            `INSERT INTO apex_records (tenant_id,record_type,record_id,payload)
+             VALUES ($1,'workspace_state','current',$2::jsonb)`,
+            [runtime.tenantId, JSON.stringify(state)]
+          );
+        }
         const token = await createSession(client, runtime, id);
         await client.query(
           `INSERT INTO apex_audit (tenant_id,actor_id,action,target_type,target_id)
