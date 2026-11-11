@@ -706,7 +706,7 @@ app.post('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANA
     const inv = req.body;
     if (!inv || typeof inv.customer !== 'string' || !inv.customer.trim() ||
         typeof inv.amount !== 'number' || !Number.isFinite(inv.amount) ||
-        inv.amount <= 0 || !Number.isInteger(inv.amount * 100) ||
+        inv.amount <= 0 || Math.abs(inv.amount * 100 - Math.round(inv.amount * 100)) > 0.00001 ||
         (inv.status && inv.status !== 'ACTIVE')) {
       return res.status(400).json({
         success: false, error: 'A valid positive invoice amount and ACTIVE status are required',
@@ -741,6 +741,12 @@ app.post('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANA
 app.patch('/api/invoices/:invoiceNo/settle', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const { paymentReference, method } = req.body;
+    if (postgresRuntime) {
+      const already = dbStore.getState().invoices.find(i => i.invoiceNo === req.params.invoiceNo);
+      if (already?.status === 'SETTLED') {
+        return res.status(409).json({ success: false, error: 'Invoice has already been settled; duplicate settlement blocked' });
+      }
+    }
     const settled = dbStore.settleInvoice(req.params.invoiceNo, { paymentReference, method });
     if (!settled) {
       return res.status(404).json({ success: false, error: 'Invoice not found' });
