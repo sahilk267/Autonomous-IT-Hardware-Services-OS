@@ -3,7 +3,7 @@ export {};
 declare global {
   interface Window {
     apexDesktop?: {
-      getSetupToken(): Promise<string | null>;
+      getSetupToken(workspaceId?: string): Promise<string | null>;
       openSettings(): Promise<void>;
     };
   }
