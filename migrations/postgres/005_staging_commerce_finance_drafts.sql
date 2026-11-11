@@ -23,7 +23,7 @@ FOR INSERT TO apex_pilot_writer WITH CHECK (
 CREATE FUNCTION apex.can_submit_linked_project(
   p_tenant TEXT,p_customer TEXT,p_project TEXT
 ) RETURNS BOOLEAN LANGUAGE plpgsql STABLE SECURITY DEFINER
-SET search_path=pg_catalog,apex,pg_temp AS $
+SET search_path=pg_catalog,apex,pg_temp AS $predicate$
 DECLARE p apex.customer_records%ROWTYPE;
 BEGIN
   IF NOT apex.can_see_customer(p_tenant,p_customer) THEN RETURN FALSE; END IF;
@@ -35,14 +35,14 @@ BEGIN
     p.created_by_staff_id,p.assigned_staff_id,p.reported_by_staff_id,
     p.related_kind,p.related_id);
 END;
-$;
+$predicate$;
 REVOKE ALL ON FUNCTION apex.can_submit_linked_project(TEXT,TEXT,TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION apex.can_submit_linked_project(TEXT,TEXT,TEXT) TO apex_pilot_writer;
 
 CREATE FUNCTION apex.can_open_asset_rma(
   p_tenant TEXT,p_customer TEXT,p_asset TEXT
 ) RETURNS BOOLEAN LANGUAGE plpgsql STABLE SECURITY DEFINER
-SET search_path=pg_catalog,apex,pg_temp AS $
+SET search_path=pg_catalog,apex,pg_temp AS $predicate$
 DECLARE a apex.customer_records%ROWTYPE; v_role TEXT;
 BEGIN
   IF NOT apex.can_see_customer(p_tenant,p_customer) THEN RETURN FALSE; END IF;
@@ -54,7 +54,7 @@ BEGIN
   RETURN v_role IN ('BUSINESS_OWNER','ENTERPRISE_IT_HEAD') OR
     (v_role='FIELD_ENGINEER' AND a.assigned_staff_id=current_setting('apex.actor_id',true));
 END;
-$;
+$predicate$;
 REVOKE ALL ON FUNCTION apex.can_open_asset_rma(TEXT,TEXT,TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION apex.can_open_asset_rma(TEXT,TEXT,TEXT) TO apex_pilot_writer;
 
