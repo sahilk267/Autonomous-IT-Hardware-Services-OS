@@ -85,7 +85,7 @@ export function registerPostgresPilotRoutes(
       await client.query("SELECT set_config('apex.tenant_id',$1,true)",[actor.tenantId]);
       await client.query("SELECT set_config('apex.actor_id',$1,true)",[actor.userId]);
       await client.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
-      const version=await client.query("SELECT stage_only FROM apex.schema_versions WHERE version='10.3a-context-domain'");
+      const version=await client.query("SELECT stage_only FROM apex.schema_versions WHERE version='10.3b-field-assets'");
       if(version.rows.length!==1 || !version.rows[0].stage_only)
         reject(503,'The required staging pilot schema is not installed.');
       // Fail closed if JSON and SQL role/tenant records ever drift.
@@ -128,7 +128,7 @@ export function registerPostgresPilotRoutes(
 
   app.get('/api/pg-pilot/status',requireAuth,handler(async()=>({
     status:200,data:{stageOnly:true,storage:'postgres',applicationStorage:'json',
-      writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets']}
+      writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets','assets','jobs']}
   })));
   app.get('/api/pg-pilot/customers',requireAuth,handler(async client=>{
     const result=await client.query(
@@ -339,6 +339,161 @@ export function registerPostgresPilotRoutes(
         [body.status,req.params.id]);
       if(result.rows.length!==1)reject(404,'Ticket is not visible or does not exist.');
       return {status:200,data:result.rows[0].payload};
+    }));
+
+
+  // Staging-only asset custody and field-job service ledger. Assignments and
+  // human-visible labels are server-authored; the field must have customer membership.
+  app.get('/api/pg-pilot/assets',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','FIELD_ENGINEER','PROCUREMENT_LEAD'),
+    handler(async client=>{
+      const rows=await client.query(
+        "SELECT payload FROM apex.customer_records WHERE kind='assets' ORDER BY source_id");
+      return {status:200,data:rows.rows.map(r=>r.payload)};
+    }));
+  app.post('/api/pg-pilot/assets',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['customerId','assetTag','name','category']);
+      if(typeof body.customerId!=='string' ||
+         typeof body.assetTag!=='string' || !/^[A-Za-z0-9._-]{3,48}$/.test(body.assetTag) ||
+         typeof body.name!=='string' || !body.name.trim() || body.name.trim().length>160 ||
+         (body.category!==undefined &&
+           !['Laptop','Server','Switch','Firewall','Workstation','UPS'].includes(String(body.category)))) {
+        reject(400,'Registered customer, safe unique asset tag, name and known category required.');
+      }
+      const customer=await client.query(
+        'SELECT customer_id FROM apex.customers WHERE customer_id=$1',[body.customerId]);
+      if(customer.rows.length!==1)reject(404,'Customer not registered or not authorized.');
+      const asset={
+        id:'asset-'+crypto.randomUUID(),customerId:body.customerId,
+        assetTag:body.assetTag,serialNumber:'',
+        name:body.name.trim(),category:body.category||'Laptop',
+        brand:'Unverified',model:'Unverified',
+        assignedUser:'Unassigned',department:'IT',location:'',
+        purchaseDate:'',purchaseCost:0,warrantyExpiresAt:'',
+        status:'AVAILABLE_IN_STOCK'
+      };
+      const row=await client.query(
+        "INSERT INTO apex.customer_records "+
+        "(tenant_id,customer_id,kind,source_id,payload,created_by_staff_id) "+
+        "VALUES($1,$2,'assets',$3,$4::jsonb,$5) RETURNING payload",
+        [actor.tenantId,asset.customerId,asset.id,JSON.stringify(asset),actor.userId]);
+      return {status:201,data:row.rows[0].payload};
+    }));
+  app.patch('/api/pg-pilot/assets/:id/assign',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD'),
+    handler(async(client,_actor,req)=>{
+      const body=strictBody(req.body,['userId']);
+      if(Object.keys(body).length!==1 || !(body.userId===null ||
+        (typeof body.userId==='string' && body.userId.length>0)))
+        reject(400,'Provide an active FIELD_ENGINEER staff ID or null.');
+      const asset=await client.query(
+        "SELECT customer_id FROM apex.customer_records WHERE kind='assets' AND source_id=$1",[req.params.id]);
+      if(asset.rows.length!==1)reject(404,'Asset not visible or not registered.');
+      if(body.userId) {
+        const allowed=await client.query(
+          'SELECT apex.is_active_customer_field_staff($1,$2,$3) AS valid',
+          [_actor.tenantId,asset.rows[0].customer_id,body.userId]);
+        if(!allowed.rows[0]?.valid)reject(403,'Assigned engineer must have customer membership.');
+      }
+      const changed=await client.query(
+        "UPDATE apex.customer_records SET assigned_staff_id=$1, "+
+        "payload=(payload - 'assignedUserId') || "+
+        "CASE WHEN $1::text IS NULL THEN jsonb_build_object('assignedUser','Unassigned') "+
+        "ELSE jsonb_build_object('assignedUserId',$1::text,'assignedUser',$1::text) END "+
+        "WHERE kind='assets' AND source_id=$2 RETURNING payload",
+        [body.userId,req.params.id]);
+      if(changed.rows.length!==1)reject(404,'Asset not visible or not registered.');
+      return {status:200,data:changed.rows[0].payload};
+    }));
+  app.patch('/api/pg-pilot/assets/:id/status',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','FIELD_ENGINEER'),
+    handler(async(client,_actor,req)=>{
+      const body=strictBody(req.body,['status']);
+      if(Object.keys(body).length!==1 || typeof body.status!=='string' ||
+         !['IN_USE','AVAILABLE_IN_STOCK','UNDER_REPAIR','RETIRED'].includes(body.status))
+        reject(400,'Use only an authorized internal asset status.');
+      const result=await client.query(
+        "UPDATE apex.customer_records SET payload=jsonb_set(payload,'{status}',to_jsonb($1::text),true) "+
+        "WHERE kind='assets' AND source_id=$2 RETURNING payload",
+        [body.status,req.params.id]);
+      if(result.rows.length!==1)reject(404,'Asset not visible or assigned.');
+      return {status:200,data:result.rows[0].payload};
+    }));
+  app.get('/api/pg-pilot/jobs',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','FIELD_ENGINEER'),
+    handler(async client=>{
+      const rows=await client.query(
+        "SELECT payload FROM apex.customer_records WHERE kind='jobs' ORDER BY source_id");
+      return {status:200,data:rows.rows.map(r=>r.payload)};
+    }));
+  app.post('/api/pg-pilot/jobs',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['customerId','title','address']);
+      if(typeof body.customerId!=='string' || typeof body.title!=='string' ||
+        !body.title.trim() || body.title.trim().length>180 ||
+        (body.address!==undefined && (typeof body.address!=='string' || body.address.length>300))) {
+        reject(400,'Registered customer, task title and optional dispatch address required.');
+      }
+      const customer=await client.query(
+        'SELECT customer_id,display_name FROM apex.customers WHERE customer_id=$1',[body.customerId]);
+      if(customer.rows.length!==1)reject(404,'Customer not registered or authorized.');
+      const job={
+        id:'job-'+crypto.randomUUID(),customerId:body.customerId,
+        jobCode:'STAGE-'+crypto.randomUUID().slice(0,8).toUpperCase(),
+        title:body.title.trim(),customerName:customer.rows[0].display_name,
+        address:body.address||'',technicianName:'Unassigned',technicianPhone:'',
+        status:'SCHEDULED',scheduledTime:'',partsConsumed:[],customerSignatureObtained:false
+      };
+      const row=await client.query(
+        "INSERT INTO apex.customer_records "+
+        "(tenant_id,customer_id,kind,source_id,payload,created_by_staff_id) "+
+        "VALUES($1,$2,'jobs',$3,$4::jsonb,$5) RETURNING payload",
+        [actor.tenantId,job.customerId,job.id,JSON.stringify(job),actor.userId]);
+      return {status:201,data:row.rows[0].payload};
+    }));
+  app.patch('/api/pg-pilot/jobs/:id/assign',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['userId']);
+      if(Object.keys(body).length!==1 || !(body.userId===null ||
+        (typeof body.userId==='string' && body.userId.length>0)))
+        reject(400,'Choose a FIELD_ENGINEER staff ID or null.');
+      const job=await client.query(
+        "SELECT customer_id FROM apex.customer_records WHERE kind='jobs' AND source_id=$1",
+        [req.params.id]);
+      if(job.rows.length!==1)reject(404,'Field job not visible.');
+      if(body.userId) {
+        const active=await client.query(
+          'SELECT apex.is_active_customer_field_staff($1,$2,$3) AS valid',
+          [actor.tenantId,job.rows[0].customer_id,body.userId]);
+        if(!active.rows[0]?.valid)reject(403,'Engineer has no active grant to this customer.');
+      }
+      const changed=await client.query(
+        "UPDATE apex.customer_records SET assigned_staff_id=$1, "+
+        "payload=(payload - 'assignedUserId') || "+
+        "CASE WHEN $1::text IS NULL THEN jsonb_build_object('technicianName','Unassigned') "+
+        "ELSE jsonb_build_object('assignedUserId',$1::text,'technicianName',$1::text) END "+
+        "WHERE kind='jobs' AND source_id=$2 RETURNING payload",
+        [body.userId,req.params.id]);
+      if(changed.rows.length!==1)reject(404,'Field job not visible.');
+      return {status:200,data:changed.rows[0].payload};
+    }));
+  app.patch('/api/pg-pilot/jobs/:id/status',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','FIELD_ENGINEER'),
+    handler(async(client,_actor,req)=>{
+      const body=strictBody(req.body,['status']);
+      if(Object.keys(body).length!==1 || typeof body.status!=='string' ||
+         !['SCHEDULED','EN_ROUTE','CHECKED_IN','DIAGNOSING'].includes(body.status))
+        reject(400,'Only internal dispatch/progress states are supported; no verified completion claims.');
+      const changed=await client.query(
+        "UPDATE apex.customer_records SET payload=jsonb_set(payload,'{status}',to_jsonb($1::text),true) "+
+        "WHERE kind='jobs' AND source_id=$2 RETURNING payload",
+        [body.status,req.params.id]);
+      if(changed.rows.length!==1)reject(404,'Field job not visible or assigned.');
+      return {status:200,data:changed.rows[0].payload};
     }));
 
   app.get('/api/pg-pilot/audit',requireAuth,requireRole('BUSINESS_OWNER'),
