@@ -1,0 +1,51 @@
+name: Phase L Stage 3 — normalized critical ledger acceptance
+
+on:
+  push:
+    branches:
+      - feature/phase-l-stage3-database-hardening-20261112
+  pull_request:
+
+concurrency:
+  group: phase-l-stage3-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  critical-ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: stage3-ci-disposable-only
+          POSTGRES_DB: apex_phase_l_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d apex_phase_l_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:postgres
+        env:
+          PG_TEST_URL: postgres://postgres:stage3-ci-disposable-only@127.0.0.1:5432/apex_phase_l_ci
+      - run: npm run test:stage2
+        env:
+          PG_TEST_URL: postgres://postgres:stage3-ci-disposable-only@127.0.0.1:5432/apex_phase_l_ci
+      - run: npm run test:stage3
+        env:
+          PG_TEST_URL: postgres://postgres:stage3-ci-disposable-only@127.0.0.1:5432/apex_phase_l_ci
