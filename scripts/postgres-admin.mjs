@@ -220,7 +220,7 @@ async function main() {
         await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_finance_quotes TO ${role}`);
         await client.query(`GRANT SELECT, INSERT ON apex_invoice_settlements TO ${role}`);
         await client.query(`GRANT SELECT, INSERT ON apex_inventory_movements TO ${role}`);
-        await client.query(`GRANT SELECT ON apex_critical_ledger_ready TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT ON apex_critical_ledger_ready TO ${role}`);
         // No runtime DELETE on invoice/quote ledger and no UPDATE/DELETE on
         // immutable inventory movements, settlements or audit entries.
         result = { role: args[0], granted: true };
