@@ -197,7 +197,7 @@ async function main() {
         const role = safeIdentifier(args[0]);
         await client.query(`GRANT USAGE ON SCHEMA public TO ${role}`);
         await client.query(`GRANT SELECT ON apex_tenants TO ${role}`);
-        await client.query(`GRANT SELECT, INSERT ON apex_memberships TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_memberships TO ${role}`);
         await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_sessions TO ${role}`);
         await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_records TO ${role}`);
         await client.query(`GRANT SELECT, INSERT ON apex_audit TO ${role}`);
