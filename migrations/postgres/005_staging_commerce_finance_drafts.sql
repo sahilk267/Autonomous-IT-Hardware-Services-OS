@@ -13,6 +13,8 @@ FOR INSERT TO apex_pilot_writer WITH CHECK (
   AND payload->>'id'=source_id AND payload->>'customerId'=customer_id
   AND payload->>'status'='DRAFT'
   AND payload->>'taxStatus'='PENDING_CLASSIFICATION'
+  AND payload->>'createdByUserId'=created_by_staff_id
+  AND payload->>'paymentStatus' IS NULL
   AND payload->>'externalDispatch' IS NULL
   AND jsonb_typeof(payload->'subtotal')='number'
   AND (payload->>'subtotal')::numeric BETWEEN 0 AND 1000000000000
@@ -75,6 +77,9 @@ FOR INSERT TO apex_pilot_writer WITH CHECK (
   AND payload->>'submittedByUserId'=created_by_staff_id
   AND payload->>'status'='SUBMITTED'
   AND payload->>'providerVerified'='false'
+  AND payload->>'externalSubmission'='false'
+  AND jsonb_typeof(payload->'commercialBid')='number'
+  AND (payload->>'commercialBid')::numeric BETWEEN 0 AND 1000000000000
   AND apex.can_submit_linked_project(tenant_id,customer_id,related_id)
 );
 
@@ -94,6 +99,9 @@ FOR INSERT TO apex_pilot_writer WITH CHECK (
   AND payload->>'stage'='FAULT_LOGGED'
   AND payload->>'warrantyStatus'='UNVERIFIED'
   AND payload->>'oemCaseNumber'=''
+  AND payload->>'externalOemCaseOpened'='false'
+  AND payload->>'createdByUserId'=created_by_staff_id
+  AND length(trim(payload->>'faultSymptom')) BETWEEN 1 AND 1500
   AND apex.can_open_asset_rma(tenant_id,customer_id,related_id)
 );
 
