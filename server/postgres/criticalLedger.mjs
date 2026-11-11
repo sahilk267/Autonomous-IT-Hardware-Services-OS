@@ -3,6 +3,8 @@
  * PostgreSQL transactions (and RLS) are provided by the caller.
  * Existing noncritical modules still use the tenant-owned JSONB workspace.
  */
+import { verifyCriticalLedger } from './reconcileLedger.mjs';
+
 const criticalKeys = ['products', 'invoices', 'inventoryTransactions', 'quotes'];
 const invoiceStates = new Set(['ACTIVE', 'DUE_SOON', 'OVERDUE', 'SETTLED', 'CANCELLED']);
 const quoteStates = new Set([
@@ -385,6 +387,9 @@ export async function backfillCriticalLedgers(client, tenantId) {
      VALUES ($1,'migration.critical_ledgers','workspace_state','current',$2::jsonb)`,
     [tenantId, JSON.stringify(summary)]
   );
+  // If historical movement totals or settlement rows disagree, do not commit
+  // any of the backfill. The operator must reconcile before retrying.
+  await verifyCriticalLedger(client, tenantId);
   return summary;
 }
 
