@@ -42,3 +42,7 @@ Apex OS currently persists runtime data in `data/app-store.json` and that filena
 ## CI vs deployment
 
 CI tests use temporary isolated DB paths and must never be configured with production storage. Passing CI does **not** imply third-party API functionality or regulatory tax certification.
+
+## Phase 10.1 PostgreSQL staging safeguard (2026-11-11)
+
+A local-only PostgreSQL staging import and forced-RLS schema now exist at `scripts/postgres/stage_json_to_pg.mjs` and `migrations/postgres/001_staging_rls.sql`. This **does not** change production JSON storage or authorize deployment. Do not repoint `APEX_DATA_FILE`, production site config or any Hostinger connection to a staging import. Staging source must be a private, verified, quiescent snapshot outside the repository, and import is refused without explicit local `apex_stage_*` database ACK. Original JSON is read-only. See [Phase 10.1 runbook](PHASE_10_POSTGRESQL_STAGING_2026-11-11.md).

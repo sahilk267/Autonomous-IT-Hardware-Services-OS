@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-11): Phases 1–8 verified; Phase 9 customer-bound API and Chromium browser increments CI verified; NOT production-certified.** Single-tenant JSON store only. Owner-managed customer records, role/customer grants, project/proposal, service, CRM and quotation scoping, real Chromium UI tests and read-only customer migration preflight are on a draft branch. True multi-tenant database enforcement, encrypted/restore-tested backups, live provider acceptance, Hostinger migration and customer portal identity remain pending. See [Phase 9 report](docs/PHASE_9_CUSTOMER_ISOLATION_2026-11-11.md), [PostgreSQL migration blueprint](docs/POSTGRESQL_MIGRATION_BLUEPRINT.md), [tracker](docs/IMPLEMENTATION_TRACKER.md) and [private data migration notes](docs/DEPLOYMENT_DATA_SAFETY.md). CI uses isolated fixtures and is not production sign-off.
+> **Current status (2026-11-11): Phase 10.1 PostgreSQL staging schema and forced tenant/customer RLS are implemented with isolated CI tests, but production runtime remains single-tenant JSON. NOT production-certified.** Single-tenant JSON store only. Owner-managed customer records, role/customer grants, project/proposal, service, CRM and quotation scoping, real Chromium UI tests and read-only customer migration preflight are on a draft branch. True multi-tenant database enforcement, encrypted/restore-tested backups, live provider acceptance, Hostinger migration and customer portal identity remain pending. See [Phase 9 report](docs/PHASE_9_CUSTOMER_ISOLATION_2026-11-11.md), [PostgreSQL migration blueprint](docs/POSTGRESQL_MIGRATION_BLUEPRINT.md), [tracker](docs/IMPLEMENTATION_TRACKER.md) and [private data migration notes](docs/DEPLOYMENT_DATA_SAFETY.md). CI uses isolated fixtures and is not production sign-off.
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -106,3 +106,13 @@ Detailed architectural and compliance documentation is available in `docs/`:
 - This is not customer login, multi-tenant RLS, an external payment workflow or an authorization audit for every historical auxiliary collection. Deployment is blocked until migration, restore and tenant-level isolation acceptance.
 
 **Phase 9 verification:** [GitHub Actions #42902830813](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42902830813) — 16/16 isolated, 7/7 authentication, 96/96 API, 133/133 role/customer, 9/9 data safety, 5/5 read-only migration preflight, and 7/7 real Chromium role browser checks. This evidence applies only to ephemeral CI fixtures; customer-level database enforcement and actual deployment remain pending.
+
+## Phase 10.1: PostgreSQL staging, not live cutover
+
+A real PostgreSQL 16 schema with tenant/customer composite FKs and forced RLS, read-only `apex_stage_reader`, fail-closed transactional JSON staging importer, and isolated CI acceptance have been added. **The existing Express application continues using JSON**; no customer database has been moved or overwritten.
+
+- [Implementation/runbook and release gates](docs/PHASE_10_POSTGRESQL_STAGING_2026-11-11.md).
+- [Schema and policies](migrations/postgres/001_staging_rls.sql).
+- `npm run stage:postgres -- --source /absolute/private/snapshot.json` is dry-run by default (no DB connection); see the runbook for explicit local-only staging `--apply`.
+- `npm run smoke:postgres` and `npm run smoke:pg:restore` require the isolated PostgreSQL 16 CI fixture/database; normal application operation does not require PostgreSQL.
+- **No production cutover approval** until SQL-backed API authentication, every customer/tenant record, audit, data backup and verified restore are end-to-end tested.

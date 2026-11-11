@@ -1,6 +1,6 @@
 # PostgreSQL Migration Blueprint — Design Only, NOT IMPLEMENTED
 
-**Status:** Architecture design / future Phase 10 release gate. Source-of-truth remains a single-process JSON file. This document does NOT certify PostgreSQL support.
+**Status (2026-11-11):** Phase 10.1 has an actual isolated PostgreSQL 16 staging schema with forced RLS, offline one-way staging import and SQL integration tests. However **the Express application is still JSON-backed**, database writes/production migration are NOT implemented, and this blueprint remains the architecture for subsequent phases. See [Phase 10.1 implementation](PHASE_10_POSTGRESQL_STAGING_2026-11-11.md).
 
 ## Target schema (proposed)
 
@@ -30,3 +30,7 @@
 - **Release gates:** Full customer/tenant coverage across invoices/quotes/leads/procurement/knowledge/event logs, historical data decisions, actual RLS tests, GDPR/Indian privacy policies as applicable, and operator sign-off.
 
 No driver, SQL migration, RLS policy, PostgreSQL deployment, customer portal or live cutover is included in this Phase 9 implementation. This blueprint is future work.
+
+## Phase 10.1 staging-specific implementation note
+
+The verified staging schema uses `TEXT` IDs (preserving existing prefixed IDs) and a typed `customer_records` JSONB staging table rather than claiming fully normalized production UUID tables. It is deliberately **read-only for the application role**, with owner-only legacy data and a restricted local importer. Production grade SQL-backed auth, RLS writes, normalization and full multi-tenant release gates remain to be built. Do not treat the SQL staging schema as a drop-in replacement for `PersistentStore`.
