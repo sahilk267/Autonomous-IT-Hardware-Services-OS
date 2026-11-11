@@ -11,6 +11,12 @@ import {
 } from '../db.ts';
 import { enforceSingleTenantIntegrity } from '../tenantIntegrity.ts';
 import { assertDatabaseTenantId } from './tenantUnitOfWork.ts';
+import {
+  captureCriticalState,
+  readCriticalState,
+  syncCriticalState,
+  scrubWorkspaceCriticalCollections,
+} from './criticalLedger.mjs';
 
 export interface PgAccount {
   userId: string;
@@ -92,10 +98,27 @@ export class PostgresRuntime {
       void schema;
       const tables = await client.query(
         "SELECT c.relname AS tablename, c.relrowsecurity AS rowsecurity, c.relforcerowsecurity AS forcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = ANY($1)",
-        [['apex_tenants', 'apex_memberships', 'apex_sessions', 'apex_records', 'apex_audit']]
+        [[
+          'apex_tenants', 'apex_memberships', 'apex_sessions', 'apex_records', 'apex_audit',
+          'apex_catalog_products', 'apex_finance_invoices', 'apex_invoice_settlements',
+          'apex_inventory_movements', 'apex_finance_quotes', 'apex_critical_ledger_ready',
+        ]]
       );
-      if (tables.rows.length !== 5 || tables.rows.some(r => !r.rowsecurity || !r.forcerowsecurity)) {
+      if (tables.rows.length !== 11 || tables.rows.some(r => !r.rowsecurity || !r.forcerowsecurity)) {
         throw new Error('PostgreSQL RLS is missing or not forced on every tenant-owned table');
+      }
+      // Stage 3 must not serve a tenant with unsynchronized legacy JSONB
+      // finance/inventory arrays. Offline backfill is an explicit operator step.
+      const workspace = await client.query(
+        "SELECT 1 FROM apex_records WHERE tenant_id=$1 AND record_type='workspace_state' AND record_id='current'",
+        [this.tenantId]
+      );
+      if (workspace.rowCount) {
+        const ledger = await client.query(
+          'SELECT 1 FROM apex_critical_ledger_ready WHERE tenant_id=$1 AND schema_version=3',
+          [this.tenantId]
+        );
+        if (!ledger.rowCount) throw new Error('Critical ledgers not backfilled; run the reviewed offline backfill command');
       }
       await client.query('COMMIT');
     } catch (error) {
@@ -164,14 +187,24 @@ export class PostgresRuntime {
       createdAt: account.createdAt,
       expiresAt: account.expiresAt,
     } as SessionRecord] : [];
+    await readCriticalState(client, this.tenantId, state);
     enforceSingleTenantIntegrity(state);
     return state;
   }
 
-  async persistBusinessState(client: PoolClient, state: AppStoreState, req: Request, account: PgAccount | null): Promise<void> {
+  async persistBusinessState(
+    client: PoolClient, state: AppStoreState, req: Request,
+    account: PgAccount | null, criticalBefore: ReturnType<typeof captureCriticalState>
+  ): Promise<void> {
     if (state.tenant.id !== this.tenantId) throw new Error('Cross-tenant state write is forbidden');
-    // Credential material and bearer tokens live only in membership/session tables.
-    const payload = { ...state, tenantId: this.tenantId, users: [], sessions: [] };
+    // DB constraints, append-only journal and finance transitions are checked
+    // in the SAME transaction as the generic business snapshot and API audit.
+    await syncCriticalState(client, this.tenantId, criticalBefore, state, { actorId: account?.userId ?? null });
+    // Avoid duplicate sources of truth: critical records live ONLY in their
+    // normalized tables; every other module remains in workspace JSONB.
+    const payload = scrubWorkspaceCriticalCollections({
+      ...state, tenantId: this.tenantId, users: [], sessions: [],
+    });
     enforceSingleTenantIntegrity(payload);
     const result = await client.query(
       `UPDATE apex_records
@@ -205,8 +238,32 @@ export class PostgresRuntime {
         client = await this.begin();
         const token = readRequestToken(req);
         const account = await this.verifySession(client, token);
+        const webhook = req.originalUrl.split('?')[0] === '/api/telegram/webhook';
+        if (!account) {
+          if (!webhook) {
+            await client.query('ROLLBACK');
+            client.release();
+            client = undefined;
+            return res.status(401).json({ success: false, error: 'Authentication required' });
+          }
+          // Authenticate Telegram's secret before loading or locking ANY
+          // business state. The original route still checks owner/chat IDs.
+          const expected = process.env.TELEGRAM_WEBHOOK_SECRET;
+          const provided = req.get('x-telegram-bot-api-secret-token') || '';
+          const valid = !!expected && crypto.timingSafeEqual(
+            crypto.createHash('sha256').update(provided).digest(),
+            crypto.createHash('sha256').update(expected).digest(),
+          );
+          if (!valid) {
+            await client.query('ROLLBACK');
+            client.release();
+            client = undefined;
+            return res.status(401).json({ success: false, error: 'Invalid Telegram webhook authorization' });
+          }
+        }
         const unsafe = !['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase());
         const state = await this.loadBusinessState(client, unsafe, account, token);
+        const criticalBefore = captureCriticalState(state);
         const store = new PersistentStore(undefined, state);
         const originalJson = res.json.bind(res);
         let finalizing = false;
@@ -229,7 +286,7 @@ export class PostgresRuntime {
           const success = res.statusCode >= 200 && res.statusCode < 400;
           void (async () => {
             if (success && unsafe) {
-              await this.persistBusinessState(client!, store.getState(), req, account);
+              await this.persistBusinessState(client!, store.getState(), req, account, criticalBefore);
             }
             await client!.query(success ? 'COMMIT' : 'ROLLBACK');
             originalJson(body);

@@ -9,6 +9,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { verifySnapshot } from './backup-data.mjs';
+import { backfillCriticalLedgers } from '../server/postgres/criticalLedger.mjs';
+import { verifyCriticalLedger } from '../server/postgres/reconcileLedger.mjs';
 
 const migrationUrl = process.env.APEX_MIGRATION_DATABASE_URL;
 const { Client } = pg;
@@ -31,7 +33,7 @@ export async function applyMigrations(client) {
     checksum_sha256 text NOT NULL,
     applied_at timestamptz NOT NULL DEFAULT now()
   )`);
-  for (const file of ['001_tenant_core.sql', '002_runtime_memberships.sql']) {
+  for (const file of ['001_tenant_core.sql', '002_runtime_memberships.sql', '003_critical_ledgers.sql']) {
     const sql = fs.readFileSync(path.resolve('database/postgres', file), 'utf8');
     const checksum = digest(sql);
     const found = await client.query('SELECT checksum_sha256 FROM apex_schema_migrations WHERE filename = $1', [file]);
@@ -64,11 +66,22 @@ export async function provisionTenant(client, slug, displayName) {
   if (typeof displayName !== 'string' || !displayName.trim() || displayName.length > 256) {
     throw new Error('A non-empty display name of at most 256 characters is required');
   }
-  const result = await client.query(
-    'INSERT INTO apex_tenants(slug,display_name) VALUES ($1,$2) RETURNING id,slug,display_name',
-    [slug, displayName.trim()]
-  );
-  return result.rows[0];
+  const tenantId = crypto.randomUUID();
+  await client.query('BEGIN');
+  try {
+    // FORCE RLS applies to a non-superuser schema owner too. Provision with
+    // a UUID-generated session-local tenant context, not a user header.
+    await client.query("SELECT set_config('apex.tenant_id', $1, true)", [tenantId]);
+    const result = await client.query(
+      'INSERT INTO apex_tenants(id,slug,display_name) VALUES ($1,$2,$3) RETURNING id,slug,display_name',
+      [tenantId, slug, displayName.trim()]
+    );
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  }
 }
 
 const collections = [
@@ -138,6 +151,8 @@ export async function importBackup(client, tenantId, manifestPath, dryRun = true
 
   await client.query('BEGIN');
   try {
+    // Needed for operators running under a FORCE-RLS schema owner.
+    await client.query("SELECT set_config('apex.tenant_id', $1, true)", [tenantId]);
     const tenant = await client.query('SELECT id FROM apex_tenants WHERE id = $1 FOR UPDATE', [tenantId]);
     if (tenant.rowCount !== 1) throw new Error('Destination tenant must be provisioned before import');
     const rows = await client.query('SELECT count(*)::int AS n FROM apex_memberships WHERE tenant_id=$1', [tenantId]);
@@ -201,7 +216,44 @@ async function main() {
         await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_sessions TO ${role}`);
         await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_records TO ${role}`);
         await client.query(`GRANT SELECT, INSERT ON apex_audit TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON apex_catalog_products TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_finance_invoices TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_finance_quotes TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT ON apex_invoice_settlements TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT ON apex_inventory_movements TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT ON apex_critical_ledger_ready TO ${role}`);
+        // No runtime DELETE on invoice/quote ledger and no UPDATE/DELETE on
+        // immutable inventory movements, settlements or audit entries.
         result = { role: args[0], granted: true };
+        break;
+      }
+      case 'verify-critical': {
+        if (args.length !== 1) throw new Error('Usage: verify-critical <tenant-uuid>');
+        const tenantId = requireUuid(args[0]);
+        await client.query('BEGIN READ ONLY');
+        try {
+          await client.query("SELECT set_config('apex.tenant_id', $1, true)", [tenantId]);
+          result = await verifyCriticalLedger(client, tenantId);
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw error;
+        }
+        break;
+      }
+      case 'backfill-critical': {
+        if (args.length !== 1) throw new Error('Usage: backfill-critical <tenant-uuid>');
+        const tenantId = requireUuid(args[0]);
+        await client.query('BEGIN');
+        try {
+          await client.query("SELECT set_config('apex.tenant_id', $1, true)", [tenantId]);
+          const summary = await backfillCriticalLedgers(client, tenantId);
+          await client.query('COMMIT');
+          result = { tenantId, ...summary, backfilled: true };
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw error;
+        }
         break;
       }
       case 'import-dry-run':
@@ -211,7 +263,7 @@ async function main() {
         result = await importBackup(client, args[0], args[1], command !== 'import-confirm');
         break;
       default:
-        throw new Error('Commands: migrate | provision <slug> <name> | grant-runtime <role> | import-dry-run <tenant-id> <manifest> | import-confirm <tenant-id> <manifest>');
+        throw new Error('Commands: migrate | provision <slug> <name> | grant-runtime <role> | verify-critical <tenant-uuid> | backfill-critical <tenant-uuid> | import-dry-run <tenant-id> <manifest> | import-confirm <tenant-id> <manifest>');
     }
     console.log(JSON.stringify(result, null, 2));
   } finally {
