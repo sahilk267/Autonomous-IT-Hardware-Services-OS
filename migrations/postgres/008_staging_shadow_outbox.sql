@@ -14,7 +14,7 @@ CREATE TABLE apex.pilot_service_outbox (
   event_data JSONB NOT NULL CHECK (
     jsonb_typeof(event_data)='object'
     AND event_data ?& ARRAY['orderId','revision','operation','status']
-    AND jsonb_object_length(event_data)=4
+    AND event_data - 'orderId' - 'revision' - 'operation' - 'status' = '{}'::jsonb
   ),
   delivery_state TEXT NOT NULL DEFAULT 'PENDING_REVIEW'
     CHECK(delivery_state='PENDING_REVIEW'),
