@@ -18,6 +18,46 @@ FOR INSERT TO apex_pilot_writer WITH CHECK (
   AND (payload->>'subtotal')::numeric BETWEEN 0 AND 1000000000000
 );
 
+-- SECURITY DEFINER predicates avoid self-referential RLS on customer_records,
+-- while checking the authenticated signed actor and actual linked-record permission.
+CREATE FUNCTION apex.can_submit_linked_project(
+  p_tenant TEXT,p_customer TEXT,p_project TEXT
+) RETURNS BOOLEAN LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,apex,pg_temp AS $
+DECLARE p apex.customer_records%ROWTYPE;
+BEGIN
+  IF NOT apex.can_see_customer(p_tenant,p_customer) THEN RETURN FALSE; END IF;
+  SELECT * INTO p FROM apex.customer_records
+  WHERE tenant_id=p_tenant AND customer_id=p_customer
+    AND kind='projects' AND source_id=p_project;
+  IF NOT FOUND OR p.payload->>'status'<>'PROPOSALS_OPEN' THEN RETURN FALSE; END IF;
+  RETURN apex.can_see_record(p.tenant_id,p.customer_id,p.kind,p.source_id,
+    p.created_by_staff_id,p.assigned_staff_id,p.reported_by_staff_id,
+    p.related_kind,p.related_id);
+END;
+$;
+REVOKE ALL ON FUNCTION apex.can_submit_linked_project(TEXT,TEXT,TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION apex.can_submit_linked_project(TEXT,TEXT,TEXT) TO apex_pilot_writer;
+
+CREATE FUNCTION apex.can_open_asset_rma(
+  p_tenant TEXT,p_customer TEXT,p_asset TEXT
+) RETURNS BOOLEAN LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path=pg_catalog,apex,pg_temp AS $
+DECLARE a apex.customer_records%ROWTYPE; v_role TEXT;
+BEGIN
+  IF NOT apex.can_see_customer(p_tenant,p_customer) THEN RETURN FALSE; END IF;
+  v_role:=apex.active_role(p_tenant);
+  SELECT * INTO a FROM apex.customer_records
+  WHERE tenant_id=p_tenant AND customer_id=p_customer
+    AND kind='assets' AND source_id=p_asset;
+  IF NOT FOUND THEN RETURN FALSE; END IF;
+  RETURN v_role IN ('BUSINESS_OWNER','ENTERPRISE_IT_HEAD') OR
+    (v_role='FIELD_ENGINEER' AND a.assigned_staff_id=current_setting('apex.actor_id',true));
+END;
+$;
+REVOKE ALL ON FUNCTION apex.can_open_asset_rma(TEXT,TEXT,TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION apex.can_open_asset_rma(TEXT,TEXT,TEXT) TO apex_pilot_writer;
+
 -- Linked proposal is not a verified external provider bid. Permission to submit
 -- depends on actual access to the SAME customer project; FK in migration 001
 -- enforces (tenant,customer,projects,projectId) integrity.
@@ -35,15 +75,7 @@ FOR INSERT TO apex_pilot_writer WITH CHECK (
   AND payload->>'submittedByUserId'=created_by_staff_id
   AND payload->>'status'='SUBMITTED'
   AND payload->>'providerVerified'='false'
-  AND EXISTS (
-    SELECT 1 FROM apex.customer_records p WHERE
-      p.tenant_id=customer_records.tenant_id
-      AND p.customer_id=customer_records.customer_id
-      AND p.kind='projects' AND p.source_id=customer_records.related_id
-      AND apex.can_see_record(p.tenant_id,p.customer_id,p.kind,p.source_id,
-        p.created_by_staff_id,p.assigned_staff_id,p.reported_by_staff_id,
-        p.related_kind,p.related_id)
-  )
+  AND apex.can_submit_linked_project(tenant_id,customer_id,related_id)
 );
 
 -- RMA intake is linked to an actual asset. External OEM approval, warranty
@@ -62,15 +94,7 @@ FOR INSERT TO apex_pilot_writer WITH CHECK (
   AND payload->>'stage'='FAULT_LOGGED'
   AND payload->>'warrantyStatus'='UNVERIFIED'
   AND payload->>'oemCaseNumber'=''
-  AND EXISTS (
-    SELECT 1 FROM apex.customer_records a WHERE
-      a.tenant_id=customer_records.tenant_id
-      AND a.customer_id=customer_records.customer_id
-      AND a.kind='assets' AND a.source_id=customer_records.related_id
-      AND (apex.active_role(a.tenant_id) IN ('BUSINESS_OWNER','ENTERPRISE_IT_HEAD')
-        OR (apex.active_role(a.tenant_id)='FIELD_ENGINEER'
-          AND a.assigned_staff_id=current_setting('apex.actor_id',true)))
-  )
+  AND apex.can_open_asset_rma(tenant_id,customer_id,related_id)
 );
 
 -- Explicit internal procurement intake: not a purchase order and never dispatched.
