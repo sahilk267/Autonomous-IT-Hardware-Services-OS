@@ -1,7 +1,7 @@
 # Phase L Stage 3 — Normalized Critical PostgreSQL Ledgers
 
 **Date:** 2026-11-12  
-**Status:** Implementation on review branch. Production rollout **NOT approved** until Stage 2/3 CI and a real data-migration/restore rehearsal are verified.
+**Status:** Implementation on review branch. PostgreSQL 16 Stage 3 CI has passed, but production rollout **NOT approved** until a real data-migration, backup/restore and rollback rehearsal is verified.
 
 ## What Stage 3 changes
 
@@ -63,10 +63,10 @@ Every new record is checked against the authenticated tenant. An attempted cross
 
 | Check | Status |
 | --- | --- |
-| Stage 3 TypeScript/build | Await Stage 3 CI |
-| Stage 3 core validation and transition unit tests | Added; await CI |
-| PostgreSQL 16 real RLS, composite FK, invoice settlement and journal immutability integration | Added; await CI |
-| Two-tenant real production-bundle HTTP acceptance, including stock adjustment, settlement, restart and legacy import/backfill | Extended; await CI |
+| Stage 3 TypeScript/build | **PASS — GitHub Actions** |
+| Stage 3 core validation and transition unit tests | **PASS — GitHub Actions** |
+| PostgreSQL 16 real RLS, composite FK, invoice settlement and journal immutability integration | **PASS — GitHub Actions** |
+| Two-tenant real production-bundle HTTP acceptance, including stock adjustment, settlement, restart and legacy import/backfill | **PASS — GitHub Actions** |
 | Windows service/Hostinger HTTPS behind real reverse proxy | **NOT RUN** |
 | Migrating a real production dataset and verifying rollback/restore | **NOT RUN** |
 | Single-process dynamic tenant routing and self-service workspace switching | **NOT IMPLEMENTED** |
@@ -76,3 +76,8 @@ Every new record is checked against the authenticated tenant. An attempted cross
 **Operational cautions:** Each running application instance remains bound to one provisioned tenant UUID, though one PostgreSQL cluster may host multiple RLS-isolated organizations. The generic JSONB snapshot persists noncritical records and is still held within a transaction during API operations. Long external AI calls may therefore hold DB locks. A release-grade migration needs load tests, query budgets, observability, encryption/key rotation, offsite encrypted backups and tested recovery objectives.
 
 **Do not configure multi-tenant public hosting, remove old backups, or switch production DNS solely because lint/build/tests eventually pass.**
+
+
+## CI evidence
+
+[Complete Stage 3 PostgreSQL 16 acceptance](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43105839742) succeeded on commit `6ad37cfb3754aba35f90abdaf3ef6cf479a4fbab`: TypeScript lint, unit tests, build, RLS baseline, two-tenant HTTP integration and Stage 3 SQL constraints all passed. Later documentation-only commits require their own final CI verification. This test run uses **disposable** databases and is not a production migration/restore certification.
