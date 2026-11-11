@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { verifySnapshot } from './backup-data.mjs';
+import { backfillCriticalLedgers } from '../server/postgres/criticalLedger.mjs';
 
 const migrationUrl = process.env.APEX_MIGRATION_DATABASE_URL;
 const { Client } = pg;
@@ -31,7 +32,7 @@ export async function applyMigrations(client) {
     checksum_sha256 text NOT NULL,
     applied_at timestamptz NOT NULL DEFAULT now()
   )`);
-  for (const file of ['001_tenant_core.sql', '002_runtime_memberships.sql']) {
+  for (const file of ['001_tenant_core.sql', '002_runtime_memberships.sql', '003_critical_ledgers.sql']) {
     const sql = fs.readFileSync(path.resolve('database/postgres', file), 'utf8');
     const checksum = digest(sql);
     const found = await client.query('SELECT checksum_sha256 FROM apex_schema_migrations WHERE filename = $1', [file]);
@@ -201,7 +202,30 @@ async function main() {
         await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_sessions TO ${role}`);
         await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_records TO ${role}`);
         await client.query(`GRANT SELECT, INSERT ON apex_audit TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT, UPDATE, DELETE ON apex_catalog_products TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_finance_invoices TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT, UPDATE ON apex_finance_quotes TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT ON apex_invoice_settlements TO ${role}`);
+        await client.query(`GRANT SELECT, INSERT ON apex_inventory_movements TO ${role}`);
+        await client.query(`GRANT SELECT ON apex_critical_ledger_ready TO ${role}`);
+        // No runtime DELETE on invoice/quote ledger and no UPDATE/DELETE on
+        // immutable inventory movements, settlements or audit entries.
         result = { role: args[0], granted: true };
+        break;
+      }
+      case 'backfill-critical': {
+        if (args.length !== 1) throw new Error('Usage: backfill-critical <tenant-uuid>');
+        const tenantId = requireUuid(args[0]);
+        await client.query('BEGIN');
+        try {
+          await client.query("SELECT set_config('apex.tenant_id', $1, true)", [tenantId]);
+          const summary = await backfillCriticalLedgers(client, tenantId);
+          await client.query('COMMIT');
+          result = { tenantId, ...summary, backfilled: true };
+        } catch (error) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw error;
+        }
         break;
       }
       case 'import-dry-run':
@@ -211,7 +235,7 @@ async function main() {
         result = await importBackup(client, args[0], args[1], command !== 'import-confirm');
         break;
       default:
-        throw new Error('Commands: migrate | provision <slug> <name> | grant-runtime <role> | import-dry-run <tenant-id> <manifest> | import-confirm <tenant-id> <manifest>');
+        throw new Error('Commands: migrate | provision <slug> <name> | grant-runtime <role> | backfill-critical <tenant-uuid> | import-dry-run <tenant-id> <manifest> | import-confirm <tenant-id> <manifest>');
     }
     console.log(JSON.stringify(result, null, 2));
   } finally {
