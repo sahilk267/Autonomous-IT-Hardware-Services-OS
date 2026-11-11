@@ -34,7 +34,7 @@ jobs:
           --health-retries 12
     env:
       PG_TEST_URL: postgres://postgres:phase-m-disposable-only@127.0.0.1:5432/apex_phase_l_ci
-      PG_REHEARSAL_MANIFEST: ${{ runner.temp }}/phase-m-seed-fingerprint.json
+      PG_REHEARSAL_MANIFEST: /tmp/phase-m-seed-fingerprint.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
