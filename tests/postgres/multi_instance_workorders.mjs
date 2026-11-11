@@ -211,6 +211,55 @@ try {
   test('Field engineer cannot read owner-only full work-order event history',()=>{
     assert.equal(r.status,403);
   });
+
+  r=await request(a,'/api/pg-pilot/service-outbox',{cookie:ownerA});
+  test('Owner reads exactly 5 queued inert outbox messages, one per committed revision',()=>{
+    assert.equal(r.status,200);
+    const events=r.data.data.filter(e=>e.orderId===orderId);
+    assert.deepEqual(events.map(e=>e.revision),[1,2,3,4,5]);
+    assert.ok(events.every(e=>e.eventType==='service.work_order.changed' &&
+      e.deliveryState==='PENDING_REVIEW' && e.deliveryEnabled===false &&
+      e.deliveryAttempts===0));
+    assert.deepEqual(events.map(e=>Object.keys(e.data).sort()),
+      Array.from({length:5},()=>['operation','orderId','revision','status']));
+  });
+  r=await request(b,'/api/pg-pilot/service-outbox',{cookie:engineerB});
+  test('Field engineer cannot read internal outbound ledger',()=>assert.equal(r.status,403));
+  const outboxCounts=await admin.query(
+    'SELECT count(*)::integer n FROM apex.pilot_service_outbox WHERE order_id=$1',[orderId]);
+  test('Database has precisely one outbox row for each of five accepted transitions',()=>{
+    assert.equal(outboxCounts.rows[0].n,5);
+  });
+  const beforeFailure=await admin.query(
+    "SELECT (SELECT count(*)::integer FROM apex.pilot_service_work_orders) AS orders,"+
+    "(SELECT count(*)::integer FROM apex.pilot_service_work_order_events) AS events,"+
+    "(SELECT count(*)::integer FROM apex.pilot_service_outbox) AS outbox,"+
+    "(SELECT count(*)::integer FROM apex.pilot_audit_events) AS audits"
+  );
+  await admin.query(
+    "ALTER TABLE apex.pilot_service_outbox ADD CONSTRAINT test_outbox_atomic_rollback "+
+    "CHECK (delivery_state <> 'PENDING_REVIEW') NOT VALID");
+  try {
+    r=await request(b,'/api/pg-pilot/service-work-orders',{
+      method:'POST',cookie:ownerB,
+      body:{customerId:'cust-a',title:'Forced outbox audit failure fixture'}
+    });
+    test('Failed outbox insertion aborts normalized service work order HTTP transaction',()=>{
+      assert.equal(r.status,503);
+    });
+    const after=await admin.query(
+      "SELECT (SELECT count(*)::integer FROM apex.pilot_service_work_orders) AS orders,"+
+      "(SELECT count(*)::integer FROM apex.pilot_service_work_order_events) AS events,"+
+      "(SELECT count(*)::integer FROM apex.pilot_service_outbox) AS outbox,"+
+      "(SELECT count(*)::integer FROM apex.pilot_audit_events) AS audits"
+    );
+    test('Outbox failure rolls back service, history, pending message and audit together',()=>{
+      assert.deepEqual(after.rows,beforeFailure.rows);
+    });
+  }finally{
+    await admin.query('ALTER TABLE apex.pilot_service_outbox DROP CONSTRAINT test_outbox_atomic_rollback');
+  }
+
   const audit=await admin.query(
     "SELECT count(*)::integer n FROM apex.pilot_audit_events "+
     "WHERE entity='pilot_service_work_orders' AND object_id=$1",[orderId]);
@@ -245,6 +294,21 @@ try {
       keyClient.query('DELETE FROM apex.pilot_service_work_order_events WHERE order_id=$1',[orderId]),
       e=>e.code==='42501');
     test('SQL writer cannot tamper with immutable normalized transition history',()=>{});
+    await keyClient.query('ROLLBACK');
+    await keyClient.query('BEGIN');
+    await keyClient.query('SET LOCAL ROLE apex_pilot_writer');
+    await assert.rejects(
+      keyClient.query(
+        "UPDATE apex.pilot_service_outbox SET delivery_enabled=true WHERE order_id=$1",
+        [orderId]),e=>e.code==='42501');
+    test('Restricted SQL writer cannot enable event delivery directly',()=>{});
+    await keyClient.query('ROLLBACK');
+    await keyClient.query('BEGIN');
+    await keyClient.query('SET LOCAL ROLE apex_pilot_writer');
+    await assert.rejects(
+      keyClient.query('DELETE FROM apex.pilot_service_outbox WHERE order_id=$1',[orderId]),
+      e=>e.code==='42501');
+    test('Restricted SQL writer cannot erase pending outbox or audit evidence',()=>{});
     await keyClient.query('ROLLBACK');
     await keyClient.query('BEGIN');
     await keyClient.query('SET LOCAL ROLE apex_pilot_writer');
