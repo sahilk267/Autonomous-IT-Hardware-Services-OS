@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const net = require('node:net');
+const os = require('node:os');
+const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
 const { validateDesktopSettings, environmentForDesktop } = require('./config.cjs');
 
@@ -52,7 +54,7 @@ async function selectPort() {
 function restrictNavigation(window, allowed) {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, nextUrl) => {
-    if (nextUrl !== allowed) event.preventDefault();
+    if (nextUrl !== allowed()) event.preventDefault();
   });
   window.webContents.on('will-redirect', (event) => event.preventDefault());
 }
@@ -82,7 +84,7 @@ function setupDialog() {
     setupWindow = null;
     if (!backend && !closing) app.quit();
   });
-  restrictNavigation(setupWindow, 'file://' + setupFile().replace(/\\/g, '/'));
+  restrictNavigation(setupWindow, () => pathToFileURL(setupFile()).href);
 }
 function mainAppWindow() {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -101,21 +103,46 @@ function mainAppWindow() {
   });
   const appUrl = `http://127.0.0.1:${backendPort}/`;
   void mainWindow.loadURL(appUrl);
-  restrictNavigation(mainWindow, appUrl);
+  restrictNavigation(mainWindow, () => `http://127.0.0.1:${backendPort}/`);
   mainWindow.on('closed', () => mainWindow = null);
+}
+// Only a dead LOCAL PID's own recorded lock may be reclaimed. Another
+// running service, symlink or unknown host always fails closed.
+function cleanupDeadDesktopLock(directory, expectedPid = null) {
+  const lockPath = path.join(directory, 'app-store.json.lock');
+  try {
+    const stat = fs.lstatSync(lockPath);
+    if (!stat.isFile() || stat.isSymbolicLink()) return;
+    const original = fs.readFileSync(lockPath, 'utf8');
+    const lock = JSON.parse(original);
+    if (!Number.isInteger(lock.pid) || lock.pid <= 1 || lock.host !== os.hostname() ||
+        (expectedPid !== null && expectedPid !== lock.pid)) return;
+    try { process.kill(lock.pid, 0); return; } catch (error) {
+      if (error.code !== 'ESRCH') return; // EPERM is a live/unknown writer.
+    }
+    if (fs.readFileSync(lockPath, 'utf8') === original) fs.unlinkSync(lockPath);
+  } catch {
+    // Unknown lock owner: preserve lock; backend must fail startup.
+  }
 }
 async function stopBackend() {
   const old = backend;
   backend = null;
-  if (!old || old.exitCode !== null) return;
-  old.kill('SIGTERM');
-  await Promise.race([
-    new Promise(resolve => old.once('exit', resolve)),
-    new Promise(resolve => setTimeout(resolve, 3500)),
-  ]);
-  if (old.exitCode === null) old.kill();
+  if (!old) return;
+  if (old.exitCode === null && old.signalCode === null) {
+    old.kill('SIGTERM');
+    await Promise.race([
+      new Promise(resolve => old.once('exit', resolve)),
+      new Promise(resolve => setTimeout(resolve, 3500)),
+    ]);
+    if (old.exitCode === null && old.signalCode === null) old.kill();
+  }
+  if (currentSettings?.storageMode === 'single') {
+    cleanupDeadDesktopLock(currentSettings.dataDirectory, old.pid);
+  }
 }
 async function startBackend(settings) {
+  if (settings.storageMode === 'single') cleanupDeadDesktopLock(settings.dataDirectory);
   const port = await selectPort();
   const runtimeEnv = environmentForDesktop(settings, port, settings.setupToken,
     path.join(process.resourcesPath, 'web'));
