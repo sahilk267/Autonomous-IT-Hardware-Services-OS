@@ -91,7 +91,7 @@ export class PostgresRuntime {
       );
       void schema;
       const tables = await client.query(
-        "SELECT tablename, rowsecurity, forcerowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY($1)",
+        "SELECT c.relname AS tablename, c.relrowsecurity AS rowsecurity, c.relforcerowsecurity AS forcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = ANY($1)",
         [['apex_tenants', 'apex_memberships', 'apex_sessions', 'apex_records', 'apex_audit']]
       );
       if (tables.rows.length !== 5 || tables.rows.some(r => !r.rowsecurity || !r.forcerowsecurity)) {
