@@ -105,7 +105,7 @@ async function prepare() {
     );
     await owner.query('GRANT USAGE ON SCHEMA public TO apex_stage2_runtime');
     await owner.query('GRANT SELECT ON apex_tenants TO apex_stage2_runtime');
-    await owner.query('GRANT SELECT, INSERT ON apex_memberships TO apex_stage2_runtime');
+    await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_memberships TO apex_stage2_runtime');
     await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_sessions TO apex_stage2_runtime');
     await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_records TO apex_stage2_runtime');
     await owner.query('GRANT SELECT, INSERT ON apex_audit TO apex_stage2_runtime');
