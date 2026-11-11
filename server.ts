@@ -7,6 +7,7 @@ import { createServer as createViteServer } from 'vite';
 import { dbStore, defaultConnectors, hashPassword, verifyPassword } from './server/db.ts';
 import { UserRole } from './src/types.ts';
 import { LoginRateLimiter, verifySetupToken, sessionCookie, expiredSessionCookie } from './server/security.ts';
+import { allowedOrigins, writeOriginGuard } from './server/writeOrigin.ts';
 
 const app = express();
 
@@ -27,7 +28,13 @@ const PORT = resolvePort();
 const loginRateLimiter = new LoginRateLimiter();
 const isProduction = process.env.NODE_ENV === 'production';
 
-app.use(express.json());
+// Fail startup on invalid production origin configuration. Do not derive trust
+// from an attacker-controlled Host/X-Forwarded-Host header.
+app.use(writeOriginGuard(allowedOrigins(
+  process.env.APEX_ALLOWED_ORIGINS || process.env.APP_URL || 'http://localhost:3000',
+  process.env.NODE_ENV === 'production'
+)));
+app.use(express.json({ limit: '1mb' }));
 
 // Cookie parser helper
 function parseCookies(cookieHeader?: string): Record<string, string> {

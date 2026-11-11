@@ -12,3 +12,4 @@ data/app-store.json
 data/app-store*.json
 data/*.backup*
 data/*.corrupted.*
+data/*.lock

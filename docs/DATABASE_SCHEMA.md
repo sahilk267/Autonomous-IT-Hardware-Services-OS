@@ -1,4 +1,6 @@
-# Database Schema Specification
+# Database Schema Specification — Current JSON Runtime
+
+> **Runtime caveat:** This document describes a **single-tenant JSON store**, not a working multi-tenant relational database. Each deployment currently has exactly one tenant. The PostgreSQL/RLS schema in `database/postgres/001_tenant_core.sql` is separately tested in disposable CI but not connected to the application. See [Phase L migration plan](PHASE_L_TENANCY_AND_MIGRATION.md).
 
 **Application**: Apex Autonomous IT Hardware & Services Operating System  
 **Storage Engine**: Atomic JSON Persistent Store (`data/app-store.json`)  
@@ -8,7 +10,7 @@
 
 ## 1. Schema Overview
 
-The database uses a schema-enforced, single-tenant/multi-tenant capable model structured around 22 primary collections:
+The existing JSON store is a single-tenant model organized around multiple collections. TypeScript interfaces do not supply database-level multi-tenant isolation or transactional foreign keys:
 
 ```
 AppStoreState

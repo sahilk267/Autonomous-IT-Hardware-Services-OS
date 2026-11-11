@@ -1,4 +1,6 @@
-# Production Readiness & Hardening Checklist
+# Production Readiness & Hardening Checklist (Historical Snapshot)
+
+> **CURRENT RELEASE STATUS: NOT production multi-tenant ready.** This older checklist verifies selected zero-mock and build properties, not a safe public multi-tenant deployment. Phase K and [Phase L](PHASE_L_TENANCY_AND_MIGRATION.md) supersede its security/release assertions; PostgreSQL runtime migration, end-to-end auth/tenant verification and live deployment are pending.
 
 **Application**: Apex Autonomous IT Hardware & Services Operating System  
 **Deployment Profile**: Enterprise Production / Hostinger Shared Hosting / Cloud Run  
@@ -11,7 +13,7 @@
 | Category | Item | Status | Verification Detail |
 | :--- | :--- | :--- | :--- |
 | **Data Integrity** | Zero Mock Records | ✅ PASS | Startup state starts with 0 products, 0 tickets, 0 jobs, 0 invoices. |
-| **Data Integrity** | Persistence Mechanism | ✅ PASS | Atomic file writes with `.tmp` staging + `fs.renameSync` + pre-mutation backups. |
+| **Data Integrity** | Persistence Mechanism | ✅ PASS | Atomic JSON replacement; **no automatic pre-mutation backup exists**. Phase L provides a manually invoked checksum-verified backup script. |
 | **Integration** | Honest Connectors | ✅ PASS | Unset API keys report `NOT_CONFIGURED` (no simulated connected counts). |
 | **Integration** | AI Failover | ✅ PASS | Gemini API calls return explicit HTTP 503 with instructions if key is missing. |
 | **Integration** | Payment Gateways | ✅ PASS | Razorpay/UPI endpoints return honest 503 when unconfigured. |
@@ -21,7 +23,7 @@
 | **Build & Bundle** | Static & Server Bundles | ✅ PASS | Vite produces optimized assets; `esbuild` creates single `dist/server.cjs`. |
 | **Routing** | SPA History Fallback | ✅ PASS | `public/.htaccess` rewrite rules handle deep links and page refreshes. |
 | **Code Quality** | Type Safety | ✅ PASS | 100% TypeScript compliance (`tsc --noEmit` exits with 0 errors). |
-| **Automated Tests**| Regression Test Suite | ✅ PASS | `tests/zero_mock_data.test.ts` passes 9/9 assertions via `npm test`. |
+| **Automated Tests**| Regression Test Suite | ✅ PASS | `Phase K/L automated tests run via GitHub Actions; see latest PR checks. |
 
 ---
 
