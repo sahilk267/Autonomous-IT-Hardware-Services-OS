@@ -470,7 +470,7 @@ app.post('/api/rfqs/:id/quotes', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/rfqs/:id/dispatch-po', requireAuth, (req, res) => {
+app.post('/api/rfqs/:id/dispatch-po', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const { supplierId } = req.body;
     const updated = dbStore.dispatchPO(req.params.id, supplierId);
@@ -501,7 +501,7 @@ app.get('/api/quotes', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().quotes });
 });
 
-app.post('/api/quotes', requireAuth, (req, res) => {
+app.post('/api/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
     const quote = req.body;
     if (!quote || !quote.customerName) {
@@ -627,7 +627,7 @@ app.get('/api/invoices', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().invoices });
 });
 
-app.post('/api/invoices', requireAuth, (req, res) => {
+app.post('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
     const inv = req.body;
     if (!inv || !inv.customer || !inv.amount) {
@@ -1258,7 +1258,12 @@ app.post('/api/telegram/webhook', (req, res) => {
     if (!expectedSecret) {
       return res.status(503).json({ success: false, error: 'Telegram webhook is not configured with TELEGRAM_WEBHOOK_SECRET' });
     }
-    if (secret !== expectedSecret) {
+    const providedSecret = typeof secret === 'string' ? secret : '';
+    const validSecret = crypto.timingSafeEqual(
+      crypto.createHash('sha256').update(providedSecret).digest(),
+      crypto.createHash('sha256').update(expectedSecret).digest()
+    );
+    if (!validSecret) {
       return res.status(401).json({ success: false, error: 'Unauthorized: Invalid Telegram webhook secret token' });
     }
 
@@ -1269,6 +1274,9 @@ app.post('/api/telegram/webhook', (req, res) => {
 
     const authorizedChat = process.env.TELEGRAM_AUTHORIZED_CHAT_ID;
     const authorizedUser = process.env.TELEGRAM_AUTHORIZED_USER_ID;
+    if (!authorizedUser || !authorizedChat) {
+      return res.status(503).json({ success: false, error: 'Telegram owner authorization requires both TELEGRAM_AUTHORIZED_USER_ID and TELEGRAM_AUTHORIZED_CHAT_ID.' });
+    }
 
     if (update.callback_query) {
       const from = update.callback_query.from;
