@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import pg from 'pg';
 import { applyMigrations, provisionTenant } from '../scripts/postgres-admin.mjs';
 import { issueSessionToken, sessionTenantHint } from '../server/postgres/workspaceIdentity.ts';
+import { deriveWorkspaceSetupToken } from '../server/security.ts';
 
 const testConnection = process.env.PG_TEST_URL;
 const u = testConnection && new URL(testConnection);
@@ -91,11 +92,17 @@ test('one Node server handles two PostgreSQL workspaces without cross-workspace 
     });
     assert.equal(malformed.status, 400);
     const aSetup = await ask(base, '/api/auth/setup', 'POST', {
-      workspaceId: a.id, username: 'owner', password: 'valid-pass-A-2026', setupToken,
+      workspaceId: a.id, username: 'owner', password: 'valid-pass-A-2026', setupToken: deriveWorkspaceSetupToken(setupToken, a.id),
     });
     assert.equal(aSetup.status, 201, JSON.stringify(aSetup.data));
+    // Tenant A's enrollment token is NOT accepted by tenant B.
+    const crossSetup = await ask(base, '/api/auth/setup', 'POST', {
+      workspaceId: b.id, username: 'attacker', password: 'valid-pass-T-2026',
+      setupToken: deriveWorkspaceSetupToken(setupToken, a.id),
+    });
+    assert.equal(crossSetup.status, 403);
     const bSetup = await ask(base, '/api/auth/setup', 'POST', {
-      workspaceId: b.id, username: 'owner', password: 'valid-pass-B-2026', setupToken,
+      workspaceId: b.id, username: 'owner', password: 'valid-pass-B-2026', setupToken: deriveWorkspaceSetupToken(setupToken, b.id),
     });
     assert.equal(bSetup.status, 201, JSON.stringify(bSetup.data));
     assert.equal(sessionTenantHint(decodeURIComponent(aSetup.cookie.split('=')[1])), a.id);
