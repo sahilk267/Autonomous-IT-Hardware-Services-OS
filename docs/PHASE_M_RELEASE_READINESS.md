@@ -47,6 +47,13 @@ Each organization is provisioned by the database owner with:
 node scripts/postgres-admin.mjs provision example-org "Example Organization"
 node scripts/postgres-admin.mjs grant-runtime apex_runtime
 ```
+**Tenant-specific first-time enrollment token:** Never give administrators the shared deployment-root `APEX_SETUP_TOKEN`. After provisioning a new tenant, derive its unique one-time setup authorization token in a private operator shell using the **same root secret** configured in the server:
+```bash
+# Never commit the root to Git or send it to another tenant's administrator.
+APEX_SETUP_TOKEN=<server-root-secret> node scripts/workspace-setup-token.mjs <tenant-uuid>
+```
+Give only that 64-character derived token to the new workspace administrator. The server refuses a token derived for any *different* tenant. Windows desktop generates the selected workspace's derived token automatically when setup is still required. Rotate the root after all intended first-run tenant enrollments and coordinate pending provisioning. This is **not** a self-service public signup system.
+
 The provisioned UUID goes in the login UI. Users select a workspace and authenticate with **that workspace's own username and password**; the server issues a high-entropy session token including an untrusted tenant UUID *routing hint*. Every protected request hashes the full token, verifies the matching member/session in PostgreSQL under RLS, and checks active role/account membership. Substituting UUID prefixes, guessing UUIDs or sending tenant IDs in JSON cannot authorize data access.
 
 **Scope:** Multiple provisioned organizations now share one Node process and PostgreSQL cluster with tenant-isolated API sessions. Switching clears frontend data and revokes the previous session, then requires fresh login. This is **not** automatic cross-workspace SSO, a workspace directory, self-service company signup, shared memberships, or background worker multi-tenant scheduling. Existing fixed-mode sessions (legacy 64-char tokens) require **reauthentication** when migrating to dynamic mode. Shared Telegram webhook callbacks are disabled in dynamic mode until per-tenant webhook URL+secret binding is designed. Never pass client-provided tenant headers directly to SQL.
