@@ -1,6 +1,6 @@
 # Production Readiness & Hardening Checklist (Historical Snapshot)
 
-> **CURRENT RELEASE STATUS: NOT production multi-tenant ready.** This older checklist verifies selected zero-mock and build properties, not a safe public multi-tenant deployment. Phase K and [Phase L](PHASE_L_TENANCY_AND_MIGRATION.md) supersede its security/release assertions; PostgreSQL runtime migration, end-to-end auth/tenant verification and live deployment are pending.
+> **CURRENT RELEASE STATUS: NOT PRODUCTION APPROVED.** This is a HISTORICAL checklist, not an authorization to deploy. Phase L Stage 3 verifies normalized PostgreSQL critical ledgers in disposable CI. Phase M adds a Windows preview installer, dynamic workspace routing and database restore rehearsal. Live Windows installer smoke testing, signed distribution, Hostinger staging, real production data recovery and cross-workspace background integration acceptance remain open. See [Phase M release gates](PHASE_M_RELEASE_READINESS.md).
 
 **Application**: Apex Autonomous IT Hardware & Services Operating System  
 **Deployment Profile**: Enterprise Production / Hostinger Shared Hosting / Cloud Run  
@@ -67,7 +67,7 @@ M365_CLIENT_SECRET=...
    - `package.json`
    - `.env`
 3. In Hostinger hPanel > **Node.js**:
-   - Set **Node.js version** to `20.x`.
+   - Set **Node.js version** to `22.x` where available.
    - Set **Application Startup File** to `server.js`.
    - Set environment variables (`GEMINI_API_KEY`, `NODE_ENV=production`, `PORT`).
    - Run **NPM Install** (`npm install --omit=dev`).
