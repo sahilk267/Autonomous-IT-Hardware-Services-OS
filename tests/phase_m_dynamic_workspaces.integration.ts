@@ -21,7 +21,7 @@ const setupToken = crypto.randomBytes(32).toString('hex');
 const { Client } = pg;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function ask(base, pathname, method = 'GET', payload, cookie) {
+async function ask(base: string, pathname: string, method = 'GET', payload?: any, cookie?: string) {
   const response = await fetch(base + pathname, {
     method,
     headers: {
