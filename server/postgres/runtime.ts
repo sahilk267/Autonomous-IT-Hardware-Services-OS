@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { Pool, type PoolClient } from 'pg';
 import type { Request, Response, NextFunction } from 'express';
 import {
@@ -11,6 +12,7 @@ import {
 } from '../db.ts';
 import { enforceSingleTenantIntegrity } from '../tenantIntegrity.ts';
 import { assertDatabaseTenantId } from './tenantUnitOfWork.ts';
+import { SESSION_TOKEN_RE, sessionTenantHint, validSessionToken } from './workspaceIdentity.ts';
 import {
   captureCriticalState,
   readCriticalState,
@@ -34,14 +36,14 @@ export function hashSessionToken(token: string): Buffer {
 }
 
 export function readRequestToken(req: Request): string | null {
-  const bearer = req.headers.authorization?.match(/^Bearer\s+([0-9a-f]{64})$/i);
-  if (bearer) return bearer[1];
+  const bearer = req.headers.authorization?.match(/^Bearer\s+([^\s]+)$/i);
+  if (bearer) return validSessionToken(bearer[1]) ? bearer[1] : null;
   const cookie = req.headers.cookie?.split(';').map(v => v.trim())
     .find(v => v.startsWith('apex_session='));
   if (!cookie) return null;
   try {
     const token = decodeURIComponent(cookie.slice('apex_session='.length));
-    return /^[0-9a-f]{64}$/i.test(token) ? token : null;
+    return validSessionToken(token) ? token : null;
   } catch {
     return null;
   }
@@ -49,13 +51,41 @@ export function readRequestToken(req: Request): string | null {
 
 export class PostgresRuntime {
   readonly pool: Pool;
-  readonly tenantId: string;
+  readonly dynamicMode: boolean;
+  private readonly configuredTenantId: string | null;
+  private readonly tenantContext = new AsyncLocalStorage<string>();
+
+  get tenantId(): string {
+    const current = this.tenantContext.getStore() ?? this.configuredTenantId;
+    if (!current) throw new Error('PostgreSQL request requires a scoped workspace identity');
+    return current;
+  }
+
+  withTenant<T>(tenantId: string, operation: () => T): T {
+    const verifiedFormat = assertDatabaseTenantId(tenantId);
+    if (!this.dynamicMode && verifiedFormat !== this.configuredTenantId) {
+      throw new Error('Tenant override forbidden in fixed-workspace mode');
+    }
+    // Tenant routing hint is NOT an authorization decision. Every business
+    // request still verifies the hashed session against the RLS table.
+    return this.tenantContext.run(verifiedFormat, operation);
+  }
 
   constructor(environment: NodeJS.ProcessEnv = process.env) {
     if (environment.APEX_STORAGE_MODE !== 'postgres') throw new Error('PostgreSQL runtime requires APEX_STORAGE_MODE=postgres');
     if (!environment.DATABASE_URL) throw new Error('DATABASE_URL is required for PostgreSQL runtime');
-    if (!environment.APEX_TENANT_ID) throw new Error('APEX_TENANT_ID must identify a provisioned organization');
-    this.tenantId = assertDatabaseTenantId(environment.APEX_TENANT_ID);
+    this.dynamicMode = environment.APEX_TENANT_MODE === 'dynamic';
+    if (environment.APEX_TENANT_MODE && !['fixed', 'dynamic'].includes(environment.APEX_TENANT_MODE)) {
+      throw new Error('APEX_TENANT_MODE must be fixed or dynamic');
+    }
+    if (!this.dynamicMode && !environment.APEX_TENANT_ID) {
+      throw new Error('APEX_TENANT_ID must identify a provisioned organization');
+    }
+    if (this.dynamicMode && environment.APEX_TENANT_ID) {
+      throw new Error('APEX_TENANT_ID must be unset in dynamic workspace mode to prevent ambiguous routing');
+    }
+    this.configuredTenantId = environment.APEX_TENANT_ID
+      ? assertDatabaseTenantId(environment.APEX_TENANT_ID) : null;
     this.pool = new Pool({
       connectionString: environment.DATABASE_URL,
       max: 10,
@@ -78,24 +108,24 @@ export class PostgresRuntime {
   }
 
   async preflight(): Promise<void> {
-    const client = await this.begin();
+    const client = this.dynamicMode ? await this.pool.connect() : await this.begin();
     try {
+      if (this.dynamicMode) await client.query('BEGIN');
       const privileges = await client.query(
         'SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user'
       );
       if (!privileges.rows.length || privileges.rows[0].rolsuper || privileges.rows[0].rolbypassrls) {
         throw new Error('PostgreSQL application role must not be superuser or BYPASSRLS');
       }
-      const scoped = await client.query(
-        'SELECT id FROM apex_tenants WHERE id = $1 AND disabled_at IS NULL',
-        [this.tenantId]
-      );
-      if (scoped.rowCount !== 1) throw new Error('APEX_TENANT_ID is not an active provisioned tenant');
-      const schema = await client.query(
-        'SELECT display_name, email FROM apex_memberships WHERE tenant_id = $1 LIMIT 0',
-        [this.tenantId]
-      );
-      void schema;
+      if (!this.dynamicMode) {
+        const scoped = await client.query(
+          'SELECT id FROM apex_tenants WHERE id = $1 AND disabled_at IS NULL',
+          [this.tenantId]
+        );
+        if (scoped.rowCount !== 1) throw new Error('APEX_TENANT_ID is not an active provisioned tenant');
+      }
+      // Schema check does not enumerate tenant membership or expose it.
+      await client.query('SELECT display_name,email FROM apex_memberships LIMIT 0');
       const tables = await client.query(
         "SELECT c.relname AS tablename, c.relrowsecurity AS rowsecurity, c.relforcerowsecurity AS forcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relname = ANY($1)",
         [[
@@ -109,16 +139,18 @@ export class PostgresRuntime {
       }
       // Stage 3 must not serve a tenant with unsynchronized legacy JSONB
       // finance/inventory arrays. Offline backfill is an explicit operator step.
-      const workspace = await client.query(
-        "SELECT 1 FROM apex_records WHERE tenant_id=$1 AND record_type='workspace_state' AND record_id='current'",
-        [this.tenantId]
-      );
-      if (workspace.rowCount) {
-        const ledger = await client.query(
-          'SELECT 1 FROM apex_critical_ledger_ready WHERE tenant_id=$1 AND schema_version=3',
+      if (!this.dynamicMode) {
+        const workspace = await client.query(
+          "SELECT 1 FROM apex_records WHERE tenant_id=$1 AND record_type='workspace_state' AND record_id='current'",
           [this.tenantId]
         );
-        if (!ledger.rowCount) throw new Error('Critical ledgers not backfilled; run the reviewed offline backfill command');
+        if (workspace.rowCount) {
+          const ledger = await client.query(
+            'SELECT 1 FROM apex_critical_ledger_ready WHERE tenant_id=$1 AND schema_version=3',
+            [this.tenantId]
+          );
+          if (!ledger.rowCount) throw new Error('Critical ledgers not backfilled; run the reviewed offline backfill command');
+        }
       }
       await client.query('COMMIT');
     } catch (error) {
@@ -130,7 +162,8 @@ export class PostgresRuntime {
   }
 
   async verifySession(client: PoolClient, token: string | null): Promise<PgAccount | null> {
-    if (!token || !/^[0-9a-f]{64}$/i.test(token)) return null;
+    if (!validSessionToken(token)) return null;
+    if (this.dynamicMode && sessionTenantHint(token) !== this.tenantId) return null;
     const result = await client.query(
       `SELECT m.user_id, m.username, m.display_name, m.email, m.role, m.created_at,
               s.expires_at
@@ -225,14 +258,25 @@ export class PostgresRuntime {
   }
 
   scopedApiMiddleware() {
-    return async (req: Request, res: Response, next: NextFunction) => {
-      // Handled directly by the dedicated PostgreSQL auth router, or public
-      // endpoints with no state access.
-      if (!req.originalUrl.startsWith('/api/') ||
-          req.originalUrl.startsWith('/api/auth/') ||
-          req.originalUrl.startsWith('/api/health') ||
-          req.originalUrl.startsWith('/api/integrations/status')) return next();
+    return (req: Request, res: Response, next: NextFunction) => {
+      const target = req.originalUrl.split('?')[0];
+      if (!target.startsWith('/api/') || target.startsWith('/api/auth/') ||
+          target.startsWith('/api/health') || target.startsWith('/api/integrations/status')) return next();
+      if (!this.dynamicMode) return void this.executeScopedApi(req, res, next);
+      const tenant = sessionTenantHint(readRequestToken(req));
+      if (!tenant) {
+        // Shared Telegram webhooks must be bound to one tenant with a separate
+        // verified route/secret design. No untrusted tenant headers accepted.
+        if (target === '/api/telegram/webhook') {
+          return res.status(503).json({ success: false, error: 'Dynamic workspaces require dedicated webhook routing; disabled' });
+        }
+        return res.status(401).json({ success: false, error: 'Workspace session required' });
+      }
+      return this.withTenant(tenant, () => { void this.executeScopedApi(req, res, next); });
+    };
+  }
 
+  private async executeScopedApi(req: Request, res: Response, next: NextFunction) {
       let client: PoolClient | undefined;
       try {
         client = await this.begin();
@@ -310,7 +354,6 @@ export class PostgresRuntime {
         }
         if (!res.headersSent) res.status(503).json({ success: false, error: 'Workspace data temporarily unavailable.' });
       }
-    };
   }
 
   freshWorkspaceState(displayName: string): AppStoreState & { tenantId: string } {
