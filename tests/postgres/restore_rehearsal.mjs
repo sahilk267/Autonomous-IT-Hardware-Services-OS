@@ -1,6 +1,7 @@
 // Phase 10.1 real PostgreSQL dump/restore acceptance, on disposable CI databases only.
 // The original staging DB and restored staging DB are isolated; no production writes.
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import pg from 'pg';
 
 const settings={
@@ -13,7 +14,8 @@ if(!/^apex_stage_[a-z0-9_]+$/.test(originalDb||'') ||
    !/^apex_stage_[a-z0-9_]+$/.test(restoredDb||'') ||
    originalDb===restoredDb ||
    process.env.APEX_PG_STAGING_ACK!=='STAGING_ONLY_NO_PRODUCTION' ||
-   !['127.0.0.1','localhost'].includes(process.env.PGHOST||'')) {
+   !['127.0.0.1','localhost'].includes(process.env.PGHOST||'') ||
+   !/^[0-9a-f]{64}$/.test(process.env.APEX_PG_PILOT_CONTEXT_KEY||'')) {
   throw Error('Unsafe restore verification environment');
 }
 const a=new pg.Client({...settings,database:originalDb});
@@ -59,6 +61,14 @@ try {
   const reader=async(tenant,actor,query)=>{
     await b.query('BEGIN');
     try {
+      if(tenant && actor) {
+        const nonce=await b.query(
+          'SELECT txid_current()::text AS txid,pg_backend_pid()::text AS backend');
+        const payload=[tenant,actor,nonce.rows[0].txid,nonce.rows[0].backend].join('\n');
+        const signature=crypto.createHmac('sha256',
+          Buffer.from(process.env.APEX_PG_PILOT_CONTEXT_KEY,'hex')).update(payload).digest('hex');
+        await b.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
+      }
       await b.query('SET LOCAL ROLE apex_stage_reader');
       if(tenant)await b.query("SELECT set_config('apex.tenant_id',$1,true)",[tenant]);
       if(actor)await b.query("SELECT set_config('apex.actor_id',$1,true)",[actor]);
@@ -83,6 +93,10 @@ try {
   });
   const noContext=await kindCount(null,null,'assets');
   check('Restored RLS denies all customer rows without context',()=>assert.equal(noContext,0));
+  const storedContextKey=await b.query('SELECT count(*)::integer AS n FROM apex.pilot_context_secrets');
+  check('Restore retains transaction attestation key for staging identity checks',()=>{
+    assert.equal(storedContextKey.rows[0].n,1);
+  });
   const importHash=await b.query('SELECT sha256 FROM apex.staging_imports');
   check('Restored provenance retains the original JSON SHA256',()=>{
     assert.match(importHash.rows[0].sha256,/^[0-9a-f]{64}$/);
