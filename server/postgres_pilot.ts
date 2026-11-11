@@ -85,7 +85,7 @@ export function registerPostgresPilotRoutes(
       await client.query("SELECT set_config('apex.tenant_id',$1,true)",[actor.tenantId]);
       await client.query("SELECT set_config('apex.actor_id',$1,true)",[actor.userId]);
       await client.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
-      const version=await client.query("SELECT stage_only FROM apex.schema_versions WHERE version='10.3b-field-assets'");
+      const version=await client.query("SELECT stage_only FROM apex.schema_versions WHERE version='10.4a-commerce-drafts'");
       if(version.rows.length!==1 || !version.rows[0].stage_only)
         reject(503,'The required staging pilot schema is not installed.');
       // Fail closed if JSON and SQL role/tenant records ever drift.
@@ -128,7 +128,7 @@ export function registerPostgresPilotRoutes(
 
   app.get('/api/pg-pilot/status',requireAuth,handler(async()=>({
     status:200,data:{stageOnly:true,storage:'postgres',applicationStorage:'json',
-      writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets','assets','jobs']}
+      writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets','assets','jobs','quotes','proposals','rmaClaims','pilot_procurement_drafts','pilot_finance_previews'],externalTransactionsEnabled:false}
   })));
   app.get('/api/pg-pilot/customers',requireAuth,handler(async client=>{
     const result=await client.query(
@@ -494,6 +494,203 @@ export function registerPostgresPilotRoutes(
         [body.status,req.params.id]);
       if(changed.rows.length!==1)reject(404,'Field job not visible or assigned.');
       return {status:200,data:changed.rows[0].payload};
+    }));
+
+
+  // Phase 10.4 — strictly unissued commercial drafts and internally logged claims.
+  // No GST certification, invoice issuance, payments, OEM approval, supplier dispatch
+  // or external provider impersonation is possible through these routes.
+  app.get('/api/pg-pilot/quotes',requireAuth,
+    requireRole('BUSINESS_OWNER','SALES_MANAGER','PROCUREMENT_LEAD'),
+    handler(async client=>{
+      const rows=await client.query(
+        "SELECT payload FROM apex.customer_records WHERE kind='quotes' ORDER BY source_id");
+      return {status:200,data:rows.rows.map(r=>r.payload)};
+    }));
+  app.post('/api/pg-pilot/quotes',requireAuth,
+    requireRole('BUSINESS_OWNER','SALES_MANAGER','PROCUREMENT_LEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['customerId','title','subtotal']);
+      if(typeof body.customerId!=='string' || typeof body.title!=='string' ||
+        !body.title.trim() || body.title.trim().length>160 ||
+        typeof body.subtotal!=='number' || !Number.isFinite(body.subtotal) ||
+        body.subtotal<0 || body.subtotal>1000000000000 ||
+        Math.round(body.subtotal*100)/100!==body.subtotal) {
+        reject(400,'Registered customer, draft description and 2-decimal subtotal required.');
+      }
+      const customer=await client.query(
+        'SELECT display_name FROM apex.customers WHERE customer_id=$1',[body.customerId]);
+      if(customer.rows.length!==1)reject(404,'Customer not visible or unregistered.');
+      const quote={
+        id:'quote-'+crypto.randomUUID(),customerId:body.customerId,
+        quoteNumber:'STAGE-'+crypto.randomUUID().slice(0,8).toUpperCase(),
+        customerName:customer.rows[0].display_name,
+        customerGstin:'',customerState:'',
+        solutionName:body.title.trim(),items:[],services:[],
+        subtotal:body.subtotal,discountAmount:0,marginPercent:0,
+        gstAmount:0,totalAmount:body.subtotal,
+        taxStatus:'PENDING_CLASSIFICATION',status:'DRAFT',
+        createdDate:new Date().toISOString(),validUntil:'',paymentTerms:'UNVERIFIED',
+        createdByUserId:actor.userId
+      };
+      const result=await client.query(
+        "INSERT INTO apex.customer_records "+
+        "(tenant_id,customer_id,kind,source_id,payload,created_by_staff_id) "+
+        "VALUES($1,$2,'quotes',$3,$4::jsonb,$5) RETURNING payload",
+        [actor.tenantId,quote.customerId,quote.id,JSON.stringify(quote),actor.userId]);
+      return {status:201,data:result.rows[0].payload};
+    }));
+  app.get('/api/pg-pilot/proposals',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','SALES_MANAGER','PROCUREMENT_LEAD'),
+    handler(async client=>{
+      const result=await client.query(
+        "SELECT payload FROM apex.customer_records WHERE kind='proposals' ORDER BY source_id");
+      return {status:200,data:result.rows.map(r=>r.payload)};
+    }));
+  app.post('/api/pg-pilot/proposals',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','SALES_MANAGER','PROCUREMENT_LEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['projectId','commercialBid','technicalApproach']);
+      if(typeof body.projectId!=='string' ||
+        typeof body.commercialBid!=='number' || !Number.isFinite(body.commercialBid) ||
+        body.commercialBid<0 || body.commercialBid>1000000000000 ||
+        (body.technicalApproach!==undefined &&
+          (typeof body.technicalApproach!=='string' || body.technicalApproach.length>3000))) {
+        reject(400,'Accessible project ID, nonnegative commercial estimate and approach required.');
+      }
+      const parent=await client.query(
+        "SELECT customer_id,payload FROM apex.customer_records "+
+        "WHERE kind='projects' AND source_id=$1",[body.projectId]);
+      if(parent.rows.length!==1)reject(404,'Accessible staging project not found.');
+      if(parent.rows[0].payload.status!=='PROPOSALS_OPEN')
+        reject(409,'Project is not currently accepting proposals.');
+      const proposal={
+        id:'proposal-'+crypto.randomUUID(),projectId:body.projectId,
+        customerId:parent.rows[0].customer_id,submittedByUserId:actor.userId,
+        providerName:'INTERNAL_UNVERIFIED',providerRating:0,providerVerified:false,
+        commercialBid:body.commercialBid,timelineDays:0,matchScore:0,
+        matchExplanation:'Internal estimate only; no external provider verified',
+        technicalApproach:body.technicalApproach||'',oemCertifications:[],status:'SUBMITTED',
+        externalSubmission:false
+      };
+      const result=await client.query(
+        "INSERT INTO apex.customer_records "+
+        "(tenant_id,customer_id,kind,source_id,payload,created_by_staff_id,related_kind,related_id) "+
+        "VALUES($1,$2,'proposals',$3,$4::jsonb,$5,'projects',$6) RETURNING payload",
+        [actor.tenantId,proposal.customerId,proposal.id,JSON.stringify(proposal),actor.userId,body.projectId]);
+      return {status:201,data:result.rows[0].payload};
+    }));
+  app.get('/api/pg-pilot/rma',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','FIELD_ENGINEER'),
+    handler(async client=>{
+      const rows=await client.query(
+        "SELECT payload FROM apex.customer_records WHERE kind='rmaClaims' ORDER BY source_id");
+      return {status:200,data:rows.rows.map(r=>r.payload)};
+    }));
+  app.post('/api/pg-pilot/rma',requireAuth,
+    requireRole('BUSINESS_OWNER','ENTERPRISE_IT_HEAD','FIELD_ENGINEER'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['assetId','faultSymptom']);
+      if(typeof body.assetId!=='string' ||
+        typeof body.faultSymptom!=='string' || !body.faultSymptom.trim() ||
+        body.faultSymptom.trim().length>1500) {
+        reject(400,'Accessible asset and nonempty fault description required.');
+      }
+      const asset=await client.query(
+        "SELECT customer_id,payload FROM apex.customer_records "+
+        "WHERE kind='assets' AND source_id=$1",[body.assetId]);
+      if(asset.rows.length!==1)reject(404,'Asset not visible or unavailable.');
+      const a=asset.rows[0].payload;
+      const rma={
+        id:'rma-'+crypto.randomUUID(),
+        rmaNumber:'STAGE-'+crypto.randomUUID().slice(0,8).toUpperCase(),
+        customerId:asset.rows[0].customer_id,
+        assetId:body.assetId,assetTag:a.assetTag,assetName:a.name,serialNumber:a.serialNumber||'',
+        oemBrand:a.brand||'',oemCaseNumber:'',
+        faultSymptom:body.faultSymptom.trim(),
+        warrantyStatus:'UNVERIFIED',courierTracking:'',courierPartner:'',
+        stage:'FAULT_LOGGED',createdAt:new Date().toISOString(),
+        createdByUserId:actor.userId,externalOemCaseOpened:false
+      };
+      const inserted=await client.query(
+        "INSERT INTO apex.customer_records "+
+        "(tenant_id,customer_id,kind,source_id,payload,created_by_staff_id,related_kind,related_id) "+
+        "VALUES($1,$2,'rmaClaims',$3,$4::jsonb,$5,'assets',$6) RETURNING payload",
+        [actor.tenantId,rma.customerId,rma.id,JSON.stringify(rma),actor.userId,body.assetId]);
+      return {status:201,data:inserted.rows[0].payload};
+    }));
+  app.get('/api/pg-pilot/procurement-drafts',requireAuth,
+    requireRole('BUSINESS_OWNER','PROCUREMENT_LEAD'),
+    handler(async client=>{
+      const result=await client.query(
+        "SELECT draft_id AS id,customer_id AS \"customerId\",created_by_staff_id AS \"createdByUserId\","+
+        "product_name AS \"productName\",required_qty AS qty,estimated_unit_cost AS \"estimatedUnitCost\","+
+        "status FROM apex.pilot_procurement_drafts ORDER BY created_at,draft_id");
+      return {status:200,data:result.rows};
+    }));
+  app.post('/api/pg-pilot/procurement-drafts',requireAuth,
+    requireRole('BUSINESS_OWNER','PROCUREMENT_LEAD'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['customerId','productName','qty','estimatedUnitCost']);
+      if(typeof body.customerId!=='string' ||
+        typeof body.productName!=='string' || !body.productName.trim() ||
+        body.productName.trim().length>180 ||
+        !Number.isInteger(body.qty) || (body.qty as number)<1 || (body.qty as number)>100000 ||
+        typeof body.estimatedUnitCost!=='number' ||
+        !Number.isFinite(body.estimatedUnitCost) || body.estimatedUnitCost<0 ||
+        body.estimatedUnitCost>1000000000000 ||
+        Math.round(body.estimatedUnitCost*100)/100!==body.estimatedUnitCost) {
+        reject(400,'Registered customer, material description, quantity and 2-decimal estimate required.');
+      }
+      const customer=await client.query(
+        'SELECT customer_id FROM apex.customers WHERE customer_id=$1',[body.customerId]);
+      if(customer.rows.length!==1)reject(404,'Customer not visible or registered.');
+      const id='proc-draft-'+crypto.randomUUID();
+      const result=await client.query(
+        "INSERT INTO apex.pilot_procurement_drafts "+
+        "(tenant_id,customer_id,draft_id,created_by_staff_id,product_name,required_qty,estimated_unit_cost) "+
+        "VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING "+
+        "draft_id AS id,customer_id AS \"customerId\",created_by_staff_id AS \"createdByUserId\","+
+        "product_name AS \"productName\",required_qty AS qty,estimated_unit_cost AS \"estimatedUnitCost\",status",
+        [actor.tenantId,body.customerId,id,actor.userId,body.productName.trim(),
+         body.qty,body.estimatedUnitCost]);
+      return {status:201,data:result.rows[0]};
+    }));
+  app.get('/api/pg-pilot/finance-previews',requireAuth,
+    requireRole('BUSINESS_OWNER'),
+    handler(async client=>{
+      const result=await client.query(
+        "SELECT preview_id AS id,customer_id AS \"customerId\",quote_id AS \"quoteId\","+
+        "subtotal,status,tax_status AS \"taxStatus\",created_by_staff_id AS \"createdByUserId\" "+
+        "FROM apex.pilot_finance_previews ORDER BY created_at,preview_id");
+      return {status:200,data:result.rows};
+    }));
+  app.post('/api/pg-pilot/finance-previews',requireAuth,
+    requireRole('BUSINESS_OWNER'),
+    handler(async(client,actor,req)=>{
+      const body=strictBody(req.body,['quoteId']);
+      if(Object.keys(body).length!==1 ||
+        typeof body.quoteId!=='string' || !body.quoteId) {
+        reject(400,'Exact existing quote ID is required for an unissued finance preview.');
+      }
+      const existing=await client.query(
+        "SELECT customer_id,payload FROM apex.customer_records "+
+        "WHERE kind='quotes' AND source_id=$1",[body.quoteId]);
+      if(existing.rows.length!==1)reject(404,'Draft quotation not visible.');
+      const quote=existing.rows[0];
+      if(quote.payload.status!=='DRAFT' ||
+        quote.payload.taxStatus!=='PENDING_CLASSIFICATION' ||
+        typeof quote.payload.subtotal!=='number')
+        reject(409,'Only an unverified draft quotation can generate a preview.');
+      const id='fin-preview-'+crypto.randomUUID();
+      const inserted=await client.query(
+        "INSERT INTO apex.pilot_finance_previews "+
+        "(tenant_id,customer_id,preview_id,created_by_staff_id,quote_id,subtotal) "+
+        "VALUES($1,$2,$3,$4,$5,$6) RETURNING "+
+        "preview_id AS id,customer_id AS \"customerId\",quote_id AS \"quoteId\","+
+        "subtotal,status,tax_status AS \"taxStatus\",created_by_staff_id AS \"createdByUserId\"",
+        [actor.tenantId,quote.customer_id,id,actor.userId,body.quoteId,quote.payload.subtotal]);
+      return {status:201,data:inserted.rows[0]};
     }));
 
   app.get('/api/pg-pilot/audit',requireAuth,requireRole('BUSINESS_OWNER'),
