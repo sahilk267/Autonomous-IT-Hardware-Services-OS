@@ -8,6 +8,8 @@ import { dbStore, defaultConnectors, hashPassword, verifyPassword } from './serv
 import { UserRole } from './src/types.ts';
 import { LoginRateLimiter, verifySetupToken, sessionCookie, expiredSessionCookie } from './server/security.ts';
 import { allowedOrigins, writeOriginGuard } from './server/writeOrigin.ts';
+import { PostgresRuntime } from './server/postgres/runtime.ts';
+import { registerPostgresAuth } from './server/postgres/auth.ts';
 
 const app = express();
 
@@ -35,6 +37,15 @@ app.use(writeOriginGuard(allowedOrigins(
   process.env.NODE_ENV === 'production'
 )));
 app.use(express.json({ limit: '1mb' }));
+
+// Stage 2: PostgreSQL is the authoritative store when explicitly enabled.
+// Its auth router owns sessions and the transactional context wraps all
+// remaining business routes without allowing a JSON-file fallback.
+const postgresRuntime = process.env.APEX_STORAGE_MODE === 'postgres' ? new PostgresRuntime() : null;
+if (postgresRuntime) {
+  registerPostgresAuth(app, postgresRuntime);
+  app.use('/api', postgresRuntime.scopedApiMiddleware());
+}
 
 // Cookie parser helper
 function parseCookies(cookieHeader?: string): Record<string, string> {
@@ -339,7 +350,11 @@ app.post('/api/state/reset', requireAuth, requireRole('BUSINESS_OWNER'), (req, r
     res.json({
       success: true,
       message: 'Workspace initialized in clean slate mode (0 business records).',
-      data: cleaned
+      data: {
+        ...cleaned,
+        users: cleaned.users.map(({ passwordHash, salt, ...user }) => user),
+        sessions: undefined
+      }
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -1675,6 +1690,9 @@ Respond in strict JSON only without markdown formatting:
 
 // Production static serving vs Dev Vite middleware
 async function setupVite() {
+  // Refuse to listen if the tenant is absent, migrations are pending, or the
+  // database role can bypass RLS. Production must fail closed, not use JSON.
+  if (postgresRuntime) await postgresRuntime.preflight();
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
