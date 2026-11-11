@@ -89,6 +89,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<{ id: string; username: string; role: UserRole; name?: string } | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isSetupRequired, setIsSetupRequired] = useState(false);
+  const [isDynamicWorkspace, setIsDynamicWorkspace] = useState(false);
 
   // Helper for user notifications
   const showToast = (msg: string) => {
@@ -138,6 +139,7 @@ export default function App() {
     fetch('/api/auth/status')
       .then(res => res.json())
       .then(status => {
+        setIsDynamicWorkspace(status.tenantMode === 'dynamic');
         if (status.setupRequired || status.needsSetup) {
           setIsSetupRequired(true);
           setIsAuthModalOpen(true);
@@ -169,6 +171,9 @@ export default function App() {
   }, []);
 
   const handleLoginSuccess = (user: any) => {
+    if (isDynamicWorkspace && user.tenantId) {
+      try { localStorage.setItem('apex_last_workspace_id', user.tenantId); } catch {}
+    }
     setCurrentUser(user);
     if (user.role) setCurrentRole(user.role);
     setIsAuthModalOpen(false);
@@ -183,8 +188,16 @@ export default function App() {
       console.error('Logout error:', err);
     }
     setCurrentUser(null);
+    // Never retain a previous tenant's confidential records behind the modal.
+    setTenant(defaultTenant);
+    setProducts([]); setLeads([]); setQuotes([]); setTelegramMessages([]);
+    setSuppliers([]); setRfqs([]); setTickets([]); setEndpoints([]);
+    setJobs([]); setAssets([]); setLicenses([]); setAMCs([]);
+    setProjects([]); setProposals([]); setProviders([]); setEvents([]);
+    setInvoices([]); setWorkflows([]); setConnectors([]);
+    setIsSetupRequired(false);
     setIsAuthModalOpen(true);
-    showToast('Logged out of Apex OS.');
+    showToast('Session closed. Select a workspace and sign in again.');
   };
 
   // Update Tenant Profile
@@ -875,6 +888,23 @@ export default function App() {
         autoExecutedCount={events.filter(e => e.approvalStatus === 'AUTO_APPROVED').length}
       />
 
+      {(isDynamicWorkspace || !!window.apexDesktop) && (
+        <div className="px-5 py-2 flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950">
+          {isDynamicWorkspace && currentUser && (
+            <button onClick={handleLogout}
+              className="rounded-md border border-cyan-800 px-3 py-1 text-xs text-cyan-300">
+              Switch workspace — {tenant.name}
+            </button>
+          )}
+          {window.apexDesktop && (
+            <button onClick={() => void window.apexDesktop?.openSettings()}
+              className="rounded-md border border-slate-700 px-3 py-1 text-xs text-slate-300">
+              Desktop server settings
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Main Module Tabs */}
       <Navigation
         activeTab={activeTab}
@@ -1038,6 +1068,7 @@ export default function App() {
       {/* Authoritative Security & Login Modal */}
       <AuthModal
         isOpen={isAuthModalOpen}
+        isDynamicWorkspace={isDynamicWorkspace}
         isSetupRequired={isSetupRequired}
         onLoginSuccess={handleLoginSuccess}
       />
