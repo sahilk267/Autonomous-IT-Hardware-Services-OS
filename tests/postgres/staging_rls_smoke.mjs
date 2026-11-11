@@ -146,7 +146,10 @@ try {
     assert.equal(report.customerManifests.length,2);
     assert.equal(report.productionCutoverReady,false);
     assert.equal(report.ownerOnlyMappingApproved,false);
-    assert.equal(report.unmappedOwnerOnlyRecords,1);
+    assert.equal(report.unmappedOwnerOnlyRecords,
+      ['invoices','marketplaceDisputes','knowledgeArticles','inventoryTransactions',
+       'products','suppliers','rfqs','telegramMessages','licenses','providers',
+       'workflows','connectors'].reduce((n,kind)=>n+(baseline[kind]||[]).length,0));
     assert.equal(report.databaseModified,false);
   });
   reconciled=reconcile({PGDATABASE:'postgres'});
