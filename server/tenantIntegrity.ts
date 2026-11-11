@@ -23,7 +23,7 @@ export class TenantScopeError extends Error {
 
 export function enforceSingleTenantIntegrity(state: AppStoreState): void {
   const tenantId = state.tenant?.id;
-  if (typeof tenantId !== 'string' || tenantId.trim().length < 12 || tenantId.length > 128) {
+  if (typeof tenantId !== 'string' || tenantId.trim().length < 3 || tenantId.length > 128) {
     throw new TenantScopeError('Invalid tenant identity in local data store');
   }
 
