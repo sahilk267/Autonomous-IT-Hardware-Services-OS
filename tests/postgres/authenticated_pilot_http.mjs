@@ -835,6 +835,54 @@ try {
       [financePreviewId]),err=>err.code==='42501');
     test('Restricted SQL writer cannot mark finance preview settled',()=>{});
     await rawProbe.query('ROLLBACK');
+
+    // A valid *signed* internal actor must still be unable to fabricate external
+    // payment, provider-verification or OEM-approval claims via direct SQL.
+    const signedWriter=async()=>{
+      await rawProbe.query('BEGIN');
+      const nonce=await rawProbe.query(
+        'SELECT txid_current()::text AS txid,pg_backend_pid()::text AS backend');
+      const msg=['tenant-fixture-a','owner-a',
+        nonce.rows[0].txid,nonce.rows[0].backend].join('\n');
+      const signature=createHmac('sha256',Buffer.from(
+        process.env.APEX_PG_PILOT_CONTEXT_KEY,'hex')).update(msg).digest('hex');
+      await rawProbe.query('SET LOCAL ROLE apex_pilot_writer');
+      await rawProbe.query("SELECT set_config('apex.tenant_id','tenant-fixture-a',true)");
+      await rawProbe.query("SELECT set_config('apex.actor_id','owner-a',true)");
+      await rawProbe.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
+    };
+    const attemptLinked=async(kind,sourceId,payload,relatedKind,relatedId)=>{
+      await signedWriter();
+      try {
+        await assert.rejects(rawProbe.query(
+          "INSERT INTO apex.customer_records "+
+          "(tenant_id,customer_id,kind,source_id,payload,created_by_staff_id,related_kind,related_id) "+
+          "VALUES('tenant-fixture-a','cust-b',$1,$2,$3::jsonb,'owner-a',$4,$5)",
+          [kind,sourceId,JSON.stringify(payload),relatedKind,relatedId]),
+          err=>err.code==='42501');
+      } finally {
+        await rawProbe.query('ROLLBACK');
+      }
+    };
+    await attemptLinked('quotes','forged-sql-paid-quote',{
+      id:'forged-sql-paid-quote',customerId:'cust-b',
+      createdByUserId:'owner-a',subtotal:100,
+      status:'DRAFT',taxStatus:'PENDING_CLASSIFICATION',paymentStatus:'SETTLED'
+    },null,null);
+    test('Valid signed owner SQL still cannot create self-settled quotation payload',()=>{});
+    await attemptLinked('proposals','forged-sql-provider',{
+      id:'forged-sql-provider',customerId:'cust-b',projectId:sqlProjectB,
+      submittedByUserId:'owner-a',status:'SUBMITTED',
+      providerVerified:true,externalSubmission:true,commercialBid:100
+    },'projects',sqlProjectB);
+    test('Valid signed owner SQL still cannot invent verified external provider',()=>{});
+    await attemptLinked('rmaClaims','forged-sql-oem',{
+      id:'forged-sql-oem',customerId:'cust-b',assetId:newAssetId,
+      createdByUserId:'owner-a',stage:'FAULT_LOGGED',
+      warrantyStatus:'ACTIVE_WARRANTY',oemCaseNumber:'',
+      externalOemCaseOpened:true,faultSymptom:'Forgery attempt'
+    },'assets',newAssetId);
+    test('Valid signed owner SQL cannot invent approved warranty or OEM claim',()=>{});
   }finally {await rawProbe.end();}
   const wrongProject=await client.query(
     "INSERT INTO apex.customer_records "+
