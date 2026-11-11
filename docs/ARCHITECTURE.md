@@ -1,8 +1,10 @@
-# System Architecture Specification
+# System Architecture Specification (JSON Runtime)
+
+> **Security and deployment status:** This architecture is an interim single-tenant Node/React application. PostgreSQL multi-tenancy, transactional audit records and actual production acceptance remain incomplete. See [Phase L migration/readiness](PHASE_L_TENANCY_AND_MIGRATION.md).
 
 **Application**: Apex Autonomous IT Hardware & Services Operating System  
-**Version**: 1.0.0 (Production Clean Slate)  
-**Target Environment**: Node.js 20.x, Express, React 19, Tailwind CSS v4
+**Version**: 1.0.0 (single-tenant JSON; not a production certification)  
+**Target Environment**: Node.js 22.x (CI validated), Express, React 19, Tailwind CSS v4
 
 ---
 
