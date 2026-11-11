@@ -34,3 +34,11 @@
 **Suggested next incremental priority (Phase 10.5B / 10.6):** normalized domain schema, application-level repository abstraction replacing selected JSON routes behind audited flags, real concurrency across separate service instances, and an external-event outbox with no live delivery until provider approval.
 
 **Merge/deploy gate remains closed. Keep Draft PR #1 open and main unchanged.**
+
+## Phase 10.5A retry-pool hardening and acceptance checkpoint — 12 November 2026
+
+- Code commit `f5d97ad7d43853aa0c2242d312055352ee5608e3` releases the checked-out PostgreSQL connection **before** bounded serialization/deadlock backoff. This prevents a four-connection pilot pool from needlessly holding connections while eight concurrent HTTP test clients retry.
+- On PostgreSQL transaction failure the service first attempts explicit ROLLBACK. If rollback itself fails, the connection is treated as broken and discarded via `client.release(true)`; that attempt is not retried. Only `40001` and `40P01` with a confirmed rollback can be retried. New attempts create fresh tenant/actor HMAC signatures bound to their own transaction and backend PID.
+- Verified pre-Phase 10.5A starting state: Phase 10.4 Push CI `43048956948` and PR CI `43048974274` both finished with SUCCESS. Previous intermediate Phase 10.5A commits had failures because schema installation and read-only gate were added in separate commits; the integrated current revision contains both.
+- **Final Phase 10.5A acceptance remains pending:** [Push CI #43098055997](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43098055997) and [PR CI #43098061347](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43098061347) were queued at the last inspection. A queued run is not a green result. Do not merge/deploy or upgrade readiness status until both the latest-commit workflows complete successfully.
+- Database cutover is still **BLOCKED by design**, even if these tests eventually pass. Historical migration, full SQL runtime parity, secure production identity, external finance/provider sandbox evidence and recovery exercises are still P0 blockers.
