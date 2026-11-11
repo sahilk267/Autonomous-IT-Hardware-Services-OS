@@ -740,7 +740,7 @@ app.post('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANA
 
 app.patch('/api/invoices/:invoiceNo/settle', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const { paymentReference, method } = req.body;
+    const { paymentReference, method } = req.body ?? {};
     if (postgresRuntime) {
       const already = dbStore.getState().invoices.find(i => i.invoiceNo === req.params.invoiceNo);
       if (already?.status === 'SETTLED') {
@@ -904,7 +904,7 @@ app.patch('/api/jobs/:id', requireAuth, (req, res) => {
 });
 
 // P3.1 Strict Inventory Consumption
-app.post('/api/jobs/:id/consume-part', requireAuth, (req, res) => {
+app.post('/api/jobs/:id/consume-part', requireAuth, requireRole('BUSINESS_OWNER', 'FIELD_ENGINEER'), (req, res) => {
   try {
     const { productId, partName, quantity, cost } = req.body;
     const targetProduct = productId || partName;
