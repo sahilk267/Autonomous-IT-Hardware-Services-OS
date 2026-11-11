@@ -57,10 +57,10 @@ const client=new pg.Client({
   password:process.env.PGPASSWORD,port:Number(process.env.PGPORT||5432),
   database:process.env.PGDATABASE
 });
-async function api(url,{method='GET',cookie='',body}={}){
+async function api(url,{method='GET',cookie='',body,headers={}}={}){
   const response=await fetch(base+url,{
     method,headers:{...(cookie?{cookie}:{}),
-      ...(body===undefined?{}:{'content-type':'application/json'})},
+      ...(body===undefined?{}:{'content-type':'application/json'}),...headers},
     body:body===undefined?undefined:JSON.stringify(body)
   });
   const raw=await response.text();
@@ -925,7 +925,10 @@ try {
     "ALTER TABLE apex.pilot_audit_events ADD CONSTRAINT test_finance_audit_failure "+
     "CHECK(entity <> 'pilot_finance_previews') NOT VALID");
   try {
-    r=await post('/api/pg-pilot/finance-previews',{quoteId:rollbackQuoteId},owner);
+    r=await api('/api/pg-pilot/finance-previews',{
+      method:'POST',cookie:owner,body:{quoteId:rollbackQuoteId},
+      headers:{'Idempotency-Key':'finance-trigger-rollback-replay-2026'}
+    });
     test('Finance preview fails atomically if audit trigger rejects insert',()=>{
       assert.equal(r.status,503);
     });
@@ -936,11 +939,144 @@ try {
   }finally {
     await client.query('ALTER TABLE apex.pilot_audit_events DROP CONSTRAINT test_finance_audit_failure');
   }
-  r=await post('/api/pg-pilot/finance-previews',{quoteId:rollbackQuoteId},owner);
+  const claimAfterFailure=await client.query(
+    "SELECT count(*)::integer n FROM apex.pilot_request_keys WHERE request_key=$1",
+    ['finance-trigger-rollback-replay-2026']);
+  test('Failed finance audit also rolls back the idempotency key claim',()=>{
+    assert.equal(claimAfterFailure.rows[0].n,0);
+  });
+  r=await api('/api/pg-pilot/finance-previews',{
+    method:'POST',cookie:owner,body:{quoteId:rollbackQuoteId},
+    headers:{'Idempotency-Key':'finance-trigger-rollback-replay-2026'}
+  });
   test('Successful retry after removing audit fault creates one unissued preview',()=>{
     assert.equal(r.status,201);
     assert.equal(r.data.data.status,'PREVIEW_UNISSUED');
   });
+
+  // Phase 10.5A: deterministic, retry-safe drafts, parallel HTTP over pooled
+  // serializable SQL transactions. All retries share an authenticated actor/key.
+  const parallelBody={
+    customerId:'cust-b',productName:'Parallel repair kit',qty:4,estimatedUnitCost:31.5
+  };
+  const procurementKey='staging-proc-concurrent-2026';
+  const procBefore=await count('pilot_procurement_drafts');
+  const concurrentProc=await Promise.all(Array.from({length:8},()=>api(
+    '/api/pg-pilot/procurement-drafts',{
+      method:'POST',cookie:proc,body:parallelBody,
+      headers:{'Idempotency-Key':procurementKey}
+    })));
+  test('Eight concurrent authenticated procurement retries return one creation and seven replays',()=>{
+    assert.equal(concurrentProc.filter(x=>x.status===201).length,1,
+      JSON.stringify(concurrentProc.map(x=>x.status)));
+    assert.equal(concurrentProc.filter(x=>x.status===200).length,7,
+      JSON.stringify(concurrentProc.map(x=>x.status)));
+    assert.equal(new Set(concurrentProc.map(x=>x.data.data.id)).size,1);
+  });
+  const parallelDraftId=concurrentProc[0].data.data.id;
+  const procAfter=await count('pilot_procurement_drafts');
+  test('Concurrent procurement retries commit exactly one database row',()=>{
+    assert.equal(procAfter,procBefore+1);
+  });
+  r=await api('/api/pg-pilot/procurement-drafts',{
+    method:'POST',cookie:proc,
+    body:{...parallelBody,estimatedUnitCost:32},
+    headers:{'Idempotency-Key':procurementKey}
+  });
+  test('Reused procurement key with changed payload is rejected, never mutated',()=>{
+    assert.equal(r.status,409);
+  });
+  r=await api('/api/pg-pilot/procurement-drafts',{
+    method:'POST',cookie:proc,body:parallelBody,
+    headers:{'Idempotency-Key':'short'}
+  });
+  test('Malformed idempotency key is rejected before SQL commit',()=>assert.equal(r.status,400));
+  r=await api('/api/pg-pilot/procurement-drafts',{
+    method:'POST',cookie:owner,
+    body:{customerId:'cust-b',productName:'Owner separate draft',qty:1,estimatedUnitCost:5},
+    headers:{'Idempotency-Key':procurementKey}
+  });
+  test('Idempotency key scope includes authenticated actor, not caller-supplied user',()=>{
+    assert.equal(r.status,201);
+    assert.notEqual(r.data.data.id,parallelDraftId);
+    assert.equal(r.data.data.createdByUserId,'owner-a');
+  });
+  r=await api('/api/pg-pilot/procurement-drafts',{
+    method:'POST',cookie:proc,body:parallelBody,
+    headers:{'Idempotency-Key':procurementKey}
+  });
+  test('Safe sequential procurement retry reuses immutable committed draft',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.id,parallelDraftId);
+  });
+
+  r=await post('/api/pg-pilot/quotes',{
+    customerId:'cust-b',title:'Concurrent finance preview source',subtotal:78.25
+  },owner);
+  test('Owner creates isolated source for finance request concurrency',()=>assert.equal(r.status,201));
+  const concurrentQuoteId=r.data.data.id;
+  const financeBefore=await count('pilot_finance_previews');
+  const financeKey='staging-finance-concurrent-2026';
+  const concurrentFin=await Promise.all(Array.from({length:8},()=>api(
+    '/api/pg-pilot/finance-previews',{
+      method:'POST',cookie:owner,body:{quoteId:concurrentQuoteId},
+      headers:{'Idempotency-Key':financeKey}
+    })));
+  test('Eight concurrent finance preview requests produce one preview and seven replays',()=>{
+    assert.equal(concurrentFin.filter(x=>x.status===201).length,1,
+      JSON.stringify(concurrentFin.map(x=>x.status)));
+    assert.equal(concurrentFin.filter(x=>x.status===200).length,7,
+      JSON.stringify(concurrentFin.map(x=>x.status)));
+    assert.equal(new Set(concurrentFin.map(x=>x.data.data.id)).size,1);
+    assert.ok(concurrentFin.every(x=>x.data.data.status==='PREVIEW_UNISSUED'));
+  });
+  const financeAfter=await count('pilot_finance_previews');
+  test('Serialized concurrent finance requests add exactly one unissued ledger row',()=>{
+    assert.equal(financeAfter,financeBefore+1);
+  });
+  r=await api('/api/pg-pilot/finance-previews',{
+    method:'POST',cookie:owner,body:{quoteId:quoteBId},
+    headers:{'Idempotency-Key':financeKey}
+  });
+  test('Reusing finance key with different quote fails closed with conflict',()=>assert.equal(r.status,409));
+  r=await api('/api/pg-pilot/procurement-drafts',{
+    method:'POST',cookie:owner,
+    body:{customerId:'cust-b',productName:'Wrong operation reuse',qty:1,estimatedUnitCost:1},
+    headers:{'Idempotency-Key':financeKey}
+  });
+  test('Same owner key cannot cross from FINANCE_PREVIEW into procurement operation',()=>{
+    assert.equal(r.status,409);
+  });
+  const [procAudit,financeAudit,claimed]=await Promise.all([
+    client.query("SELECT count(*)::integer n FROM apex.pilot_audit_events "+
+      "WHERE entity='pilot_procurement_drafts' AND object_id=$1",[parallelDraftId]),
+    client.query("SELECT count(*)::integer n FROM apex.pilot_audit_events "+
+      "WHERE entity='pilot_finance_previews' AND object_id=$1",[concurrentFin[0].data.data.id]),
+    client.query("SELECT count(*)::integer n FROM apex.pilot_request_keys "+
+      "WHERE tenant_id='tenant-fixture-a' AND actor_staff_id='proc-a' AND request_key=$1",
+      [procurementKey])
+  ]);
+  test('Retry deduplication preserves exactly one audit event per resource and one request key',()=>{
+    assert.equal(procAudit.rows[0].n,1);
+    assert.equal(financeAudit.rows[0].n,1);
+    assert.equal(claimed.rows[0].n,1);
+  });
+  const rawKeyClient=new pg.Client({
+    host:process.env.APEX_PG_PILOT_HOST,port:Number(process.env.PGPORT||5432),
+    user:process.env.APEX_PG_PILOT_USER,password:process.env.APEX_PG_PILOT_PASSWORD,
+    database:process.env.APEX_PG_PILOT_DB
+  });
+  await rawKeyClient.connect();
+  try {
+    await rawKeyClient.query('BEGIN');
+    await rawKeyClient.query('SET LOCAL ROLE apex_pilot_writer');
+    await assert.rejects(rawKeyClient.query(
+      "DELETE FROM apex.pilot_request_keys WHERE request_key=$1",[procurementKey]),
+      err=>err.code==='42501');
+    test('Restricted SQL writer cannot remove immutable request replay claims',()=>{});
+    await rawKeyClient.query('ROLLBACK');
+  } finally {await rawKeyClient.end();}
+
   r=await patch('/api/pg-pilot/customers/cust-b/access',{
     userId:'proc-a',grant:false
   },owner);
