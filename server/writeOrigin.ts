@@ -4,7 +4,7 @@ import type { Request, Response, NextFunction } from 'express';
  * Browser write requests must carry an Origin matching the deployment's
  * explicit public origin. Never trust Host or X-Forwarded-* as an allowlist.
  */
-export function allowedOrigins(configured: string, production: boolean): ReadonlySet<string> {
+export function allowedOrigins(configured: string, production: boolean, desktopLoopback = false): ReadonlySet<string> {
   const entries = configured.split(',').map(value => value.trim()).filter(Boolean);
   if (!entries.length) throw new Error('APP_URL is required for write-origin validation');
   const origins = new Set<string>();
