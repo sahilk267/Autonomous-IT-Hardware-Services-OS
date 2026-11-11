@@ -104,3 +104,13 @@ jobs:
         run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/001_staging_rls.sql
       - name: Real PostgreSQL isolation and transactional import tests
         run: npm run smoke:postgres
+      - name: Isolated PostgreSQL snapshot and restore rehearsal
+        run: |
+          set -euo pipefail
+          export PGRESTORE_DATABASE=apex_stage_restored
+          psql -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE apex_stage_restored'
+          dump="$RUNNER_TEMP/apex-phase10-throwaway.dump"
+          trap 'rm -f "$dump"' EXIT
+          pg_dump -Fc --no-owner -f "$dump" apex_stage_ci
+          pg_restore --no-owner --exit-on-error -d "$PGRESTORE_DATABASE" "$dump"
+          npm run smoke:pg:restore

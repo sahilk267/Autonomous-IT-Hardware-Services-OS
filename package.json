@@ -20,6 +20,7 @@
     "preflight:customers": "node scripts/customer_migration_preflight.mjs",
     "smoke:preflight": "node tests/customer_preflight_smoke.mjs",
     "smoke:postgres": "node tests/postgres/staging_rls_smoke.mjs",
+    "smoke:pg:restore": "node tests/postgres/restore_rehearsal.mjs",
     "stage:postgres": "node scripts/postgres/stage_json_to_pg.mjs"
   },
   "dependencies": {

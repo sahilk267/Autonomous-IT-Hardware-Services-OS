@@ -71,6 +71,14 @@ function validate() {
     const cust=parent?.customerId || row.customerId;
     ensure(typeof cust==='string' && customers.has(cust),kind+'/'+row.id+' missing registered customer');
     if(row.customerId)ensure(row.customerId===cust,'cross-customer link '+kind+'/'+row.id);
+    if(row.tenantId)ensure(row.tenantId===tenantId,'forged tenantId in '+kind+'/'+row.id);
+    const expectedName=customers.get(cust).name;
+    if(['projects','crmOpportunities','amcs'].includes(kind) && row.clientName)
+      ensure(row.clientName===expectedName,'customer-name conflict in '+kind+'/'+row.id);
+    if(['jobs','quotes','leads'].includes(kind)) {
+      const displayName=kind==='leads'?row.companyName:row.customerName;
+      if(displayName)ensure(displayName===expectedName,'customer-name conflict in '+kind+'/'+row.id);
+    }
     if(kind==='proposals'||kind==='rmaClaims')ensure(!!parent,'orphan '+kind+'/'+row.id);
     staffId(row.createdByUserId,kind,row.id,'createdByUserId');
     staffId(row.assignedUserId,kind,row.id,'assignedUserId');
