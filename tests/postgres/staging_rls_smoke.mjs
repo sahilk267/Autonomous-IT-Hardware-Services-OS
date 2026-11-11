@@ -219,6 +219,60 @@ try {
     assert.match(response.stderr,/preflight/);
     assert.equal(hashFile(),rejectedHash);
   });
+  // The importer must also stop customer identity spoofing before attempting any DB write.
+  baseline.quotes[0].customerId='cust-a';
+  baseline.quotes[0].customerName='Customer B';
+  fs.writeFileSync(source,JSON.stringify(baseline),{mode:0o600});
+  response=cli(['--apply']);
+  test('Contradictory quote customer name is rejected without touching PostgreSQL',()=>{
+    assert.equal(response.status,1);
+    assert.match(response.stderr,/customer-name conflict/);
+  });
+  baseline.quotes[0].customerName=undefined;
+  baseline.jobs[0].tenantId='another-tenant';
+  fs.writeFileSync(source,JSON.stringify(baseline),{mode:0o600});
+  response=cli(['--apply']);
+  test('Embedded spoofed record tenant ID is rejected without a DB connection',()=>{
+    assert.equal(response.status,1);
+    assert.match(response.stderr,/forged tenantId/);
+  });
+  baseline.jobs[0].tenantId=undefined;
+
+  // Construct a second isolated staging database to force a LATE SQL integrity failure.
+  // A duplicate granted staff identity passes the read-only structural preflight but
+  // violates the SQL composite grant PK after tenant and staff inserts have occurred.
+  const control=new pg.Client({
+    host:process.env.PGHOST,port:Number(process.env.PGPORT||5432),
+    user:process.env.PGUSER,password:process.env.PGPASSWORD,database:'postgres'
+  });
+  await control.connect();
+  try{await control.query('CREATE DATABASE apex_stage_abort');}
+  finally{await control.end();}
+  const abortDb=new pg.Client({
+    host:process.env.PGHOST,port:Number(process.env.PGPORT||5432),
+    user:process.env.PGUSER,password:process.env.PGPASSWORD,database:'apex_stage_abort'
+  });
+  await abortDb.connect();
+  try {
+    await abortDb.query(fs.readFileSync('migrations/postgres/001_staging_rls.sql','utf8'));
+    baseline.customers[0].staffUserIds.push('field-a');
+    fs.writeFileSync(source,JSON.stringify(baseline),{mode:0o600});
+    const beforeAbortedImport=hashFile();
+    response=cli(['--apply'],{PGDATABASE:'apex_stage_abort'});
+    test('SQL grant constraint forces transaction-wide rollback after partial inserts',()=>{
+      assert.equal(response.status,1);
+      assert.match(response.stderr,/rolled back/);
+      assert.equal(hashFile(),beforeAbortedImport);
+    });
+    const after=await abortDb.query('SELECT count(*)::integer n FROM apex.tenants');
+    const afterRows=await abortDb.query('SELECT count(*)::integer n FROM apex.customer_records');
+    const afterImport=await abortDb.query('SELECT count(*)::integer n FROM apex.staging_imports');
+    test('Aborted import leaves ZERO tenant, customer data or provenance rows',()=>{
+      assert.equal(after.rows[0].n,0);
+      assert.equal(afterRows.rows[0].n,0);
+      assert.equal(afterImport.rows[0].n,0);
+    });
+  }finally{await abortDb.end();}
   console.log('POSTGRES STAGING SUMMARY: '+passed+'/'+passed+' PASSED');
 } finally {
   if(db)await db.end().catch(()=>{});
