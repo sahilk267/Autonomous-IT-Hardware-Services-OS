@@ -227,3 +227,12 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 - [GitHub Actions push #43042984912](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43042984912) PostgreSQL 16 staging **27/27**, authenticated SQL HTTP including project/ticket/asset/job workflows and signed context replay **93/93**, PostgreSQL dump/restore with attestation **18/18**. The same commit's existing TypeScript/build and Node backend job completed successfully.
 - Real PostgreSQL service checks include HMAC signature of tenant+actor+transaction+backend, rejection of unsigned/forged/replayed context, owner-only project sharing, field-assigned asset/job custody, customer membership grant/revoke, SQL audit and failure rollback, source SHA/parity, backup and restored RLS.
 - These verification numbers refer to **ephemeral CI fixtures, not a live Postgres deployment or a completed multi-tenant cutover**. Existing JSON application and production customer data were unchanged.
+
+## Phase 10.4 — 11 November 2026 (internal commerce drafts; not operational finance)
+
+- **P10.4-SQL** Implemented migration 005: FORCE-RLS quote draft, unverified internal proposal and RMA intake insert permissions; two composite tenant/customer draft ledgers for procurement (`REQUEST_DRAFT`) and owner finance (`PREVIEW_UNISSUED`). Foreign keys tie project/proposal, asset/RMA, quote/preview; server and DB reject forged verified payment/provider/OEM claims.
+- **P10.4-API** Authenticated staging-only create/list operations for quotes, proposals, RMAs, procurement drafts, finance previews; creator and owner authorizations validated in HMAC-signed PostgreSQL transactions. No actual dispatch/settlement/approval capability.
+- **P10.4-AUDIT** New SQL triggers audit every accepted insert and roll back complete finance drafts when audit fails. Direct SQL writer does not have financial/procurement UPDATE/DELETE. Existing JSON-backed app remains unchanged.
+- **P10.4-VERIFY** Tests added for five-role/customer access, linked FK cross-customer denial, invoice/PO/provider/OEM claim refusal, failed audit atomic rollback, source-parity and independent PG16 restore comparing 12 RLS tables. Final Actions evidence to be recorded after CI finishes.
+- **P0 BLOCKERS** Production SQL repositories, actual invoices/taxes/PO/payment/OEM/provider workflows, historical customer crosswalk, secure managed database, migration rollback, DR/Hostinger signoff. PR #1 still Draft; main untouched.
+- [Detailed Phase 10.4 report](PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).

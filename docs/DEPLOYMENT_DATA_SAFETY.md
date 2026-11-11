@@ -54,3 +54,7 @@ The optional `APEX_PG_PILOT_ENABLED` path exists only for the loopback `NODE_ENV
 ## Phase 10.3 context signing and database safety
 
 The 10.3 staging SQL pilot uses a separate 32-byte HMAC secret stored in privileged PostgreSQL staging data and supplied through the application runtime environment, not HTTP headers. The key binds actor/tenant to one PostgreSQL transaction and backend. Database dump/restore includes this staging key: **rotate or destroy the key after any copy**; never place it in Git, logs, public Hostinger files or end-user data. Stage assets/projects/tickets/jobs are NOT live customer records; normal JSON APIs remain authoritative. See [Phase 10.3 runbook](PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).
+
+## Phase 10.4 commerce pilot safety
+
+All PG pilot procurement items are `REQUEST_DRAFT` and finance rows `PREVIEW_UNISSUED` with tax `PENDING_CLASSIFICATION`. Do not issue/send them as real POs or invoices, charge funds or initiate OEM returns. Local PG pilot continues to require private 32-byte context key, disposable outside-checkout auth data and loopback staging only. No production Hostinger deployment is authorized. See [Phase 10.4 report](PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).

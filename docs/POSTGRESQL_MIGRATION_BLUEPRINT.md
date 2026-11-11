@@ -47,3 +47,7 @@ The read-only `scripts/postgres/verify_staging_parity.mjs` now checks the staged
 ## Phase 10.3 verified direction (staging, not production)
 
 Staging migrations 003 and 004 implement a per-transaction signed PostgreSQL context and limited project/ticket/asset/field-job repositories with forced RLS, field assignment/customer membership, same-transaction audit and negative authorization tests. These are narrower than the full multi-tenant transactional domain repositories still required. Source/target parity remains pre-pilot-import-only. Details: [Phase 10.3 security and domain report](PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).
+
+## Phase 10.4 staging-only draft progress
+
+Migration 005 now contains composite tenant/customer-linked RLS rules for unissued quotes, internal project proposals and asset RMAs; separate immutable procurement request and owner finance preview ledgers use FORCE RLS and SQL audit. See [Phase 10.4](PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md). These are NOT production invoices, orders, verified provider submissions or payments. Normal Express runtime remains JSON; historical migration and cutover are still blocked.

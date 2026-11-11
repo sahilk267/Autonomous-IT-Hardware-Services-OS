@@ -47,3 +47,7 @@ For any future environment, use a proper key-management system. Never commit or 
 - [GitHub Actions push #43042984912](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43042984912) PostgreSQL 16 staging **27/27**, authenticated SQL HTTP including project/ticket/asset/job workflows and signed context replay **93/93**, PostgreSQL dump/restore with attestation **18/18**. The same commit's existing TypeScript/build and Node backend job completed successfully.
 - Real PostgreSQL service checks include HMAC signature of tenant+actor+transaction+backend, rejection of unsigned/forged/replayed context, owner-only project sharing, field-assigned asset/job custody, customer membership grant/revoke, SQL audit and failure rollback, source SHA/parity, backup and restored RLS.
 - These verification numbers refer to **ephemeral CI fixtures, not a live Postgres deployment or a completed multi-tenant cutover**. Existing JSON application and production customer data were unchanged.
+
+## Phase 10.4 follow-on
+
+Unissued quote/proposal/RMA, procurement draft and owner finance preview ledgers have been added to the isolated signed PostgreSQL pilot. Nothing in this increment processes funds, issues tax invoices or dispatches external services. [Phase 10.4 report](PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).

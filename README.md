@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-11): Phase 10.3 staged PostgreSQL signed-identity and domain-repository increments implemented. NOT production-certified.** Customer/CRM/project/ticket/asset/field-job SQL pilot writes are tested in disposable databases; normal application API and customer data remain JSON-backed. Remaining service, procurement, finance and provider modules, fully normalized DB storage, production migration and Hostinger cutover are BLOCKED. See [Phase 10.3 report](docs/PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).
+> **Current status (2026-11-11): Phase 10.4 PostgreSQL commerce/procurement/finance STAGING drafts implemented; NOT production-certified.** Signed RLS enforces internal quotation drafts, linked unverified proposals and RMAs, and customer-bound procurement/owner finance preview ledgers. The main application remains JSON-backed; real invoice/GST, payment, PO dispatch, provider/OEM integration, data migration and Hostinger cutover are blocked. See [Phase 10.4 report](docs/PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -136,3 +136,9 @@ A real PostgreSQL 16 schema with tenant/customer composite FKs and forced RLS, r
 - Existing JSON `/api/*` endpoints and app UI are **not** cut over. A staging pilot is not a production integration, provider workflow or source of truth. Read [Phase 10.3 implementation and security report](docs/PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).
 
 **Phase 10.3 isolated PostgreSQL CI:** [Push #43042984912](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43042984912) — staging RLS/import/parity **27/27**, signed actor + SQL domain HTTP **93/93**, restored PostgreSQL security **18/18**. Normal application remains JSON-backed; do not deploy SQL pilot as production.
+
+## Phase 10.4 — strictly unissued commerce pilot
+
+- [PostgreSQL staging migration 005](migrations/postgres/005_staging_commerce_finance_drafts.sql) and [Phase 10.4 implementation/runbook](docs/PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).
+- Separate authenticated staging `/api/pg-pilot/quotes`, `/proposals`, `/rma`, `/procurement-drafts`, `/finance-previews` routes use real PostgreSQL RLS/foreign keys and same-transaction audit. No invoice is issued and no external payment, tax, purchase order, OEM or provider request is sent.
+- Production application and normal `/api/*` routes remain JSON-backed. Do not expose or deploy the staging pilot to live customers.
