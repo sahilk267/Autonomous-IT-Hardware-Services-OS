@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import pg from 'pg';
 import { applyMigrations, provisionTenant, importBackup } from '../scripts/postgres-admin.mjs';
 import { createSnapshot } from '../scripts/backup-data.mjs';
+import { backfillCriticalLedgers } from '../server/postgres/criticalLedger.mjs';
 
 const adminUrl = process.env.PG_TEST_URL;
 const url = adminUrl && new URL(adminUrl);
@@ -114,6 +115,12 @@ async function prepare() {
     await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_sessions TO apex_stage2_runtime');
     await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_records TO apex_stage2_runtime');
     await owner.query('GRANT SELECT, INSERT ON apex_audit TO apex_stage2_runtime');
+    await owner.query('GRANT SELECT, INSERT, UPDATE, DELETE ON apex_catalog_products TO apex_stage2_runtime');
+    await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_finance_invoices TO apex_stage2_runtime');
+    await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_finance_quotes TO apex_stage2_runtime');
+    await owner.query('GRANT SELECT, INSERT ON apex_invoice_settlements TO apex_stage2_runtime');
+    await owner.query('GRANT SELECT, INSERT ON apex_inventory_movements TO apex_stage2_runtime');
+    await owner.query('GRANT SELECT ON apex_critical_ledger_ready TO apex_stage2_runtime');
     return { owner, tenantA, tenantB, tenantC };
   } catch (error) {
     await owner.end();
@@ -221,6 +228,20 @@ test('real production Express API uses PostgreSQL with isolated tenants, session
     assert.equal(db.rows.length, 1);
     assert.deepEqual(db.rows[0].payload.users, []);
     assert.deepEqual(db.rows[0].payload.sessions, []);
+    assert.deepEqual(db.rows[0].payload.products, []);
+    assert.deepEqual(db.rows[0].payload.invoices, []);
+    assert.deepEqual(db.rows[0].payload.quotes, []);
+    assert.deepEqual(db.rows[0].payload.inventoryTransactions, []);
+    const normalizedProducts = await owner.query(
+      'SELECT sku,stock_available FROM apex_catalog_products WHERE tenant_id=$1', [tenantA.id]
+    );
+    assert.equal(normalizedProducts.rows.length, 1);
+    assert.equal(normalizedProducts.rows[0].stock_available, '3');
+    const normalizedInvoices = await owner.query(
+      'SELECT invoice_no,amount FROM apex_finance_invoices WHERE tenant_id=$1', [tenantA.id]
+    );
+    assert.equal(normalizedInvoices.rows.length, 1);
+    assert.equal(Number(normalizedInvoices.rows[0].amount), 1300);
     assert.ok(Number(db.rows[0].revision) >= 3);
 
     const wrongLoginA = await request(a, '/api/auth/login', 'POST', {
@@ -237,12 +258,43 @@ test('real production Express API uses PostgreSQL with isolated tenants, session
     const afterRestart = await request(a, '/api/products', 'GET', undefined, reLoginA.cookie);
     assert.deepEqual(afterRestart.data.data.map(item => item.sku), ['A-001']);
 
+    const adjustment = await request(a, `/api/products/${created.data.data.id}/stock-adjust`,
+      'POST', { delta: -2, reason: 'Used in approved bench repair' }, reLoginA.cookie);
+    assert.equal(adjustment.status, 200, JSON.stringify(adjustment.data));
+    assert.equal(adjustment.data.data.product.stockAvailable, 1);
+    const journal = await owner.query(
+      'SELECT movement_type,qty,previous_stock,new_stock FROM apex_inventory_movements WHERE tenant_id=$1',
+      [tenantA.id]
+    );
+    assert.equal(journal.rows.length, 1);
+    assert.equal(journal.rows[0].movement_type, 'OUT');
+    assert.equal(journal.rows[0].qty, '2');
+    const directStockPatch = await request(a, `/api/products/${created.data.data.id}`,
+      'PATCH', { stockAvailable: 99999 }, reLoginA.cookie);
+    assert.equal(directStockPatch.status, 400);
+
+    const invoiceNum = invoiceA.data.data.invoiceNo;
+    const settled = await request(a, `/api/invoices/${invoiceNum}/settle`,
+      'PATCH', { paymentReference: 'E2E-PAY-001', method: 'BANK' }, reLoginA.cookie);
+    assert.equal(settled.status, 200, JSON.stringify(settled.data));
+    const settledAgain = await request(a, `/api/invoices/${invoiceNum}/settle`,
+      'PATCH', { paymentReference: 'E2E-PAY-001' }, reLoginA.cookie);
+    assert.equal(settledAgain.status, 409);
+    const finance = await owner.query(
+      'SELECT status,amount FROM apex_finance_invoices WHERE tenant_id=$1', [tenantA.id]
+    );
+    assert.equal(finance.rows[0].status, 'SETTLED');
+    assert.equal(Number(finance.rows[0].amount), 1300);
+    const settlements = await owner.query(
+      'SELECT count(*)::int AS n FROM apex_invoice_settlements WHERE tenant_id=$1', [tenantA.id]
+    );
+    assert.equal(settlements.rows[0].n, 1);
+
+    // Destructive reset of the financial and inventory journals is forbidden.
     const reset = await request(a, '/api/state/reset', 'POST', { confirm: true }, reLoginA.cookie);
-    assert.equal(reset.status, 200, JSON.stringify(reset.data));
-    assert.equal(JSON.stringify(reset.data).includes('passwordHash'), false);
-    assert.equal(JSON.stringify(reset.data).includes('apex_session='), false);
+    assert.equal(reset.status, 409, JSON.stringify(reset.data));
     const resetList = await request(a, '/api/products', 'GET', undefined, reLoginA.cookie);
-    assert.deepEqual(resetList.data.data, []);
+    assert.deepEqual(resetList.data.data.map(x => x.stockAvailable), [1]);
     const stillLoggedIn = await request(a, '/api/auth/me', 'GET', undefined, reLoginA.cookie);
     assert.equal(stillLoggedIn.status, 200);
 
@@ -294,6 +346,25 @@ test('real production Express API uses PostgreSQL with isolated tenants, session
       assert.equal(moved.rows[0].payload.tenant.id, tenantC.id);
       assert.equal(moved.rows[0].payload.products[0].tenantId, tenantC.id);
       assert.deepEqual(moved.rows[0].payload.sessions, []);
+      await owner.query('BEGIN');
+      let verifiedCounts;
+      try {
+        await owner.query("SELECT set_config('apex.tenant_id', $1, true)", [tenantC.id]);
+        verifiedCounts = await backfillCriticalLedgers(owner, tenantC.id);
+        await owner.query('COMMIT');
+      } catch (error) {
+        await owner.query('ROLLBACK').catch(() => {});
+        throw error;
+      }
+      assert.equal(verifiedCounts.products, 1);
+      const backfilled = await owner.query(
+        'SELECT sku FROM apex_catalog_products WHERE tenant_id=$1', [tenantC.id]
+      );
+      assert.equal(backfilled.rows[0].sku, 'LEGACY-001');
+      const legacyWorkspace = await owner.query(
+        "SELECT payload FROM apex_records WHERE tenant_id=$1 AND record_type='workspace_state'", [tenantC.id]
+      );
+      assert.deepEqual(legacyWorkspace.rows[0].payload.products, []);
       const migratedUsers = await owner.query(
         "SELECT count(*)::int AS n FROM apex_memberships WHERE tenant_id=$1", [tenantC.id]
       );
