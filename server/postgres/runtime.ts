@@ -169,6 +169,7 @@ export class PostgresRuntime {
               s.expires_at
          FROM apex_sessions s
          JOIN apex_memberships m ON m.tenant_id = s.tenant_id AND m.user_id = s.user_id
+         JOIN apex_tenants t ON t.id = s.tenant_id AND t.disabled_at IS NULL
         WHERE s.tenant_id = $1 AND s.token_sha256 = $2
           AND s.revoked_at IS NULL AND s.expires_at > now() AND m.is_active = true`,
       [this.tenantId, hashSessionToken(token)]
