@@ -68,41 +68,78 @@ export function registerPostgresPilotRoutes(
       reject(403,'Authenticated actor does not belong to this staging tenant.');
     }
     const actor:Actor={userId:user.id,role:user.role,tenantId:currentTenant};
-    const client=await pool.connect();
-    let inTransaction=false;
-    try {
-      await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
-      inTransaction=true;
-      // Attest this exact database transaction and backend connection to the
-      // authenticated JSON session. A standalone SQL client cannot forge actor
-      // identity by supplying its own custom PostgreSQL GUC settings.
-      const nonce=await client.query(
-        'SELECT txid_current()::text AS txid, pg_backend_pid()::text AS backend');
-      const payload=[actor.tenantId,actor.userId,nonce.rows[0].txid,nonce.rows[0].backend].join('\n');
-      const signature=crypto.createHmac('sha256',
-        Buffer.from(process.env.APEX_PG_PILOT_CONTEXT_KEY!,'hex')).update(payload).digest('hex');
-      await client.query('SET LOCAL ROLE apex_pilot_writer');
-      await client.query("SELECT set_config('apex.tenant_id',$1,true)",[actor.tenantId]);
-      await client.query("SELECT set_config('apex.actor_id',$1,true)",[actor.userId]);
-      await client.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
-      const version=await client.query("SELECT stage_only FROM apex.schema_versions WHERE version='10.4a-commerce-drafts'");
-      if(version.rows.length!==1 || !version.rows[0].stage_only)
-        reject(503,'The required staging pilot schema is not installed.');
-      // Fail closed if JSON and SQL role/tenant records ever drift.
-      const sqlUser=await client.query(
-        'SELECT role FROM apex.staff WHERE tenant_id=$1 AND staff_id=$2 AND disabled_at IS NULL',
-        [actor.tenantId,actor.userId]);
-      if(sqlUser.rows.length!==1 || sqlUser.rows[0].role!==actor.role)
-        reject(403,'Authenticated local identity does not match the SQL staging role.');
-      const result=await operation(client,actor,req);
-      await client.query('COMMIT');
-      inTransaction=false;
-      return result;
-    } catch(error) {
-      if(inTransaction)await client.query('ROLLBACK').catch(()=>{});
-      throw error;
-    } finally {client.release();}
+    // Only retry transactions that cannot have committed. No external side
+    // effects are executed by this staging-only SQL service. Every attempt
+    // obtains a fresh serializable snapshot and a NEW transaction-bound signature.
+    for(let attempt=0;attempt<4;attempt++){
+      const client=await pool.connect();
+      let inTransaction=false;
+      try {
+        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+        inTransaction=true;
+        const nonce=await client.query(
+          'SELECT txid_current()::text AS txid, pg_backend_pid()::text AS backend');
+        const payload=[actor.tenantId,actor.userId,nonce.rows[0].txid,nonce.rows[0].backend].join('\n');
+        const signature=crypto.createHmac('sha256',
+          Buffer.from(process.env.APEX_PG_PILOT_CONTEXT_KEY!,'hex')).update(payload).digest('hex');
+        await client.query('SET LOCAL ROLE apex_pilot_writer');
+        await client.query("SELECT set_config('apex.tenant_id',$1,true)",[actor.tenantId]);
+        await client.query("SELECT set_config('apex.actor_id',$1,true)",[actor.userId]);
+        await client.query("SELECT set_config('apex.context_signature',$1,true)",[signature]);
+        const version=await client.query(
+          "SELECT stage_only FROM apex.schema_versions WHERE version='10.5a-idempotent-drafts'");
+        if(version.rows.length!==1 || !version.rows[0].stage_only)
+          reject(503,'The required staging pilot schema is not installed.');
+        const sqlUser=await client.query(
+          'SELECT role FROM apex.staff WHERE tenant_id=$1 AND staff_id=$2 AND disabled_at IS NULL',
+          [actor.tenantId,actor.userId]);
+        if(sqlUser.rows.length!==1 || sqlUser.rows[0].role!==actor.role)
+          reject(403,'Authenticated local identity does not match the SQL staging role.');
+        const result=await operation(client,actor,req);
+        await client.query('COMMIT');
+        inTransaction=false;
+        return result;
+      } catch(error: any) {
+        if(inTransaction)await client.query('ROLLBACK').catch(()=>{});
+        // 40001 serialization and 40P01 deadlocks are safe to retry AFTER rollback.
+        if((error?.code==='40001'||error?.code==='40P01') && attempt<3){
+          await new Promise(resolve=>setTimeout(resolve,20*(attempt+1)));
+          continue;
+        }
+        throw error;
+      } finally {client.release();}
+    }
+    return reject(503,'Staging SQL serialization retries exhausted.');
   }
+
+  function digestRequest(value: unknown): string {
+    return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  }
+  async function claimDraftKey(client:PoolClient,actor:Actor,req:Request,
+    operation:'PROCUREMENT_DRAFT'|'FINANCE_PREVIEW',customerId:string,
+    requestDigest:string,generatedId:string):Promise<{id:string;replay:boolean}> {
+    const key=req.get('Idempotency-Key');
+    if(key===undefined)return {id:generatedId,replay:false};
+    if(!/^[A-Za-z0-9._-]{12,80}$/.test(key))
+      reject(400,'Idempotency-Key must be 12–80 URL-safe characters.');
+    const inserted=await client.query(
+      "INSERT INTO apex.pilot_request_keys "+
+      "(tenant_id,actor_staff_id,request_key,operation,customer_id,request_sha256,resource_id) "+
+      "VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING RETURNING resource_id",
+      [actor.tenantId,actor.userId,key,operation,customerId,requestDigest,generatedId]);
+    if(inserted.rows.length===1)return {id:generatedId,replay:false};
+    const existing=await client.query(
+      "SELECT operation,customer_id,request_sha256,resource_id "+
+      "FROM apex.pilot_request_keys WHERE tenant_id=$1 AND actor_staff_id=$2 AND request_key=$3",
+      [actor.tenantId,actor.userId,key]);
+    if(existing.rows.length!==1 ||
+      existing.rows[0].operation!==operation ||
+      existing.rows[0].customer_id!==customerId ||
+      existing.rows[0].request_sha256!==requestDigest)
+      reject(409,'Idempotency key already belongs to a different draft request.');
+    return {id:existing.rows[0].resource_id,replay:true};
+  }
+
   const handler=(operation:PilotOperation):RequestHandler=>async(req,res)=>{
     res.setHeader('Cache-Control','no-store');
     try{
@@ -645,7 +682,20 @@ export function registerPostgresPilotRoutes(
       const customer=await client.query(
         'SELECT customer_id FROM apex.customers WHERE customer_id=$1',[body.customerId]);
       if(customer.rows.length!==1)reject(404,'Customer not visible or registered.');
-      const id='proc-draft-'+crypto.randomUUID();
+      const key=await claimDraftKey(client,actor,req,'PROCUREMENT_DRAFT',
+        body.customerId,digestRequest({
+          customerId:body.customerId,productName:body.productName.trim(),
+          qty:body.qty,estimatedUnitCost:body.estimatedUnitCost
+        }),'proc-draft-'+crypto.randomUUID());
+      if(key.replay){
+        const existing=await client.query(
+          "SELECT draft_id AS id,customer_id AS \"customerId\",created_by_staff_id AS \"createdByUserId\","+
+          "product_name AS \"productName\",required_qty AS qty,estimated_unit_cost AS \"estimatedUnitCost\",status "+
+          "FROM apex.pilot_procurement_drafts WHERE draft_id=$1",[key.id]);
+        if(existing.rows.length!==1)reject(409,'Original draft no longer accessible.');
+        return {status:200,data:existing.rows[0]};
+      }
+      const id=key.id;
       const result=await client.query(
         "INSERT INTO apex.pilot_procurement_drafts "+
         "(tenant_id,customer_id,draft_id,created_by_staff_id,product_name,required_qty,estimated_unit_cost) "+
@@ -682,7 +732,17 @@ export function registerPostgresPilotRoutes(
         quote.payload.taxStatus!=='PENDING_CLASSIFICATION' ||
         typeof quote.payload.subtotal!=='number')
         reject(409,'Only an unverified draft quotation can generate a preview.');
-      const id='fin-preview-'+crypto.randomUUID();
+      const key=await claimDraftKey(client,actor,req,'FINANCE_PREVIEW',
+        quote.customer_id,digestRequest({quoteId:body.quoteId}),'fin-preview-'+crypto.randomUUID());
+      if(key.replay){
+        const previous=await client.query(
+          "SELECT preview_id AS id,customer_id AS \"customerId\",quote_id AS \"quoteId\","+
+          "subtotal,status,tax_status AS \"taxStatus\",created_by_staff_id AS \"createdByUserId\" "+
+          "FROM apex.pilot_finance_previews WHERE preview_id=$1",[key.id]);
+        if(previous.rows.length!==1)reject(409,'Original unissued preview not available.');
+        return {status:200,data:previous.rows[0]};
+      }
+      const id=key.id;
       const inserted=await client.query(
         "INSERT INTO apex.pilot_finance_previews "+
         "(tenant_id,customer_id,preview_id,created_by_staff_id,quote_id,subtotal) "+
