@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import { spawn } from 'node:child_process';
 import pg from 'pg';
-import { applyMigrations, provisionTenant } from '../scripts/postgres-admin.mjs';
+import { applyMigrations, provisionTenant, importBackup } from '../scripts/postgres-admin.mjs';
+import { createSnapshot } from '../scripts/backup-data.mjs';
 
 const adminUrl = process.env.PG_TEST_URL;
 const url = adminUrl && new URL(adminUrl);
@@ -100,6 +104,7 @@ async function prepare() {
     await applyMigrations(owner);
     const tenantA = await provisionTenant(owner, 'stage2-tenant-a', 'Stage 2 Company A');
     const tenantB = await provisionTenant(owner, 'stage2-tenant-b', 'Stage 2 Company B');
+    const tenantC = await provisionTenant(owner, 'stage2-tenant-c', 'Legacy Import Company');
     await owner.query(
       `CREATE ROLE apex_stage2_runtime LOGIN PASSWORD '${runtimePassword}' NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE`
     );
@@ -109,7 +114,7 @@ async function prepare() {
     await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_sessions TO apex_stage2_runtime');
     await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_records TO apex_stage2_runtime');
     await owner.query('GRANT SELECT, INSERT ON apex_audit TO apex_stage2_runtime');
-    return { owner, tenantA, tenantB };
+    return { owner, tenantA, tenantB, tenantC };
   } catch (error) {
     await owner.end();
     throw error;
@@ -117,7 +122,7 @@ async function prepare() {
 }
 
 test('real production Express API uses PostgreSQL with isolated tenants, sessions and transactions', { timeout: 110_000 }, async () => {
-  const { owner, tenantA, tenantB } = await prepare();
+  const { owner, tenantA, tenantB, tenantC } = await prepare();
   let a; let b;
   try {
     a = await startTenantServer(tenantA.id, 31541, 'tenant-a.example.test');
@@ -245,6 +250,57 @@ test('real production Express API uses PostgreSQL with isolated tenants, session
     assert.equal(logoutB.status, 200);
     const afterLogout = await request(b, '/api/products', 'GET', undefined, setupB.cookie);
     assert.equal(afterLogout.status, 401);
+
+    // Operator-led import is dry-run first, then atomic and overwrite-proof.
+    // This fixture intentionally has no sessions field (pre-session legacy format).
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'apex-stage2-import-'));
+    try {
+      const legacySalt = crypto.randomBytes(16).toString('hex');
+      const legacyHash = crypto.scryptSync('legacy-owner-password-2026', legacySalt, 64).toString('hex');
+      const keys = [
+        'products', 'leads', 'quotes', 'telegramMessages', 'suppliers', 'rfqs',
+        'tickets', 'endpoints', 'jobs', 'assets', 'licenses', 'amcs', 'projects',
+        'proposals', 'providers', 'events', 'invoices', 'workflows', 'connectors',
+        'rmaClaims', 'knowledgeArticles', 'crmOpportunities', 'marketplaceDisputes',
+        'inventoryTransactions',
+      ];
+      const legacy = {
+        tenant: { id: 'tenant-1', name: 'Legacy Co', currency: '₹', gstin: '', state: '', logoText: 'LEG', isConfigured: true },
+        users: [{ id: 'usr-old', username: 'legacyowner', name: 'Legacy Owner', email: 'legacy@example.test',
+          role: 'BUSINESS_OWNER', tenantId: 'tenant-1', salt: legacySalt, passwordHash: legacyHash }],
+        ...Object.fromEntries(keys.map(key => [key, []])),
+        lastUpdated: new Date().toISOString(),
+      };
+      legacy.products.push({ id: 'old-product', tenantId: 'tenant-1', name: 'Migrated Stock', sku: 'LEGACY-001' });
+      const sourceDir = path.join(tmp, 'original');
+      fs.mkdirSync(sourceDir);
+      const source = path.join(sourceDir, 'app-store.json');
+      fs.writeFileSync(source, JSON.stringify(legacy));
+      const backup = createSnapshot(source, path.join(tmp, 'backups'));
+      const dryRun = await importBackup(owner, tenantC.id, backup.manifestFile, true);
+      assert.equal(dryRun.dryRun, true);
+      const beforeImport = await owner.query(
+        "SELECT count(*)::int AS n FROM apex_records WHERE tenant_id=$1", [tenantC.id]
+      );
+      assert.equal(beforeImport.rows[0].n, 0);
+      const imported = await importBackup(owner, tenantC.id, backup.manifestFile, false);
+      assert.equal(imported.imported, true);
+      await assert.rejects(() => importBackup(owner, tenantC.id, backup.manifestFile, false),
+        /already has accounts or workspace data/);
+      const moved = await owner.query(
+        "SELECT payload FROM apex_records WHERE tenant_id=$1 AND record_type='workspace_state'",
+        [tenantC.id]
+      );
+      assert.equal(moved.rows[0].payload.tenant.id, tenantC.id);
+      assert.equal(moved.rows[0].payload.products[0].tenantId, tenantC.id);
+      assert.deepEqual(moved.rows[0].payload.sessions, []);
+      const migratedUsers = await owner.query(
+        "SELECT count(*)::int AS n FROM apex_memberships WHERE tenant_id=$1", [tenantC.id]
+      );
+      assert.equal(migratedUsers.rows[0].n, 1);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
 
     const audits = await owner.query('SELECT action FROM apex_audit WHERE tenant_id=$1', [tenantA.id]);
     assert.ok(audits.rows.some(row => row.action === 'auth.bootstrap'));
