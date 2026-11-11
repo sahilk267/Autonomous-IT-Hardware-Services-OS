@@ -153,6 +153,30 @@ test('real production Express API uses PostgreSQL with isolated tenants, session
     });
     assert.equal(repeated.status, 403);
 
+    const operator = await request(a, '/api/admin/users', 'POST', {
+      username: 'engineer', password: 'operator-secret-password-2026',
+      role: 'FIELD_ENGINEER', name: 'Engineer A',
+    }, setupA.cookie);
+    assert.equal(operator.status, 201, JSON.stringify(operator.data));
+    const operatorLogin = await request(a, '/api/auth/login', 'POST', {
+      username: 'engineer', password: 'operator-secret-password-2026',
+    });
+    assert.equal(operatorLogin.status, 200, JSON.stringify(operatorLogin.data));
+    const unauthorizedOwnerEdit = await request(a, '/api/tenant', 'POST', {
+      name: 'Attacker Tenant Rename',
+    }, operatorLogin.cookie);
+    assert.equal(unauthorizedOwnerEdit.status, 403);
+    const unauthorizedSettlement = await request(a, '/api/invoices/INV-UNKNOWN/settle', 'PATCH', {
+      method: 'cash', paymentReference: 'forged',
+    }, operatorLogin.cookie);
+    assert.equal(unauthorizedSettlement.status, 403);
+    const crossTenantOwner = await request(b, '/api/admin/users', 'GET', undefined, setupA.cookie);
+    assert.equal(crossTenantOwner.status, 401);
+    const disabled = await request(a, `/api/admin/users/${operator.data.user.id}/disable`, 'POST', {}, setupA.cookie);
+    assert.equal(disabled.status, 200, JSON.stringify(disabled.data));
+    const afterDisable = await request(a, '/api/products', 'GET', undefined, operatorLogin.cookie);
+    assert.equal(afterDisable.status, 401);
+
     const invalidCrossSession = await request(a, '/api/tenant', 'GET', undefined, setupB.cookie);
     assert.equal(invalidCrossSession.status, 401, JSON.stringify(invalidCrossSession.data));
 
@@ -180,7 +204,7 @@ test('real production Express API uses PostgreSQL with isolated tenants, session
 
     const state = await request(a, '/api/state', 'GET', undefined, setupA.cookie);
     assert.equal(state.status, 200);
-    assert.equal(state.data.data.users.length, 1);
+    assert.equal(state.data.data.users.length, 1); // disabled operators are not active
     assert.equal(JSON.stringify(state.data).includes('passwordHash'), false);
     assert.equal(JSON.stringify(state.data).includes('apex_session='), false);
     assert.equal(JSON.stringify(state.data).includes('secret-password-A'), false);
