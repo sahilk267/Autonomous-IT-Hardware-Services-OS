@@ -63,3 +63,7 @@ This proves **two test processes using one PostgreSQL database**, not production
 **Next recommendation: Phase 10.5C / 10.6** — select one existing real JSON business endpoint for controlled dual-read against PostgreSQL in an offline/shadow nonproduction fixture; build a transactionally consistent outbox for future provider event delivery while leaving delivery disabled; add approved migration parity checks and real multi-tenant independent process isolation. Require explicit release approval before any live cutover.
 
 **Do not merge PR #1 or deploy SQL pilot to production. `main` remains unchanged.**
+
+## Phase 10.5C staging continuation
+
+An append-only, SQL-triggered **inert** service outbox now tracks one pending internal event per normalized work-order revision and rolls back with any failing service/audit mutation. Read-only shadow comparator checks actual JSON API route visibility against imported SQL, and a customer-specific SHA/grant manifest flags unapproved legacy ownership. There is no dispatcher or production cutover. [Full Phase 10.5C report](PHASE_10_5C_SHADOW_OUTBOX_RECONCILIATION_2026-11-12.md).

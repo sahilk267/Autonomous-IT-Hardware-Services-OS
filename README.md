@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-12): Phase 10.5A and Phase 10.5B staging PostgreSQL tests GREEN; production cutover remains BLOCKED.** Signed actor RLS, idempotent procurement/finance draft retries, normalized service work orders and two independent server-instance revision races are verified in disposable PG16 CI. Normal app JSON source of truth remains unchanged. See [Phase 10.5B report](docs/PHASE_10_5B_NORMALIZED_SERVICE_MULTI_INSTANCE_2026-11-12.md).
+> **Current status (2026-11-12): Phase 10.5C PostgreSQL staging shadow parity, per-customer migration manifests and transaction-atomic INERT outbox implemented. Production cutover BLOCKED.** The original JSON application remains authoritative. Actual authenticated JSON GET views are compared read-only against staged SQL for 18 role/route combinations; outbox delivery remains permanently disabled. See [Phase 10.5C report](docs/PHASE_10_5C_SHADOW_OUTBOX_RECONCILIATION_2026-11-12.md).
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -155,3 +155,10 @@ A real PostgreSQL 16 schema with tenant/customer composite FKs and forced RLS, r
 - [Migration 007](migrations/postgres/007_staging_normalized_service_orders.sql): normalized, customer-scoped work orders and append-only transitions, SQL-owned optimistic revision, manager-only assignment, real customer-grant revocation, sequential internal states, FORCE RLS and same-transaction audit.
 - [Two independent server process test](tests/postgres/multi_instance_workorders.mjs): **26/26** real HTTP tests; a race on one expected version succeeds once and rejects the competing update with HTTP 409, with no duplicate SQL history or audit.
 - [Full Phase 10.5B implementation and CI report](docs/PHASE_10_5B_NORMALIZED_SERVICE_MULTI_INSTANCE_2026-11-12.md). Verified [Push CI #43102224573](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43102224573) and [PR CI #43102234533](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43102234533), both SUCCESS (PG stage 27, HTTP 155, multi-instance 26, cutover 8, restore 29). Production JSON and external provider workflows remain unchanged.
+
+## Phase 10.5C — safe shadow comparison, historical reconciliation and inert SQL outbox
+
+- [Actual JSON HTTP ↔ PostgreSQL RLS shadow comparator](scripts/postgres/shadow_route_parity.mjs): 18 authenticated read-only route/role checks on disposable snapshots, source SHA provenance, no business writes, intentional SQL tamper negative test.
+- [Historical per-customer reconciliation manifest](scripts/postgres/customer_reconciliation_manifest.mjs): tenant/customer/grants/record canonical SHA comparison, including linked proposals/RMA; owner-only legacy collections remain **unmapped and blocked for production**.
+- [Migration 008 transactional outbox](migrations/postgres/008_staging_shadow_outbox.sql): FORCE RLS, one pending event per committed normalized work-order revision, trigger-atomic with history/audit. **No dispatcher, no enabled delivery, no external effects.** 16 FORCE-RLS staging tables total.
+- [Phase 10.5C verified baseline, test matrix and production blockers](docs/PHASE_10_5C_SHADOW_OUTBOX_RECONCILIATION_2026-11-12.md). The existing normal JSON API, customer data and `main` remain unchanged.
