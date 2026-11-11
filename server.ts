@@ -366,7 +366,7 @@ app.get('/api/products', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().products });
 });
 
-app.post('/api/products', requireAuth, (req, res) => {
+app.post('/api/products', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const prod = req.body;
     if (!prod || !prod.name || !prod.sku) {
@@ -395,8 +395,13 @@ app.post('/api/products', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/products/:id', requireAuth, (req, res) => {
+app.patch('/api/products/:id', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
+    if (postgresRuntime && req.body && ('stockAvailable' in req.body || 'stockReserved' in req.body)) {
+      return res.status(400).json({
+        success: false, error: 'Use the audited stock-adjustment API for PostgreSQL inventory changes',
+      });
+    }
     const updated = dbStore.updateProduct(req.params.id, req.body);
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Product not found' });
@@ -407,7 +412,7 @@ app.patch('/api/products/:id', requireAuth, (req, res) => {
   }
 });
 
-app.delete('/api/products/:id', requireAuth, (req, res) => {
+app.delete('/api/products/:id', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const deleted = dbStore.deleteProduct(req.params.id);
     if (!deleted) {
@@ -416,6 +421,53 @@ app.delete('/api/products/:id', requireAuth, (req, res) => {
     res.json({ success: true, message: 'Product deleted' });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Audited stock adjustment. Never allow clients to patch stock balances without
+// a matching append-only inventory movement inside the same SQL transaction.
+app.post('/api/products/:id/stock-adjust', requireAuth,
+  requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
+  if (!postgresRuntime) return res.status(501).json({
+    success: false, error: 'Audited stock adjustments require PostgreSQL mode',
+  });
+  try {
+    const delta = req.body?.delta;
+    const reason = req.body?.reason;
+    if (!Number.isSafeInteger(delta) || delta === 0 || Math.abs(delta) > 1000000 ||
+        typeof reason !== 'string' || reason.trim().length < 3 || reason.length > 300) {
+      return res.status(400).json({ success: false, error: 'Valid nonzero integer delta and reason (3-300 characters) required' });
+    }
+    const adjusted = dbStore.commit(draft => {
+      const item = draft.products.find(p => p.id === req.params.id);
+      if (!item) return null;
+      const previousStock = item.stockAvailable ?? 0;
+      const next = previousStock + delta;
+      if (!Number.isSafeInteger(next) || next < (item.stockReserved ?? 0)) {
+        throw new Error('Stock adjustment would violate reserved or available stock limits');
+      }
+      item.stockAvailable = next;
+      const movement = {
+        id: `tx-${crypto.randomUUID()}`,
+        tenantId: draft.tenant.id,
+        productId: item.id,
+        sku: item.sku,
+        productName: item.name,
+        type: delta > 0 ? 'IN' as const : 'OUT' as const,
+        qty: Math.abs(delta),
+        previousStock,
+        newStock: next,
+        reason: reason.trim(),
+        referenceId: `manual-adjustment:${(req as any).user.userId}`,
+        timestamp: new Date().toISOString(),
+      };
+      draft.inventoryTransactions.push(movement);
+      return { product: item, movement };
+    });
+    if (!adjusted) return res.status(404).json({ success: false, error: 'Product not found' });
+    return res.json({ success: true, data: adjusted });
+  } catch (error: any) {
+    return res.status(400).json({ success: false, error: error.message });
   }
 });
 
@@ -652,8 +704,13 @@ app.get('/api/invoices', requireAuth, (req, res) => {
 app.post('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
     const inv = req.body;
-    if (!inv || !inv.customer || !inv.amount) {
-      return res.status(400).json({ success: false, error: 'Customer and amount are required' });
+    if (!inv || typeof inv.customer !== 'string' || !inv.customer.trim() ||
+        typeof inv.amount !== 'number' || !Number.isFinite(inv.amount) ||
+        inv.amount <= 0 || !Number.isInteger(inv.amount * 100) ||
+        (inv.status && inv.status !== 'ACTIVE')) {
+      return res.status(400).json({
+        success: false, error: 'A valid positive invoice amount and ACTIVE status are required',
+      });
     }
     const created = dbStore.addInvoice({
       ...inv,
