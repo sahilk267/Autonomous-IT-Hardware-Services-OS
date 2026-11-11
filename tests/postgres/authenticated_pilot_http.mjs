@@ -197,6 +197,7 @@ try {
     assert.ok(events.some(e=>e.entity==='customer_records'&&e.operation==='UPDATE'));
     assert.ok(events.every(e=>e.actor==='owner-a'||e.actor==='sales-a'));
   });
+  await client.connect();
   const before=await count('customers');
   // Deliberately fail the audit trigger. The row insert must roll back atomically.
   await client.query("ALTER TABLE apex.pilot_audit_events ADD CONSTRAINT test_reject_new_customer_audit CHECK (entity <> 'customers') NOT VALID");
@@ -206,10 +207,10 @@ try {
       assert.equal(r.status,503);
       assert.equal(r.data.success,false);
     });
-    test('Failed audit trigger rolls back customer creation in same transaction',async()=>{
-      // async assertion below; keeping check synchronous for test counter
+    const after=await count('customers');
+    test('Failed audit trigger rolls back customer creation in same transaction',()=>{
+      assert.equal(after,before);
     });
-    assert.equal(await count('customers'),before);
   }finally{
     await client.query('ALTER TABLE apex.pilot_audit_events DROP CONSTRAINT test_reject_new_customer_audit');
   }
