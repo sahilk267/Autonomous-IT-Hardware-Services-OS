@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { verifySnapshot } from './backup-data.mjs';
 
@@ -71,11 +72,13 @@ const collections = [
 function validateImportSnapshot(snapshot, targetTenantId) {
   if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot) ||
       !snapshot.tenant || typeof snapshot.tenant.id !== 'string' ||
-      !Array.isArray(snapshot.users) || !Array.isArray(snapshot.sessions)) {
+      !Array.isArray(snapshot.users) ||
+      (snapshot.sessions !== undefined && !Array.isArray(snapshot.sessions))) {
     throw new Error('Legacy snapshot has an invalid shape');
   }
   const originalTenant = snapshot.tenant.id;
   const state = structuredClone(snapshot);
+  if (state.sessions === undefined) state.sessions = []; // valid pre-session legacy format
   for (const key of collections) {
     if (!Array.isArray(state[key])) throw new Error(`Legacy collection ${key} missing`);
     for (const item of state[key]) {
@@ -207,7 +210,7 @@ async function main() {
   }
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch(error => {
     console.error(`PostgreSQL administrative command failed: ${error.message}`);
     process.exitCode = 1;
