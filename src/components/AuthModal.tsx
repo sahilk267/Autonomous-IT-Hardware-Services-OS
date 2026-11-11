@@ -167,7 +167,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <span className="font-semibold block mb-0.5">Initial Security Setup Required:</span>
                 {window.apexDesktop
                   ? 'Your desktop app created a protected setup token. Create the Business Owner account; the token is filled locally.'
-                  : 'Enter the one-time workspace-specific setup authorization token from your administrator, then create the Business Owner account. The token is never saved in the browser.'}
+                  : isDynamicWorkspace
+                    ? 'Enter the one-time workspace-specific enrollment token from your administrator. It works only for this selected workspace.'
+                    : 'Enter the one-time server setup authorization token, then create the Business Owner account. The token is never saved in the browser.'}
               </div>
 
               <div>
