@@ -233,9 +233,11 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
       }
       const result = await transact(runtime, async client => {
         const user = await client.query(
-          `SELECT user_id, username, password_hash, display_name, email, role
-             FROM apex_memberships WHERE tenant_id = $1 AND lower(username) = lower($2)
-               AND is_active = true`,
+          `SELECT m.user_id, m.username, m.password_hash, m.display_name, m.email, m.role
+             FROM apex_memberships m
+             JOIN apex_tenants t ON t.id = m.tenant_id AND t.disabled_at IS NULL
+            WHERE m.tenant_id = $1 AND lower(m.username) = lower($2)
+              AND m.is_active = true`,
           [runtime.tenantId, username.trim()]
         );
         const account = user.rows[0];
