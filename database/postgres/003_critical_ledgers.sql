@@ -162,6 +162,30 @@ CREATE POLICY apex_quotes_scope ON apex_finance_quotes FOR ALL
   WITH CHECK (tenant_id = NULLIF(current_setting('apex.tenant_id', true), '')::uuid);
 CREATE POLICY apex_ledger_ready_scope ON apex_critical_ledger_ready FOR SELECT
   USING (tenant_id = NULLIF(current_setting('apex.tenant_id', true), '')::uuid);
+CREATE POLICY apex_ledger_ready_initial ON apex_critical_ledger_ready FOR INSERT
+  WITH CHECK (tenant_id = NULLIF(current_setting('apex.tenant_id', true), '')::uuid);
+
+-- A database-level guard forbids incorrectly marking a legacy business
+-- workspace as normalized merely because the runtime role can INSERT.
+CREATE OR REPLACE FUNCTION apex_guard_initial_ledger_ready()
+RETURNS trigger LANGUAGE plpgsql AS $
+DECLARE old_workspace jsonb;
+BEGIN
+  SELECT payload INTO old_workspace FROM apex_records
+    WHERE tenant_id=NEW.tenant_id AND record_type='workspace_state' AND record_id='current';
+  IF old_workspace IS NOT NULL AND (
+      coalesce(jsonb_array_length(old_workspace->'products'),0) > 0 OR
+      coalesce(jsonb_array_length(old_workspace->'invoices'),0) > 0 OR
+      coalesce(jsonb_array_length(old_workspace->'inventoryTransactions'),0) > 0 OR
+      coalesce(jsonb_array_length(old_workspace->'quotes'),0) > 0
+  ) THEN
+    RAISE EXCEPTION 'Legacy workspace contains unbackfilled critical records';
+  END IF;
+  RETURN NEW;
+END $;
+CREATE TRIGGER apex_guard_initial_ledger_ready
+BEFORE INSERT ON apex_critical_ledger_ready
+FOR EACH ROW EXECUTE FUNCTION apex_guard_initial_ledger_ready();
 
 -- Even a misconfigured app grant should fail to rewrite settled transactions
 -- and movements: no UPDATE or DELETE policies on append-only tables.
