@@ -6,6 +6,7 @@ import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { dbStore, defaultConnectors, hashPassword, verifyPassword } from './server/db.ts';
 import { UserRole } from './src/types.ts';
+import { LoginRateLimiter, verifySetupToken, sessionCookie, expiredSessionCookie } from './server/security.ts';
 
 const app = express();
 
@@ -23,6 +24,8 @@ function resolvePort(): number {
 }
 
 const PORT = resolvePort();
+const loginRateLimiter = new LoginRateLimiter();
+const isProduction = process.env.NODE_ENV === 'production';
 
 app.use(express.json());
 
@@ -62,7 +65,11 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
   if (!session) {
     return res.status(401).json({ success: false, error: 'Unauthorized: Session invalid or expired' });
   }
-  (req as any).user = session;
+  const user = dbStore.getUserById(session.userId);
+  if (!user || user.tenantId !== dbStore.getState().tenant.id) {
+    return res.status(401).json({ success: false, error: 'Unauthorized: Account is no longer active in this workspace' });
+  }
+  (req as any).user = { ...session, username: user.username, role: user.role };
   next();
 }
 
@@ -95,7 +102,6 @@ function getGeminiClient(): GoogleGenAI | null {
 
 // 1. Health check & configuration status (Safe public endpoint - NO confidential business or PII leak)
 app.get('/api/health', (req, res) => {
-  const state = dbStore.getState();
   const geminiConfigured = !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY';
   const telegramConfigured = !!process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'MY_TELEGRAM_BOT_TOKEN';
 
@@ -109,19 +115,7 @@ app.get('/api/health', (req, res) => {
       payments: process.env.RAZORPAY_KEY_ID ? 'CONFIGURED' : 'NOT_CONFIGURED',
       gst: process.env.GST_API_KEY ? 'CONFIGURED' : 'NOT_CONFIGURED'
     },
-    database: {
-      status: 'ready',
-      recordCounts: {
-        products: state.products.length,
-        quotes: state.quotes.length,
-        invoices: state.invoices.length,
-        tickets: state.tickets.length,
-        jobs: state.jobs.length,
-        assets: state.assets.length,
-        projects: state.projects.length,
-        events: state.events.length
-      }
-    }
+    database: { status: 'ready' }
   });
 });
 
@@ -130,12 +124,14 @@ app.get('/api/auth/status', (req, res) => {
   const users = dbStore.getUsers();
   const token = getSessionToken(req);
   const session = token ? dbStore.getSession(token) : null;
+  const account = session ? dbStore.getUserById(session.userId) : null;
+  const active = !!account && account.tenantId === dbStore.getState().tenant.id;
   res.json({
     success: true,
     needsSetup: users.length === 0,
     setupRequired: users.length === 0,
-    authenticated: !!session,
-    user: session ? {
+    authenticated: active,
+    user: active && session ? {
       id: session.userId,
       username: session.username,
       role: session.role
@@ -150,12 +146,19 @@ app.post('/api/auth/setup', (req, res) => {
     if (users.length > 0) {
       return res.status(403).json({ success: false, error: 'Initial administrator enrollment is already completed.' });
     }
-    const { username, password, name, email } = req.body;
+    const setupTokenResult = verifySetupToken(process.env.APEX_SETUP_TOKEN, req.body?.setupToken);
+    if (setupTokenResult === 'unconfigured') {
+      return res.status(503).json({ success: false, error: 'Setup is locked. Configure APEX_SETUP_TOKEN (32+ characters) on the server before enrollment.' });
+    }
+    if (setupTokenResult !== 'valid') {
+      return res.status(403).json({ success: false, error: 'Invalid setup authorization token.' });
+    }
+    const { username, password, name, email } = req.body ?? {};
     if (!username || typeof username !== 'string' || username.trim().length < 3) {
       return res.status(400).json({ success: false, error: 'Username must be at least 3 characters.' });
     }
-    if (!password || typeof password !== 'string' || password.length < 8) {
-      return res.status(400).json({ success: false, error: 'Password must be at least 8 characters.' });
+    if (!password || typeof password !== 'string' || password.length < 12) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 12 characters.' });
     }
 
     const { salt, hash } = hashPassword(password);
@@ -173,7 +176,7 @@ app.post('/api/auth/setup', (req, res) => {
 
     dbStore.addUser(newUser);
     const session = dbStore.createSession(newUser.id, newUser.username, newUser.role);
-    res.setHeader('Set-Cookie', `apex_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+    res.setHeader('Set-Cookie', sessionCookie(session.token, isProduction));
     res.status(201).json({
       success: true,
       user: {
@@ -183,8 +186,7 @@ app.post('/api/auth/setup', (req, res) => {
         email: newUser.email,
         role: newUser.role,
         tenantId: newUser.tenantId
-      },
-      token: session.token
+      }
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -194,21 +196,30 @@ app.post('/api/auth/setup', (req, res) => {
 // Secure Login (scrypt KDF verification)
 app.post('/api/auth/login', (req, res) => {
   try {
-    const { username, password } = req.body;
-    if (!username || !password) {
+    const { username, password } = req.body ?? {};
+    if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) {
       return res.status(400).json({ success: false, error: 'Username and password are required.' });
+    }
+    const key = `${req.ip || req.socket.remoteAddress || 'unknown'}:${username.toLowerCase().trim()}`;
+    const retryAfter = loginRateLimiter.check(key);
+    if (retryAfter) {
+      res.setHeader('Retry-After', String(retryAfter));
+      return res.status(429).json({ success: false, error: 'Too many login attempts. Try again later.' });
     }
     const user = dbStore.getUserByUsername(username);
     if (!user || !user.salt || !user.passwordHash) {
+      loginRateLimiter.fail(key);
       return res.status(401).json({ success: false, error: 'Invalid username or password.' });
     }
     const isValid = verifyPassword(password, user.salt, user.passwordHash);
     if (!isValid) {
+      loginRateLimiter.fail(key);
       return res.status(401).json({ success: false, error: 'Invalid username or password.' });
     }
 
+    loginRateLimiter.success(key);
     const session = dbStore.createSession(user.id, user.username, user.role);
-    res.setHeader('Set-Cookie', `apex_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+    res.setHeader('Set-Cookie', sessionCookie(session.token, isProduction));
     res.json({
       success: true,
       user: {
@@ -218,8 +229,7 @@ app.post('/api/auth/login', (req, res) => {
         email: user.email,
         role: user.role,
         tenantId: user.tenantId
-      },
-      token: session.token
+      }
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -230,15 +240,7 @@ app.post('/api/auth/login', (req, res) => {
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
   const session = (req as any).user;
-  const user = dbStore.getUserById(session.userId) || {
-    id: session.userId,
-    username: session.username,
-    name: session.username,
-    email: `${session.username}@apex-it.internal`,
-    role: session.role,
-    tenantId: dbStore.getState().tenant.id,
-    createdAt: session.createdAt
-  };
+  const user = dbStore.getUserById(session.userId)!;
   res.json({
     success: true,
     user: {
@@ -258,7 +260,7 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
   if (token) {
     dbStore.deleteSession(token);
   }
-  res.setHeader('Set-Cookie', 'apex_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+  res.setHeader('Set-Cookie', expiredSessionCookie(isProduction));
   res.json({ success: true, message: 'Logged out successfully.' });
 });
 
@@ -266,7 +268,7 @@ app.get('/api/tenant', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().tenant });
 });
 
-app.post('/api/tenant', requireAuth, (req, res) => {
+app.post('/api/tenant', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const { name, gstin, state, address, contactEmail, contactPhone, pan } = req.body;
     const updated = dbStore.updateTenant({
@@ -593,7 +595,7 @@ app.patch('/api/quotes/:id/approve', requireAuth, requireRole('BUSINESS_OWNER'),
   }
 });
 
-app.patch('/api/quotes/:id/reject', requireAuth, (req, res) => {
+app.patch('/api/quotes/:id/reject', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const { reason } = req.body;
     const actor = (req as any).user?.username || 'Business Owner';
@@ -657,7 +659,7 @@ app.post('/api/invoices', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/invoices/:invoiceNo/settle', requireAuth, (req, res) => {
+app.patch('/api/invoices/:invoiceNo/settle', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const { paymentReference, method } = req.body;
     const settled = dbStore.settleInvoice(req.params.invoiceNo, { paymentReference, method });
@@ -1242,28 +1244,9 @@ app.get('/api/events', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().events });
 });
 
-app.post('/api/events', requireAuth, (req, res) => {
-  try {
-    const { eventType, summary, autonomousActionTaken, humanApprovalRequired, approvalStatus } = req.body;
-    if (!summary || !eventType) {
-      return res.status(400).json({ success: false, error: 'eventType and summary are required' });
-    }
-    const agent = (req as any).user?.username || 'System';
-    const created = dbStore.addEvent({
-      id: `evt-${crypto.randomUUID()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType,
-      agent,
-      summary,
-      autonomousActionTaken: autonomousActionTaken || 'Action recorded in audit log.',
-      humanApprovalRequired: !!humanApprovalRequired,
-      approvalStatus: approvalStatus || 'AUTO_APPROVED',
-      confidenceScore: 1.0
-    });
-    res.status(201).json({ success: true, data: created });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+// Audit records are authoritative server transitions, never user-submitted approval claims.
+app.post('/api/events', requireAuth, (_req, res) => {
+  return res.status(405).json({ success: false, error: 'Direct audit event creation is disabled. Server transitions emit audit evidence.' });
 });
 
 // Telegram Live Webhook (P1.4 Verified webhook secret & exact quote match)
