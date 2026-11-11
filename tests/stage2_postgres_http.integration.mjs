@@ -120,7 +120,7 @@ async function prepare() {
     await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_finance_quotes TO apex_stage2_runtime');
     await owner.query('GRANT SELECT, INSERT ON apex_invoice_settlements TO apex_stage2_runtime');
     await owner.query('GRANT SELECT, INSERT ON apex_inventory_movements TO apex_stage2_runtime');
-    await owner.query('GRANT SELECT ON apex_critical_ledger_ready TO apex_stage2_runtime');
+    await owner.query('GRANT SELECT, INSERT ON apex_critical_ledger_ready TO apex_stage2_runtime');
     return { owner, tenantA, tenantB, tenantC };
   } catch (error) {
     await owner.end();
