@@ -111,6 +111,10 @@ jobs:
           psql -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE apex_stage_restored'
           dump="$RUNNER_TEMP/apex-phase10-throwaway.dump"
           trap 'rm -f "$dump"' EXIT
-          pg_dump -Fc --no-owner -f "$dump" apex_stage_ci
-          pg_restore --no-owner --exit-on-error -d "$PGRESTORE_DATABASE" "$dump"
+          # Host runner may ship PostgreSQL 18 clients; match the PostgreSQL 16 service's tools.
+          postgres_container="$(docker ps --filter 'ancestor=postgres:16-alpine' -q | head -n 1)"
+          test -n "$postgres_container"
+          docker exec "$postgres_container" pg_dump -U postgres -Fc --no-owner -d apex_stage_ci > "$dump"
+          docker exec -i "$postgres_container" pg_restore -U postgres --no-owner --exit-on-error \
+            -d "$PGRESTORE_DATABASE" < "$dump"
           npm run smoke:pg:restore
