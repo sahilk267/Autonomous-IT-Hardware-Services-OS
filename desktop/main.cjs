@@ -234,7 +234,15 @@ app.whenReady().then(async () => {
         signal: AbortSignal.timeout(2500),
       });
       const data = await response.json();
-      return response.ok && data.needsSetup === true ? currentSettings.setupToken : null;
+      if (!response.ok || data.needsSetup !== true) return null;
+      if (currentSettings.storageMode === 'postgres' && currentSettings.tenantMode === 'dynamic') {
+        if (typeof workspaceId !== 'string' ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(workspaceId)) return null;
+        return crypto.createHmac('sha256', currentSettings.setupToken)
+          .update('apex-workspace-enrollment-v1:' + workspaceId.toLowerCase())
+          .digest('hex');
+      }
+      return currentSettings.setupToken;
     } catch { return null; }
   });
   ipcMain.handle('desktop:open-settings', event => {
