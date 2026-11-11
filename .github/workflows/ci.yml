@@ -60,3 +60,47 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Real browser login and cross-customer isolation (throwaway DB)
         run: npm run smoke:browser
+
+  postgres-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: phase10_local_ci_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: phase10_local_ci_only
+      PGDATABASE: apex_stage_ci
+      APEX_PG_STAGING_ACK: STAGING_ONLY_NO_PRODUCTION
+    steps:
+      - uses: actions/checkout@v4
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Node and PostgreSQL client dependencies
+        run: |
+          npm install --include=optional --no-audit --no-fund
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+      - name: Create empty throwaway staging database
+        run: psql -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE apex_stage_ci'
+      - name: Install forced RLS + tenant/customer FK schema
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/001_staging_rls.sql
+      - name: Real PostgreSQL isolation and transactional import tests
+        run: npm run smoke:postgres
