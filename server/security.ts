@@ -15,6 +15,21 @@ export function verifySetupToken(configured: string | undefined, supplied: unkno
   return crypto.timingSafeEqual(expectedHash, receivedHash) ? 'valid' : 'invalid';
 }
 
+/**
+ * Dynamic deployments derive a DIFFERENT setup authorization secret for each
+ * provisioned tenant. The deployment root key stays server-side.
+ * An admin who receives tenant A's setup token cannot bootstrap tenant B.
+ */
+export function deriveWorkspaceSetupToken(rootSecret: string | undefined, tenantId: string): string | null {
+  if (typeof rootSecret !== 'string' || rootSecret.length < 32 ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId)) {
+    return null;
+  }
+  return crypto.createHmac('sha256', rootSecret)
+    .update('apex-workspace-enrollment-v1:' + tenantId.toLowerCase())
+    .digest('hex');
+}
+
 export class LoginRateLimiter {
   private attempts = new Map<string, { count: number; resetAt: number }>();
 
