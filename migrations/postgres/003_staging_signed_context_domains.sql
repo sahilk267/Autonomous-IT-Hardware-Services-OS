@@ -34,7 +34,7 @@ BEGIN
   -- Replaying a signed context in another transaction or connection fails.
   v_payload := v_tenant || E'\n' || v_actor || E'\n' ||
     txid_current()::text || E'\n' || pg_backend_pid()::text;
-  RETURN v_sig=encode(hmac(convert_to(v_payload,'UTF8'),v_key,'sha256'),'hex');
+  RETURN v_sig=encode(public.hmac(convert_to(v_payload,'UTF8'),v_key,'sha256'),'hex');
 END;
 $$;
 REVOKE ALL ON FUNCTION apex.pilot_context_is_attested(TEXT) FROM PUBLIC;
