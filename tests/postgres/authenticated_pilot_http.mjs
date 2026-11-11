@@ -108,7 +108,7 @@ try {
     cookies[username]=(r.headers.get('set-cookie')||'').split(';')[0];
     assert.ok(cookies[username].startsWith('apex_session='));
   }
-  const owner=cookies['owner-a'],sales=cookies['sales-a'],field=cookies['field-a'],proc=cookies['proc-a'];
+  const owner=cookies['owner-a'],sales=cookies['sales-a'],field=cookies['field-a'],proc=cookies['proc-a'],ithead=cookies['it-a'];
   r=await api('/api/pg-pilot/status',{cookie:sales});
   test('Pilot is declared staging-only while JSON runtime stays authoritative',()=>{
     assert.equal(r.status,200);
@@ -297,6 +297,175 @@ try {
     const events=r.data.data.filter(e=>e.customerId===customerC);
     assert.ok(events.some(e=>e.entity==='customer_grants'&&e.operation==='DELETE'));
     assert.ok(!events.some(e=>e.object===crmId&&e.operation==='DELETE'));
+  });
+
+  // Phase 10.3A — domain repository operations are real SQL writes, not JSON simulations.
+  r=await api('/api/pg-pilot/projects',{cookie:field});
+  test('Field engineer cannot enumerate SQL projects by changing route',()=>assert.equal(r.status,403));
+  r=await post('/api/pg-pilot/projects',{
+    customerId:'cust-b',title:'B staged authorization project',budget:900
+  },ithead);
+  test('IT head creates a customer-B project in PostgreSQL',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.clientName,'Customer B');
+    assert.equal(r.data.data.createdByUserId,'it-a');
+  });
+  const sqlProjectB=r.data.data.id;
+  r=await api('/api/pg-pilot/projects',{cookie:owner});
+  test('Owner can list staged project B through signed SQL context',()=>{
+    assert.ok(r.data.data.some(p=>p.id===sqlProjectB));
+  });
+  r=await api('/api/pg-pilot/projects',{cookie:sales});
+  test('Sales without customer-B membership cannot enumerate project B',()=>{
+    assert.ok(!r.data.data.some(p=>p.id===sqlProjectB));
+  });
+  r=await patch('/api/pg-pilot/projects/'+sqlProjectB+'/access',{
+    userId:'sales-a',grant:true
+  },owner);
+  test('Project collaboration cannot grant access without customer-B membership',()=>{
+    assert.equal(r.status,403);
+  });
+  r=await patch('/api/pg-pilot/customers/cust-b/access',{
+    userId:'sales-a',grant:true
+  },owner);
+  test('Owner can grant sales a specific second customer',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.changed,true);
+  });
+  r=await api('/api/pg-pilot/projects',{cookie:sales});
+  test('Customer membership alone does not expose unshared private project',()=>{
+    assert.ok(!r.data.data.some(p=>p.id===sqlProjectB));
+  });
+  r=await patch('/api/pg-pilot/projects/'+sqlProjectB+'/access',{
+    userId:'sales-a',grant:true
+  },owner);
+  test('Owner shares project in same customer after staff grant',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.changed,true);
+  });
+  r=await api('/api/pg-pilot/projects',{cookie:sales});
+  test('Sales project visibility requires both SQL membership and project share',()=>{
+    assert.ok(r.data.data.some(p=>p.id===sqlProjectB));
+  });
+  r=await patch('/api/pg-pilot/projects/'+sqlProjectB+'/access',{
+    userId:'sales-a',grant:false
+  },owner);
+  test('Project-specific share can be revoked independently of customer membership',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.changed,true);
+  });
+  r=await api('/api/pg-pilot/projects',{cookie:sales});
+  test('Revoked share immediately hides private project from existing sales session',()=>{
+    assert.ok(!r.data.data.some(p=>p.id===sqlProjectB));
+  });
+  // Allow field role to submit nothing: ticket intake restricted to owner and IT HEAD.
+  r=await post('/api/pg-pilot/tickets',{
+    customerId:'cust-b',title:'Forged field incident'
+  },field);
+  test('Field role cannot bypass SQL ticket creation permissions',()=>assert.equal(r.status,403));
+  r=await post('/api/pg-pilot/tickets',{
+    customerId:'cust-b',title:'Staging network incident',priority:'HIGH'
+  },ithead);
+  test('IT head creates customer-B ticket with server-authoritative reporter',()=>{
+    assert.equal(r.status,201);
+    assert.equal(r.data.data.reportedByUserId,'it-a');
+    assert.equal(r.data.data.status,'OPEN');
+  });
+  const sqlTicketB=r.data.data.id;
+  r=await api('/api/pg-pilot/tickets',{cookie:field});
+  test('Field user cannot see unassigned ticket even with customer-A grant',()=>{
+    assert.ok(!r.data.data.some(t=>t.id===sqlTicketB));
+  });
+  r=await patch('/api/pg-pilot/tickets/'+sqlTicketB+'/status',{
+    status:'IN_PROGRESS'
+  },ithead);
+  test('IT head updates ticket status through DB column-restricted RLS',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.status,'IN_PROGRESS');
+  });
+  r=await patch('/api/pg-pilot/tickets/'+sqlTicketB+'/status',{
+    status:'FAKE_CLOSED_BY_OEM'
+  },ithead);
+  test('Unverified ticket closure/status rejected before SQL',()=>assert.equal(r.status,400));
+  r=await post('/api/pg-pilot/projects',{
+    customerId:'cust-b',title:'Forged enterprise project',createdByUserId:'owner-a'
+  },ithead);
+  test('Project intake rejects creator mass-assignment spoof',()=>assert.equal(r.status,400));
+  r=await post('/api/pg-pilot/tickets',{
+    customerId:'cust-a',title:'Unauthorized customer A ticket'
+  },ithead);
+  test('IT head without customer-A grant is rejected only if grant revoked',()=>{
+    // This fixture grants the IT head to A, so creation is correctly permitted.
+    assert.equal(r.status,201);
+  });
+  r=await api('/api/pg-pilot/audit',{cookie:owner});
+  test('Project/ticket create, share grant/revoke and ticket transition are SQL-trigger audited',()=>{
+    assert.equal(r.status,200);
+    const events=r.data.data;
+    assert.ok(events.some(e=>e.object===sqlProjectB&&e.entity==='customer_records'));
+    assert.ok(events.some(e=>e.object===sqlTicketB&&e.entity==='customer_records'&&e.operation==='INSERT'));
+    assert.ok(events.some(e=>e.object===sqlTicketB&&e.entity==='customer_records'&&e.operation==='UPDATE'));
+    assert.ok(events.some(e=>e.object===sqlProjectB+':sales-a'&&e.entity==='project_shares'&&e.operation==='INSERT'));
+    assert.ok(events.some(e=>e.object===sqlProjectB+':sales-a'&&e.entity==='project_shares'&&e.operation==='DELETE'));
+  });
+  // Malicious SQL client can forge GUCs but cannot generate the attestation without
+  // the private server-side key. Key is inaccessible to restricted login.
+  const rawClient=new pg.Client({
+    host:process.env.APEX_PG_PILOT_HOST,port:Number(process.env.PGPORT||5432),
+    user:process.env.APEX_PG_PILOT_USER,password:process.env.APEX_PG_PILOT_PASSWORD,
+    database:process.env.APEX_PG_PILOT_DB
+  });
+  await rawClient.connect();
+  try {
+    await rawClient.query('BEGIN');
+    await rawClient.query('SET LOCAL ROLE apex_pilot_writer');
+    await rawClient.query("SELECT set_config('apex.tenant_id','tenant-fixture-a',true)");
+    await rawClient.query("SELECT set_config('apex.actor_id','owner-a',true)");
+    let select=await rawClient.query("SELECT count(*)::integer n FROM apex.customers");
+    test('Forged owner/tenant GUCs cannot bypass signed actor attestation',()=>{
+      assert.equal(select.rows[0].n,0);
+    });
+    await rawClient.query("SELECT set_config('apex.context_signature',$1,true)",['f'.repeat(64)]);
+    select=await rawClient.query("SELECT count(*)::integer n FROM apex.customers");
+    test('Forged random 256-bit signature cannot impersonate owner',()=>{
+      assert.equal(select.rows[0].n,0);
+    });
+    await assert.rejects(rawClient.query('SELECT secret FROM apex.pilot_context_secrets'),
+      err=>err.code==='42501');
+    test('Restricted SQL login cannot read private attestation secret',()=>{});
+    // SELECT permission error leaves transaction aborted; cleanup on separate COMMIT.
+    await rawClient.query('ROLLBACK');
+    await rawClient.query('BEGIN');
+    await rawClient.query('SET LOCAL ROLE apex_pilot_writer');
+    await rawClient.query("SELECT set_config('apex.tenant_id','tenant-fixture-a',true)");
+    await rawClient.query("SELECT set_config('apex.actor_id','owner-a',true)");
+    await assert.rejects(rawClient.query(
+      "INSERT INTO apex.customers(tenant_id,customer_id,display_name) "+
+      "VALUES('tenant-fixture-a','forged-guc-owner','Fake Owner')"),
+      err=>err.code==='42501');
+    test('Staging SQL cannot insert using unsigned owner identity',()=>{});
+    await rawClient.query('ROLLBACK');
+  }finally{await rawClient.end();}
+  const domainBefore=await count('customer_records');
+  await client.query(
+    "ALTER TABLE apex.pilot_audit_events ADD CONSTRAINT test_domain_audit_required "+
+    "CHECK (entity <> 'customer_records') NOT VALID");
+  try {
+    r=await post('/api/pg-pilot/projects',{
+      customerId:'cust-b',title:'Atomic project must rollback'
+    },owner);
+    test('Project insert fails if its audit trigger cannot commit',()=>assert.equal(r.status,503));
+    const after=await count('customer_records');
+    test('Failed domain audit rolls back all project record writes',()=>{
+      assert.equal(after,domainBefore);
+    });
+  }finally{
+    await client.query('ALTER TABLE apex.pilot_audit_events DROP CONSTRAINT test_domain_audit_required');
+  }
+  r=await patch('/api/pg-pilot/customers/cust-b/access',{userId:'sales-a',grant:false},owner);
+  test('Customer-B revocation removes residual project membership',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.data.data.changed,true);
   });
   console.log('PG AUTHENTICATED HTTP PILOT SUMMARY: '+passed+'/'+passed+' PASSED');
 } finally {
