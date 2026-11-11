@@ -76,6 +76,46 @@ CREATE TABLE apex_invoice_settlements (
   FOREIGN KEY (tenant_id, actor_id) REFERENCES apex_memberships(tenant_id, user_id) ON DELETE SET NULL (actor_id)
 );
 
+-- Deferred pairing check: an invoice cannot end a transaction SETTLED
+-- without exactly one matching immutable settlement entry.
+CREATE OR REPLACE FUNCTION apex_verify_invoice_settlement_pair()
+RETURNS trigger LANGUAGE plpgsql AS $
+BEGIN
+  IF NEW.status = 'SETTLED' AND NOT EXISTS (
+    SELECT 1 FROM apex_invoice_settlements x
+      WHERE x.tenant_id=NEW.tenant_id AND x.invoice_no=NEW.invoice_no
+        AND x.settled_amount=NEW.amount
+        AND x.settled_at=NEW.settled_at
+        AND x.payment_reference IS NOT DISTINCT FROM NEW.payment_reference
+  ) THEN
+    RAISE EXCEPTION 'Settled invoice must have a matching settlement ledger entry';
+  END IF;
+  RETURN NULL;
+END $;
+CREATE CONSTRAINT TRIGGER apex_invoice_settlement_pair
+AFTER INSERT OR UPDATE ON apex_finance_invoices
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION apex_verify_invoice_settlement_pair();
+
+CREATE OR REPLACE FUNCTION apex_verify_settlement_invoice()
+RETURNS trigger LANGUAGE plpgsql AS $
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM apex_finance_invoices i
+      WHERE i.tenant_id=NEW.tenant_id AND i.invoice_no=NEW.invoice_no
+        AND i.status='SETTLED' AND i.amount=NEW.settled_amount
+        AND i.settled_at=NEW.settled_at
+        AND i.payment_reference IS NOT DISTINCT FROM NEW.payment_reference
+  ) THEN
+    RAISE EXCEPTION 'Settlement does not match the final invoice state';
+  END IF;
+  RETURN NULL;
+END $;
+CREATE CONSTRAINT TRIGGER apex_settlement_invoice_pair
+AFTER INSERT ON apex_invoice_settlements
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION apex_verify_settlement_invoice();
+
 CREATE TABLE apex_inventory_movements (
   tenant_id uuid NOT NULL,
   movement_id text NOT NULL CHECK (length(movement_id) BETWEEN 1 AND 256),
