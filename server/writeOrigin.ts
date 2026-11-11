@@ -19,8 +19,13 @@ export function allowedOrigins(configured: string, production: boolean, desktopL
         url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
       throw new Error('Write origins must be absolute HTTP(S) origins without paths or credentials');
     }
-    if (production && url.protocol !== 'https:') {
-      throw new Error('Production write origins must use HTTPS');
+    const approvedLocal = desktopLoopback && url.protocol === 'http:' &&
+      ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+    if (production && url.protocol !== 'https:' && !approvedLocal) {
+      throw new Error('Production write origins must use HTTPS (except packaged desktop loopback)');
+    }
+    if (desktopLoopback && !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {
+      throw new Error('Packaged desktop must use a loopback-only origin');
     }
     origins.add(url.origin);
   }
