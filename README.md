@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-12): Phase 10.5C PostgreSQL staging shadow parity, per-customer migration manifests and transaction-atomic INERT outbox implemented. Production cutover BLOCKED.** The original JSON application remains authoritative. Actual authenticated JSON GET views are compared read-only against staged SQL for 18 role/route combinations; outbox delivery remains permanently disabled. See [Phase 10.5C report](docs/PHASE_10_5C_SHADOW_OUTBOX_RECONCILIATION_2026-11-12.md).
+> **Current status (2026-11-12): Phase 10.5C PostgreSQL staging shadow parity, historical per-customer reconciliation and transaction-atomic INERT outbox are CI GREEN; production cutover BLOCKED.** The original JSON application remains authoritative. Actual authenticated JSON GET views are compared read-only against staged SQL for 18 role/route combinations; outbox delivery remains permanently disabled. See [Phase 10.5C report](docs/PHASE_10_5C_SHADOW_OUTBOX_RECONCILIATION_2026-11-12.md).
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
