@@ -95,6 +95,45 @@ try {
     user:process.env.PGUSER,password:process.env.PGPASSWORD,database:process.env.PGDATABASE
   });
   await db.connect();
+  const parity=(extraEnv={})=>spawnSync(process.execPath,
+    ['scripts/postgres/verify_staging_parity.mjs','--source',source],
+    {encoding:'utf8',env:{...process.env,...extraEnv}});
+  let parityResult=parity();
+  test('Read-only verifier checks all source/customer/staff/legacy/audit rows against PG',()=>{
+    assert.equal(parityResult.status,0,parityResult.stderr);
+    const report=JSON.parse(parityResult.stdout);
+    assert.equal(report.sourceSha256,expectedSha);
+    assert.equal(report.databaseModified,false);
+    assert.equal(report.sourceModified,false);
+    assert.ok(report.customerRecords>=baseline.projects.length+baseline.assets.length);
+  });
+  parityResult=parity({PGDATABASE:'postgres'});
+  test('Parity checker refuses default or non-staging database',()=>{
+    assert.equal(parityResult.status,2);
+    assert.match(parityResult.stderr,/PARITY REFUSED/);
+  });
+  const originalSnapshot=fs.readFileSync(source);
+  const altered=JSON.parse(originalSnapshot.toString('utf8'));
+  altered.customers[0].name='Spoofed Customer Name';
+  fs.writeFileSync(source,JSON.stringify(altered),{mode:0o600});
+  parityResult=parity();
+  test('Staged source SHA rejects changed customer identity',()=>{
+    assert.equal(parityResult.status,1);
+    assert.match(parityResult.stderr,/SHA256 mismatch/);
+  });
+  fs.writeFileSync(source,originalSnapshot,{mode:0o600});
+  const previousPayload=(await db.query(
+    "SELECT payload FROM apex.customer_records WHERE kind='crmOpportunities' AND source_id='crm-a'")).rows[0].payload;
+  await db.query("UPDATE apex.customer_records SET payload=jsonb_set(payload,'{tamper}',to_jsonb('wrong'::text)) "+
+    "WHERE kind='crmOpportunities' AND source_id='crm-a'");
+  parityResult=parity();
+  test('Exact row parity detects DB payload corruption even when source SHA matches',()=>{
+    assert.equal(parityResult.status,1);
+    assert.match(parityResult.stderr,/staged row mismatch/);
+  });
+  await db.query("UPDATE apex.customer_records SET payload=$1::jsonb WHERE kind='crmOpportunities' AND source_id='crm-a'",
+    [JSON.stringify(previousPayload)]);
+  assert.equal((parity()).status,0,'Restored staging data should match original immutable source');
   await asyncTest('Staged data counts match all scoped and owner-only records',async()=>{
     const rows=await db.query('SELECT kind,count(*)::integer n FROM apex.customer_records GROUP BY kind');
     for(const kind of ['projects','proposals','assets','rmaClaims','crmOpportunities','amcs','quotes','leads'])
