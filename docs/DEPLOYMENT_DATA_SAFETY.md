@@ -62,3 +62,7 @@ All PG pilot procurement items are `REQUEST_DRAFT` and finance rows `PREVIEW_UNI
 ## Phase 10.5A — immutable staging retry keys, explicit BLOCKED cutover
 
 The `pilot_request_keys` table stores only tenant/customer, authenticated actor, operation, SHA256 request digest and draft resource reference; no payment credentials or full request bodies. It is protected by FORCE RLS and not mutable by the runtime writer. `assess:pg:cutover` is read-only and **must report BLOCKED (exit 3)**; this is not a switch, approval or deployment action. All live payment, invoice, PO, OEM and finance processing remain disabled; ordinary production data is still JSON-backed. See [Phase 10.5A operator guidance](PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md).
+
+## Phase 10.5B — normalized SQL staging safety
+
+Two compiled Express instances in CI use independent private throwaway JSON auth files and an isolated local PG16 database; the work-order rows, revision conflicts and event history are synthetic. No real customer, OTP/identity integration, provider dispatch, completion certificate, production DB, invoice, payment, supplier PO, or Hostinger cutover is touched. The SQL pilot still refuses `NODE_ENV=production` and runtime switch flags; `main` and live JSON records remain authoritative and untouched. Read [Phase 10.5B documentation](PHASE_10_5B_NORMALIZED_SERVICE_MULTI_INSTANCE_2026-11-12.md).

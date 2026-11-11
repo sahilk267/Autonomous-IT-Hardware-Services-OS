@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-12): Phase 10.5A adds staging-only PostgreSQL transactional retry/idempotency and a fail-closed cutover-readiness gate. NOT production-certified.** Existing JSON remains the application system of record. Phase 10.4's unissued quotes/finance/procurement subset stays internal and no supplier, payment, provider or OEM APIs are enabled. See [Phase 10.5A report](docs/PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md).
+> **Current status (2026-11-12): Phase 10.5A and Phase 10.5B staging PostgreSQL tests GREEN; production cutover remains BLOCKED.** Signed actor RLS, idempotent procurement/finance draft retries, normalized service work orders and two independent server-instance revision races are verified in disposable PG16 CI. Normal app JSON source of truth remains unchanged. See [Phase 10.5B report](docs/PHASE_10_5B_NORMALIZED_SERVICE_MULTI_INSTANCE_2026-11-12.md).
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -149,3 +149,9 @@ A real PostgreSQL 16 schema with tenant/customer composite FKs and forced RLS, r
 - Optional `Idempotency-Key` on two staging-only POST endpoints allows safe finance preview/procurement draft replays: first creation 201; identical replay 200 with same resource ID; conflicting reuse 409. New keys and audit rows commit atomically; serialization conflicts retry with new signed transaction context.
 - [Read-only cutover assessment](scripts/postgres/cutover_readiness_gate.mjs) (`npm run assess:pg:cutover`) verifies local PostgreSQL safeguards and **always reports BLOCKED** pending production identity, customer migration, full SQL parity, provider acceptance and recovery gates. Exit 3 is expected and means no deployment authorization.
 - [Phase 10.5A implementation, CI and limitations](docs/PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md). The normal app and `main` remain unchanged.
+
+## Phase 10.5B — normalized PostgreSQL service work orders (verified staging only)
+
+- [Migration 007](migrations/postgres/007_staging_normalized_service_orders.sql): normalized, customer-scoped work orders and append-only transitions, SQL-owned optimistic revision, manager-only assignment, real customer-grant revocation, sequential internal states, FORCE RLS and same-transaction audit.
+- [Two independent server process test](tests/postgres/multi_instance_workorders.mjs): **26/26** real HTTP tests; a race on one expected version succeeds once and rejects the competing update with HTTP 409, with no duplicate SQL history or audit.
+- [Full Phase 10.5B implementation and CI report](docs/PHASE_10_5B_NORMALIZED_SERVICE_MULTI_INSTANCE_2026-11-12.md). Verified [Push CI #43102224573](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43102224573) and [PR CI #43102234533](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43102234533), both SUCCESS (PG stage 27, HTTP 155, multi-instance 26, cutover 8, restore 29). Production JSON and external provider workflows remain unchanged.
