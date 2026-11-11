@@ -1,6 +1,6 @@
 # Apex Autonomous IT Hardware & Services Operating System
 
-> **Current status (2026-11-11): Phase 10.1 PostgreSQL staging schema and forced tenant/customer RLS are implemented with isolated CI tests, but production runtime remains single-tenant JSON. NOT production-certified.** Single-tenant JSON store only. Owner-managed customer records, role/customer grants, project/proposal, service, CRM and quotation scoping, real Chromium UI tests and read-only customer migration preflight are on a draft branch. True multi-tenant database enforcement, encrypted/restore-tested backups, live provider acceptance, Hostinger migration and customer portal identity remain pending. See [Phase 9 report](docs/PHASE_9_CUSTOMER_ISOLATION_2026-11-11.md), [PostgreSQL migration blueprint](docs/POSTGRESQL_MIGRATION_BLUEPRINT.md), [tracker](docs/IMPLEMENTATION_TRACKER.md) and [private data migration notes](docs/DEPLOYMENT_DATA_SAFETY.md). CI uses isolated fixtures and is not production sign-off.
+> **Current status (2026-11-11): Phase 10.2 authenticated PostgreSQL staging CRUD pilot is implemented and CI-verified, NOT production-certified.** Main application remains single-tenant JSON-backed. The opt-in staging-only SQL pilot supports owner customer/grants and CRM writes with transaction-atomic audit; full SQL migration, enterprise tenancy, Hostinger deployment and external provider acceptance remain pending. See [Phase 10.2 report](docs/PHASE_10_2_AUTHENTICATED_PG_PILOT_2026-11-11.md).
 
 Apex is an **evolving single-tenant prototype** for IT hardware distributors, system integrators and managed service providers. It is not yet a certified multi-tenant enterprise operating system.
 
@@ -118,3 +118,10 @@ A real PostgreSQL 16 schema with tenant/customer composite FKs and forced RLS, r
 - **No production cutover approval** until SQL-backed API authentication, every customer/tenant record, audit, data backup and verified restore are end-to-end tested.
 
 **Phase 10.1 isolated CI evidence:** [Push run #42929292843](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42929292843), [PR run #42929301929](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42929301929) — PostgreSQL 16 RLS/staging **23/23**, PostgreSQL 16 dump/restore rehearsal **16/16**, TypeScript/build PASS, existing API **96/96**, roles **133/133**, auth **7/7**, other regression **16/16**, data safety **9/9**, preflight **5/5** and Chromium **7/7**. **Not production-ready.**
+
+## Phase 10.2: authenticated PostgreSQL CRUD pilot
+
+- The [Phase 10.2 implementation/report and staging runbook](docs/PHASE_10_2_AUTHENTICATED_PG_PILOT_2026-11-11.md) documents the restricted database writer role and SQL-trigger audit.
+- [Migration 002](migrations/postgres/002_staging_authenticated_pilot.sql) enables narrow customer/grant and CRM writes; [server/postgres_pilot.ts](server/postgres_pilot.ts) exposes authenticated, isolated `/api/pg-pilot/*` routes.
+- Pilot is OFF by default, refuses production startup, and requires a dedicated local staging PostgreSQL service plus throwaway private JSON authentication fixture. Existing `/api/state` and business routes remain unchanged and JSON-backed.
+- Isolated PostgreSQL and real HTTP tests cover RLS, CSRF, role drift, revocation and audit-trigger rollback; **this is not a production data cutover**.

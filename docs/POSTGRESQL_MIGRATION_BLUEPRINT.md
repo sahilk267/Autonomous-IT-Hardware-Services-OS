@@ -34,3 +34,9 @@ No driver, SQL migration, RLS policy, PostgreSQL deployment, customer portal or 
 ## Phase 10.1 staging-specific implementation note
 
 The verified staging schema uses `TEXT` IDs (preserving existing prefixed IDs) and a typed `customer_records` JSONB staging table rather than claiming fully normalized production UUID tables. It is deliberately **read-only for the application role**, with owner-only legacy data and a restricted local importer. Production grade SQL-backed auth, RLS writes, normalization and full multi-tenant release gates remain to be built. Do not treat the SQL staging schema as a drop-in replacement for `PersistentStore`.
+
+## Phase 10.2 actual progress
+
+A staging-only and authenticated PostgreSQL write pilot is implemented using migration 002, a NOLOGIN restricted writer role, customer/grant and CRM API subset, SQL transaction-scoped context and database triggers for same-transaction audit. Real HTTP+RLS and backup/restore tests pass. See [Phase 10.2 report](PHASE_10_2_AUTHENTICATED_PG_PILOT_2026-11-11.md).
+
+**Not yet done:** complete SQL repository/domain migration, production database identity that cannot be impersonated via arbitrary SET LOCAL GUC statements, customer-data historical parity, all module workflows, production recovery, Hostinger connection or customer portal. PostgreSQL remains separate from JSON source of truth.

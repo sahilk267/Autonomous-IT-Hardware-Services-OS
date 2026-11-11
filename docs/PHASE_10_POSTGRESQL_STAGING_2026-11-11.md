@@ -52,3 +52,7 @@ It does not migrate current production users/data, expose new PostgreSQL login, 
 - **Separate dump/restore 16/16:** matching PG16 client binaries, backup taken from staging DB, restored into another disposable PG16 DB; nine table rowsets compared, `FORCE RLS` verified on nine tables, revoke/tenant scope tests replayed and staging import provenance checked.
 - **Original runtime CI:** TypeScript/build PASS; regression **16/16**, authentication **7/7**, HTTP API **96/96**, role/customer API **133/133**, data safety **9/9**, customer source preflight **5/5**, Node22 Chromium browser **7/7**.
 - No production PostgreSQL instance, customer records, Hostinger credentials, real payment provider or live deployment was used. These numbers are evidence of isolated source/CI acceptance only.
+
+## Phase 10.2 follow-up
+
+The staging-only PostgreSQL API write pilot and transaction-atomic audit are now implemented and tested. See [Phase 10.2 implementation](PHASE_10_2_AUTHENTICATED_PG_PILOT_2026-11-11.md). This does not change the existing JSON-backed runtime.
