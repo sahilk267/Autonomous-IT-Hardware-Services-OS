@@ -39,13 +39,23 @@ export async function applyMigrations(client) {
       if (found.rows[0].checksum_sha256 !== checksum) throw new Error(`MIGRATION_CHECKSUM_MISMATCH: ${file}`);
       continue;
     }
-    // Advisory lock is held by this session so parallel operator runs cannot
-    // apply the same migration twice.
-    await client.query(sql);
-    await client.query(
-      'INSERT INTO apex_schema_migrations(filename,checksum_sha256) VALUES ($1,$2)',
-      [file, checksum]
-    );
+    // Each versioned SQL file is applied atomically together with its checksum.
+    // Strip only its outer BEGIN/COMMIT delimiters; DDL and ledger must be one TX.
+    const statements = sql
+      .replace(/^BEGIN;\s*$/m, '')
+      .replace(/^COMMIT;\s*$/m, '');
+    await client.query('BEGIN');
+    try {
+      await client.query(statements);
+      await client.query(
+        'INSERT INTO apex_schema_migrations(filename,checksum_sha256) VALUES ($1,$2)',
+        [file, checksum]
+      );
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    }
   }
 }
 
