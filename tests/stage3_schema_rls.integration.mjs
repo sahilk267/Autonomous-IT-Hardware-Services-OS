@@ -52,7 +52,7 @@ test('PostgreSQL 16 normalized finance/inventory RLS and SQL constraints under n
     await owner.query('GRANT SELECT, INSERT, UPDATE, DELETE ON apex_catalog_products TO apex_stage3_app');
     await owner.query('GRANT SELECT, INSERT, UPDATE ON apex_finance_invoices,apex_finance_quotes TO apex_stage3_app');
     await owner.query('GRANT SELECT, INSERT ON apex_inventory_movements,apex_invoice_settlements TO apex_stage3_app');
-    await owner.query('GRANT SELECT ON apex_critical_ledger_ready TO apex_stage3_app');
+    await owner.query('GRANT SELECT, INSERT ON apex_critical_ledger_ready TO apex_stage3_app');
 
     runtime = new Client({ connectionString: runtimeUrl.href });
     await runtime.connect();
