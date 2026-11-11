@@ -12,7 +12,8 @@
     "lint": "tsc --noEmit",
     "test": "tsx tests/zero_mock_data.test.ts && tsx --test tests/phase_k_security.test.ts && tsx --test tests/phase_l_security.test.ts && node --test tests/phase_l_backup.test.mjs && tsx --test tests/phase_l_postgres_contract.test.ts && node --test tests/phase_l_stage3_validation.test.mjs",
     "test:postgres": "node --test tests/phase_l_rls.integration.mjs",
-    "test:stage2": "node --test tests/stage2_postgres_http.integration.mjs"
+    "test:stage2": "node --test tests/stage2_postgres_http.integration.mjs",
+    "test:stage3": "node --test tests/stage3_schema_rls.integration.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
