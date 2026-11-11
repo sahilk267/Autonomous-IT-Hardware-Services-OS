@@ -34,7 +34,8 @@ const isProduction = process.env.NODE_ENV === 'production';
 // from an attacker-controlled Host/X-Forwarded-Host header.
 app.use(writeOriginGuard(allowedOrigins(
   process.env.APEX_ALLOWED_ORIGINS || process.env.APP_URL || 'http://localhost:3000',
-  process.env.NODE_ENV === 'production'
+  process.env.NODE_ENV === 'production',
+  process.env.APEX_DESKTOP_MODE === '1'
 )));
 app.use(express.json({ limit: '1mb' }));
 
