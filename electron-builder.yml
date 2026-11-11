@@ -1,0 +1,31 @@
+appId: com.aaditech.apexos
+productName: Apex IT OS Desktop
+asar: true
+directories:
+  output: release/windows
+files:
+  - package.json
+  - desktop/**/*
+  - dist/server.cjs
+  - dist/server.cjs.map
+  - "!**/*.{ts,tsx,map}"
+extraResources:
+  - from: dist
+    to: web
+    filter:
+      - index.html
+      - assets/**/*
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  signAndEditExecutable: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  artifactName: Apex-IT-OS-Desktop-${version}-Setup-${arch}.${ext}
+publish: null

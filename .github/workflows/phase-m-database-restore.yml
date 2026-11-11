@@ -1,0 +1,68 @@
+name: Phase M — dynamic workspace and backup/restore acceptance
+
+on:
+  push:
+    branches:
+      - feature/phase-m-deployment-readiness-20261112
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: phase-m-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-and-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: phase-m-disposable-only
+          POSTGRES_DB: apex_phase_l_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d apex_phase_l_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PG_TEST_URL: postgres://postgres:phase-m-disposable-only@127.0.0.1:5432/apex_phase_l_ci
+      PG_REHEARSAL_MANIFEST: /tmp/phase-m-seed-fingerprint.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:postgres
+      - run: npm run test:stage2
+      - run: npm run test:stage3
+      - run: npm run test:phase-m
+      - name: Seed migration and verify rollback on disposable data
+        run: node scripts/phase-m-restore-rehearsal.mjs seed
+      - name: Perform actual pg_dump -Fc and pg_restore into separate database
+        shell: bash
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          test -n "$PG_CONTAINER"
+          docker exec "$PG_CONTAINER" pg_dump -U postgres -Fc apex_phase_m_source_ci > "$RUNNER_TEMP/phase-m.backup"
+          test -s "$RUNNER_TEMP/phase-m.backup"
+          docker exec "$PG_CONTAINER" createdb -U postgres apex_phase_m_restored_ci
+          docker cp "$RUNNER_TEMP/phase-m.backup" "$PG_CONTAINER:/tmp/phase-m.backup"
+          docker exec "$PG_CONTAINER" pg_restore -U postgres --no-owner --exit-on-error -d apex_phase_m_restored_ci /tmp/phase-m.backup
+      - name: Reconcile real restored DB and verify role-level tenant isolation
+        run: node scripts/phase-m-restore-rehearsal.mjs verify

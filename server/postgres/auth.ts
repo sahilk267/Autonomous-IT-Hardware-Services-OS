@@ -2,9 +2,10 @@ import crypto from 'node:crypto';
 import type { Express, Request, Response } from 'express';
 import type { PoolClient } from 'pg';
 import { hashPassword, verifyPassword } from '../db.ts';
-import { LoginRateLimiter, verifySetupToken, sessionCookie, expiredSessionCookie } from '../security.ts';
+import { LoginRateLimiter, verifySetupToken, deriveWorkspaceSetupToken, sessionCookie, expiredSessionCookie } from '../security.ts';
 import { hashSessionToken, readRequestToken, PostgresRuntime } from './runtime.ts';
 import { markEmptyCriticalLedgerReady } from './criticalLedger.mjs';
+import { issueSessionToken, sessionTenantHint, resolvedTenantHint } from './workspaceIdentity.ts';
 
 interface Result {
   status: number;
@@ -51,7 +52,7 @@ function publicUser(row: any, tenantId: string) {
 }
 
 async function createSession(client: PoolClient, runtime: PostgresRuntime, userId: string): Promise<string> {
-  const token = crypto.randomBytes(32).toString('hex');
+  const token = issueSessionToken(runtime.tenantId, runtime.dynamicMode);
   await client.query(
     `INSERT INTO apex_sessions (tenant_id, token_sha256, user_id, expires_at)
      VALUES ($1, $2, $3, now() + interval '24 hours')`,
@@ -63,14 +64,49 @@ async function createSession(client: PoolClient, runtime: PostgresRuntime, userI
 export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): void {
   const production = process.env.NODE_ENV === 'production';
 
+  // Every protected request resolves tenant scope from an existing session
+  // token. For login/setup only, a caller may supply a tenant UUID as a HINT;
+  // membership+password or bootstrap token is still mandatory.
+  app.use(['/api/auth', '/api/admin/users'], (req, res, next) => {
+    if (!runtime.dynamicMode) return next();
+    const route = req.originalUrl.split('?')[0];
+    const status = route === '/api/auth/status';
+    const publicEnrollment = route === '/api/auth/login' || route === '/api/auth/setup';
+    const submitted = publicEnrollment ? req.body?.workspaceId
+      : status ? (req.query.workspaceId || sessionTenantHint(readRequestToken(req)))
+      : sessionTenantHint(readRequestToken(req));
+    if (status && !submitted) {
+      return res.json({
+        success: true, tenantMode: 'dynamic', workspaceSelectionRequired: true,
+        authenticated: false, setupRequired: false, needsSetup: false, user: null,
+      });
+    }
+    if (!submitted && !publicEnrollment) {
+      return res.status(401).json({ success: false, error: 'Workspace session required' });
+    }
+    try {
+      const scope = resolvedTenantHint(true, null, submitted);
+      runtime.withTenant(scope, next);
+    } catch {
+      res.status(publicEnrollment || status ? 400 : 401).json({
+        success: false, error: 'A valid provisioned workspace UUID is required',
+      });
+    }
+  });
+
   app.get('/api/health', (_req, res) => {
-    void send(res, async () => transact(runtime, async client => {
-      await client.query('SELECT id FROM apex_tenants WHERE id = $1', [runtime.tenantId]);
-      return {
-        status: 200,
-        payload: { status: 'ok', database: { status: 'ready', engine: 'postgresql' } },
-      };
-    }));
+    void send(res, async () => {
+      if (runtime.dynamicMode) {
+        await runtime.pool.query('SELECT 1');
+        return { status: 200,
+          payload: { status: 'ok', tenantMode: 'dynamic', database: { status: 'ready', engine: 'postgresql' } } };
+      }
+      return transact(runtime, async client => {
+        await client.query('SELECT id FROM apex_tenants WHERE id = $1', [runtime.tenantId]);
+        return { status: 200,
+          payload: { status: 'ok', tenantMode: 'fixed', database: { status: 'ready', engine: 'postgresql' } } };
+      });
+    });
   });
 
   app.get('/api/auth/status', (req, res) => {
@@ -88,7 +124,9 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
           setupRequired: existing === 0,
           needsSetup: existing === 0,
           authenticated: !!account,
-          user: account ? { id: account.userId, username: account.username, role: account.role } : null,
+          tenantMode: runtime.dynamicMode ? 'dynamic' : 'fixed',
+          workspaceId: runtime.tenantId,
+          user: account ? { id: account.userId, username: account.username, role: account.role, tenantId: runtime.tenantId } : null,
         },
       };
     }));
@@ -96,7 +134,10 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
 
   app.post('/api/auth/setup', (req, res) => {
     void send(res, async (): Promise<Result> => {
-      const check = verifySetupToken(process.env.APEX_SETUP_TOKEN, req.body?.setupToken);
+      const expectedSetupToken = runtime.dynamicMode
+        ? deriveWorkspaceSetupToken(process.env.APEX_SETUP_TOKEN, runtime.tenantId)
+        : process.env.APEX_SETUP_TOKEN;
+      const check = verifySetupToken(expectedSetupToken ?? undefined, req.body?.setupToken);
       if (check === 'unconfigured') return {
         status: 503, payload: { success: false, error: 'Setup is locked. Configure a private APEX_SETUP_TOKEN of at least 32 characters.' }
       };
@@ -192,9 +233,11 @@ export function registerPostgresAuth(app: Express, runtime: PostgresRuntime): vo
       }
       const result = await transact(runtime, async client => {
         const user = await client.query(
-          `SELECT user_id, username, password_hash, display_name, email, role
-             FROM apex_memberships WHERE tenant_id = $1 AND lower(username) = lower($2)
-               AND is_active = true`,
+          `SELECT m.user_id, m.username, m.password_hash, m.display_name, m.email, m.role
+             FROM apex_memberships m
+             JOIN apex_tenants t ON t.id = m.tenant_id AND t.disabled_at IS NULL
+            WHERE m.tenant_id = $1 AND lower(m.username) = lower($2)
+              AND m.is_active = true`,
           [runtime.tenantId, username.trim()]
         );
         const account = user.rows[0];

@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self'; form-action 'none'; connect-src 'none'; base-uri 'none'"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Apex IT OS — Secure Desktop Setup</title>
+  <link rel="stylesheet" href="./setup.css"/>
+  <script src="./setup.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="eyebrow">APEX IT HARDWARE &amp; SERVICES OS</div>
+      <h1>Desktop configuration</h1>
+      <p>Complete the required settings once. Your encrypted configuration can be edited later from <strong>Desktop server settings</strong>.</p>
+    </header>
+    <form id="settings" autocomplete="off">
+      <fieldset>
+        <legend>1 · Choose storage</legend>
+        <label for="storageMode">Database mode</label>
+        <select name="storageMode" id="storageMode">
+          <option value="single">Local private JSON file (encrypt disk with BitLocker)</option>
+          <option value="postgres">Existing PostgreSQL database (RLS tenant isolation)</option>
+        </select>
+        <div id="localOptions">
+          <label for="dataDirectory">Private data folder</label>
+          <div class="folder"><input id="dataDirectory" name="dataDirectory" readonly/><button id="browse" type="button">Browse</button></div>
+          <small>The Windows account must have private read/write access. Changing the folder later requires a backup and manual migration.</small>
+        </div>
+        <div id="postgresOptions" hidden>
+          <label for="databaseUrl">PostgreSQL runtime connection URL</label>
+          <input name="databaseUrl" id="databaseUrl" type="password" autocomplete="off"
+            placeholder="postgresql://runtime-user:secret@db-host:5432/apex"/>
+          <small>Use a pre-provisioned, non-superuser, non-BYPASSRLS role. Never enter a migration-owner connection here.</small>
+          <label for="tenantMode">Workspace selection model</label>
+          <select id="tenantMode" name="tenantMode">
+            <option value="fixed">Fixed: one configured organization</option>
+            <option value="dynamic">Dynamic: choose a provisioned workspace at login</option>
+          </select>
+          <div id="tenantOptions">
+            <label for="tenantId">Provisioned workspace UUID</label>
+            <input name="tenantId" id="tenantId" type="text"
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/>
+          </div>
+          <p class="hint">For dynamic mode, users enter the workspace UUID and their own credentials at login. The database administrator must provision each organization separately.</p>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>2 · Optional integrations (can be edited later)</legend>
+        <div class="columns">
+          <div><label for="geminiApiKey">Google Gemini API key</label><input id="geminiApiKey" name="geminiApiKey" type="password"/></div>
+          <div><label for="telegramBotToken">Telegram bot token</label><input id="telegramBotToken" name="telegramBotToken" type="password"/></div>
+          <div><label for="telegramWebhookSecret">Telegram webhook secret</label><input id="telegramWebhookSecret" name="telegramWebhookSecret" type="password"/></div>
+          <div><label for="telegramAuthorizedUserId">Telegram authorized user ID</label><input id="telegramAuthorizedUserId" name="telegramAuthorizedUserId"/></div>
+          <div><label for="telegramAuthorizedChatId">Telegram authorized chat ID</label><input id="telegramAuthorizedChatId" name="telegramAuthorizedChatId"/></div>
+          <div><label for="razorpayKeyId">Razorpay key ID</label><input id="razorpayKeyId" name="razorpayKeyId"/></div>
+          <div><label for="razorpayKeySecret">Razorpay key secret</label><input id="razorpayKeySecret" name="razorpayKeySecret" type="password"/></div>
+          <div><label for="gstApiKey">GST integration key</label><input id="gstApiKey" name="gstApiKey" type="password"/></div>
+          <div><label for="m365TenantId">Microsoft 365 tenant ID</label><input id="m365TenantId" name="m365TenantId"/></div>
+          <div><label for="m365ClientId">Microsoft 365 client ID</label><input id="m365ClientId" name="m365ClientId"/></div>
+          <div><label for="m365ClientSecret">Microsoft 365 client secret</label><input id="m365ClientSecret" name="m365ClientSecret" type="password"/></div>
+        </div>
+      </fieldset>
+      <section class="notice">
+        <strong>3 · First administrator</strong>
+        <p>After you save, Apex opens the local app and asks for the Business Owner's username and 12+ character password. The desktop generates a random bootstrap token automatically; it is kept in Windows-protected encrypted storage.</p>
+        <p>Windows SmartScreen may warn about an unsigned preview installer. Only install a signed, verified production release.</p>
+      </section>
+      <div id="error" role="alert" hidden></div>
+      <footer><button id="save" type="submit">Save securely and launch Apex</button><span id="status" role="status"></span></footer>
+    </form>
+  </main>
+</body>
+</html>

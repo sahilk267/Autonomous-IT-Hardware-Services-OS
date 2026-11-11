@@ -4,7 +4,7 @@ import type { Request, Response, NextFunction } from 'express';
  * Browser write requests must carry an Origin matching the deployment's
  * explicit public origin. Never trust Host or X-Forwarded-* as an allowlist.
  */
-export function allowedOrigins(configured: string, production: boolean): ReadonlySet<string> {
+export function allowedOrigins(configured: string, production: boolean, desktopLoopback = false): ReadonlySet<string> {
   const entries = configured.split(',').map(value => value.trim()).filter(Boolean);
   if (!entries.length) throw new Error('APP_URL is required for write-origin validation');
   const origins = new Set<string>();
@@ -19,8 +19,13 @@ export function allowedOrigins(configured: string, production: boolean): Readonl
         url.username || url.password || url.pathname !== '/' || url.search || url.hash) {
       throw new Error('Write origins must be absolute HTTP(S) origins without paths or credentials');
     }
-    if (production && url.protocol !== 'https:') {
-      throw new Error('Production write origins must use HTTPS');
+    const approvedLocal = desktopLoopback && url.protocol === 'http:' &&
+      ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+    if (production && url.protocol !== 'https:' && !approvedLocal) {
+      throw new Error('Production write origins must use HTTPS (except packaged desktop loopback)');
+    }
+    if (desktopLoopback && !['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {
+      throw new Error('Packaged desktop must use a loopback-only origin');
     }
     origins.add(url.origin);
   }

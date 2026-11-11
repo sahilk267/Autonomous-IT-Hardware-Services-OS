@@ -1,6 +1,6 @@
-# Hostinger Deployment — Single-Tenant Pilot (Phase L)
+# Hostinger Deployment — Phase M Staging (Fixed or Dynamic Workspace)
 
-> **Security gate:** Yeh guide abhi **single-organization pilot** ke liye hai, public multi-tenant production signoff ke liye nahi. Phase K/L code PR review par hai; live Hostinger verification nahi hui. [Phase L migration guide](docs/PHASE_L_TENANCY_AND_MIGRATION.md) pehle padhein.
+> **Security gate:** Phase M ke code mein PostgreSQL dynamic workspace selection aur staged Windows installer workflow hai, lekin **live Hostinger deployment/acceptance verify nahi hua**. [Phase M detailed release guide](docs/PHASE_M_RELEASE_READINESS.md) aur [Stage 3 DB migration](docs/PHASE_L_STAGE3_DATABASE_HARDENING.md) pehle padhein. Production approval pending hai.
 
 Yeh guide aapko Apex AI-Native IT Operating System ko **Hostinger Shared Web Hosting (Business Plan)** par deploy karne ke liye step-by-step instructions deti hai.
 
@@ -51,7 +51,8 @@ Agar aapke Hostinger plan aur region me **Node.js Application Manager** availabl
 3. **Environment Variables** section me minimum ye values set karein:
    - `NODE_ENV=production`
    - `APP_URL=https://yourdomain.com` (exact browser origin)
-   - `APEX_STORAGE_MODE=single` (PostgreSQL multi-tenant runtime abhi unavailable)
+   - `APEX_STORAGE_MODE=postgres` (external managed PostgreSQL required)
+   - `APEX_TENANT_MODE=fixed` with `APEX_TENANT_ID=<provisioned-uuid>`, **or** `APEX_TENANT_MODE=dynamic` without `APEX_TENANT_ID`
    - `APEX_DATA_DIR=/home/account/private/apex-data` (absolute writable persistent path; **webroot ke bahar**)
    - `APEX_SETUP_TOKEN=<random secret of 32+ characters>` (first admin setup ke liye)
    - Optional `APEX_ALLOWED_ORIGINS` sirf explicit HTTPS origins ke saath, wildcard nahi
@@ -61,7 +62,7 @@ Agar aapke Hostinger plan aur region me **Node.js Application Manager** availabl
 4. Click **Create / Save**.
 
 ### Step 4: Dependencies Install aur App Start
-1. Node.js manager screen par **NPM Install** button par click karein (ya SSH Terminal open karke `npm install --omit=dev` run karein).
+1. Node.js manager mein server-only dependencies install karein. Hostinger managed hosting npm commands build/redeploy ke waqt run karta hai; on its managed plans they are not generally executed through SSH. Set `ELECTRON_SKIP_BINARY_DOWNLOAD=1` for server-only builds.
 2. **Restart** / **Start** button click karein.
 3. Apna HTTPS URL open karke initial setup token enter karein. Login/logout, CSRF rejection, database persistence/restart aur private backup test **pass hone ke baad hi** pilot use karein. Sirf page load hona production acceptance nahi hai.
 

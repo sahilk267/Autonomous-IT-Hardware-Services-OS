@@ -4,12 +4,14 @@ import { ShieldCheck, Lock, User, Mail, AlertCircle, KeyRound, ArrowRight } from
 interface AuthModalProps {
   isOpen: boolean;
   isSetupRequired: boolean;
+  isDynamicWorkspace?: boolean;
   onLoginSuccess: (user: any) => void;
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   isSetupRequired,
+  isDynamicWorkspace = false,
   onLoginSuccess
 }) => {
   const [isSetup, setIsSetup] = useState(isSetupRequired);
@@ -19,6 +21,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [setupToken, setSetupToken] = useState('');
+  const [workspaceId, setWorkspaceId] = useState(() => {
+    try { return localStorage.getItem('apex_last_workspace_id') || ''; } catch { return ''; }
+  });
+  const [workspaceChecked, setWorkspaceChecked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -27,12 +33,40 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsSetup(isSetupRequired);
   }, [isSetupRequired]);
 
+  React.useEffect(() => {
+    if (isSetup && window.apexDesktop) {
+      window.apexDesktop.getSetupToken(isDynamicWorkspace ? workspaceId : undefined).then(value => {
+        if (value) setSetupToken(value);
+      }).catch(() => {});
+    }
+  }, [isSetup, isDynamicWorkspace, workspaceId]);
+
+  const checkWorkspace = async () => {
+    setError(null);
+    if (!/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(workspaceId)) {
+      setError('Enter the provisioned workspace UUID from your administrator.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/status?workspaceId=' + encodeURIComponent(workspaceId.trim()));
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Unable to check workspace');
+      setIsSetup(!!data.needsSetup);
+      setWorkspaceChecked(true);
+      if (data.needsSetup) setError('Workspace has no administrator yet. Secure first-time enrollment is required.');
+    } catch (err: any) { setError(err.message); }
+  };
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
+    if (isDynamicWorkspace && !/^[0-9a-f]{8}-([0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(workspaceId)) {
+      setError('A provisioned workspace UUID is required.');
+      return;
+    }
     if (isSetup) {
       if (password !== confirmPassword) {
         setError('Passwords do not match.');
@@ -57,8 +91,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const endpoint = isSetup ? '/api/auth/setup' : '/api/auth/login';
       const body = isSetup 
-        ? { username: username.trim(), password, name: name.trim(), email: email.trim(), setupToken }
-        : { username: username.trim(), password };
+        ? { username: username.trim(), password, name: name.trim(), email: email.trim(), setupToken,
+            ...(isDynamicWorkspace ? { workspaceId: workspaceId.trim().toLowerCase() } : {}) }
+        : { username: username.trim(), password,
+            ...(isDynamicWorkspace ? { workspaceId: workspaceId.trim().toLowerCase() } : {}) };
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -71,6 +107,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         throw new Error(data.error || 'Authentication failed. Please verify credentials.');
       }
 
+      if (isDynamicWorkspace) {
+        try { localStorage.setItem('apex_last_workspace_id', workspaceId.trim().toLowerCase()); } catch {}
+      }
       onLoginSuccess(data.user);
     } catch (err: any) {
       setError(err.message || 'Network error during authentication.');
@@ -98,7 +137,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          
+          {isDynamicWorkspace && (
+            <div className="rounded-lg border border-cyan-900/50 p-3 space-y-2 bg-slate-950/60">
+              <label className="text-xs font-semibold text-slate-300 block">Workspace ID (provisioned UUID)</label>
+              <input type="text" autoComplete="off" value={workspaceId}
+                onChange={e => { setWorkspaceId(e.target.value); setWorkspaceChecked(false); setIsSetup(false); }}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                className="w-full rounded-lg bg-slate-900 p-2 text-xs text-white border border-slate-700"
+                required />
+              <button type="button" onClick={checkWorkspace}
+                className="rounded-lg border border-cyan-800 px-3 py-2 text-xs text-cyan-300">
+                {workspaceChecked ? 'Recheck workspace / setup status' : 'Check workspace before sign-in'}
+              </button>
+              <p className="text-xs text-slate-400">
+                Switch workspaces by signing in separately. A workspace ID is not a password.
+              </p>
+            </div>
+          )}
           {error && (
             <div className="p-3 rounded-lg bg-rose-950/70 border border-rose-800/80 text-rose-300 text-xs flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
@@ -110,7 +165,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <>
               <div className="p-3 rounded-lg bg-blue-950/40 border border-blue-900/60 text-blue-300 text-xs leading-relaxed">
                 <span className="font-semibold block mb-0.5">Initial Security Setup Required:</span>
-                Enter the one-time server setup authorization token from your deployment environment, then create the Business Owner account. The token is never saved in the browser.
+                {window.apexDesktop
+                  ? 'Your desktop app created a protected setup token. Create the Business Owner account; the token is filled locally.'
+                  : isDynamicWorkspace
+                    ? 'Enter the one-time workspace-specific enrollment token from your administrator. It works only for this selected workspace.'
+                    : 'Enter the one-time server setup authorization token, then create the Business Owner account. The token is never saved in the browser.'}
               </div>
 
               <div>

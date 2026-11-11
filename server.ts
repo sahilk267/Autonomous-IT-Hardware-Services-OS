@@ -12,6 +12,18 @@ import { PostgresRuntime } from './server/postgres/runtime.ts';
 import { registerPostgresAuth } from './server/postgres/auth.ts';
 
 const app = express();
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+  if (req.path.startsWith('/api/')) res.setHeader('Cache-Control', 'no-store');
+  if (process.env.NODE_ENV === 'production' && process.env.APEX_DESKTOP_MODE !== '1') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  }
+  next();
+});
 
 function resolvePort(): number {
   const portArgIndex = process.argv.indexOf('--port');
@@ -34,7 +46,8 @@ const isProduction = process.env.NODE_ENV === 'production';
 // from an attacker-controlled Host/X-Forwarded-Host header.
 app.use(writeOriginGuard(allowedOrigins(
   process.env.APEX_ALLOWED_ORIGINS || process.env.APP_URL || 'http://localhost:3000',
-  process.env.NODE_ENV === 'production'
+  process.env.NODE_ENV === 'production',
+  process.env.APEX_DESKTOP_MODE === '1'
 )));
 app.use(express.json({ limit: '1mb' }));
 
@@ -1763,15 +1776,16 @@ async function setupVite() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
+    const distPath = process.env.APEX_DIST_DIR ? path.resolve(process.env.APEX_DIST_DIR) : path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Apex Autonomous IT Hardware & Services OS running on http://0.0.0.0:${PORT}`);
+  const host = process.env.APEX_DESKTOP_MODE === '1' ? '127.0.0.1' : (process.env.APEX_BIND_HOST || '0.0.0.0');
+  app.listen(PORT, host, () => {
+    console.log(`Apex Autonomous IT Hardware & Services OS running on http://${host}:${PORT}`);
   });
 }
 
