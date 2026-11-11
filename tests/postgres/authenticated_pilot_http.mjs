@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import {spawn, spawnSync} from 'node:child_process';
-import {randomBytes, scryptSync} from 'node:crypto';
+import {randomBytes, scryptSync, createHmac} from 'node:crypto';
 import pg from 'pg';
 
 if(process.env.APEX_PG_STAGING_ACK!=='STAGING_ONLY_NO_PRODUCTION' ||
@@ -444,6 +444,41 @@ try {
       "VALUES('tenant-fixture-a','forged-guc-owner','Fake Owner')"),
       err=>err.code==='42501');
     test('Staging SQL cannot insert using unsigned owner identity',()=>{});
+    await rawClient.query('ROLLBACK');
+
+    // The test harness can sign a synthetic fixture transaction; a stolen signature
+    // must not authorize a later transaction, even on the SAME backend connection.
+    await rawClient.query('BEGIN');
+    const challenge=await rawClient.query(
+      'SELECT txid_current()::text AS txid,pg_backend_pid()::text AS backend');
+    const signedPayload=['tenant-fixture-a','owner-a',
+      challenge.rows[0].txid,challenge.rows[0].backend].join('\n');
+    const validSignature=createHmac('sha256',
+      Buffer.from(process.env.APEX_PG_PILOT_CONTEXT_KEY,'hex'))
+      .update(signedPayload).digest('hex');
+    await rawClient.query('SET LOCAL ROLE apex_pilot_writer');
+    await rawClient.query("SELECT set_config('apex.tenant_id','tenant-fixture-a',true)");
+    await rawClient.query("SELECT set_config('apex.actor_id','owner-a',true)");
+    await rawClient.query("SELECT set_config('apex.context_signature',$1,true)",[validSignature]);
+    let signed=await rawClient.query('SELECT count(*)::integer n FROM apex.customers');
+    test('A correctly signed transaction context authorizes only its verified actor',()=>{
+      assert.ok(signed.rows[0].n>=2);
+    });
+    await rawClient.query("SELECT set_config('apex.actor_id','sales-a',true)");
+    signed=await rawClient.query('SELECT count(*)::integer n FROM apex.customers');
+    test('Changing actor ID invalidates signature within same SQL transaction',()=>{
+      assert.equal(signed.rows[0].n,0);
+    });
+    await rawClient.query('ROLLBACK');
+    await rawClient.query('BEGIN');
+    await rawClient.query('SET LOCAL ROLE apex_pilot_writer');
+    await rawClient.query("SELECT set_config('apex.tenant_id','tenant-fixture-a',true)");
+    await rawClient.query("SELECT set_config('apex.actor_id','owner-a',true)");
+    await rawClient.query("SELECT set_config('apex.context_signature',$1,true)",[validSignature]);
+    signed=await rawClient.query('SELECT count(*)::integer n FROM apex.customers');
+    test('Replayed signed context from previous transaction is rejected',()=>{
+      assert.equal(signed.rows[0].n,0);
+    });
     await rawClient.query('ROLLBACK');
   }finally{await rawClient.end();}
   const domainBefore=await count('customer_records');
