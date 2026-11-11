@@ -50,7 +50,9 @@ export function enforceSingleTenantIntegrity(state: AppStoreState): void {
  * transactional semantics. Explicitly disallow claiming it as multi-tenant.
  */
 export function assertSupportedStorageMode(mode: string | undefined): void {
-  if (mode && mode !== 'single') {
-    throw new TenantScopeError('Multi-tenant runtime is disabled until the PostgreSQL data adapter and RLS are wired to every endpoint');
+  // PostgreSQL mode requires a provisioned tenant UUID and a real RLS-backed
+  // runtime adapter. The JSON "single" mode remains the default.
+  if (mode && mode !== 'single' && mode !== 'postgres') {
+    throw new TenantScopeError('Storage mode must be single or postgres (unsupported modes fail closed)');
   }
 }
