@@ -74,6 +74,8 @@ export function registerPostgresPilotRoutes(
     for(let attempt=0;attempt<4;attempt++){
       const client=await pool.connect();
       let inTransaction=false;
+      let retryable=false;
+      let brokenConnection=false;
       try {
         await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
         inTransaction=true;
@@ -100,14 +102,20 @@ export function registerPostgresPilotRoutes(
         inTransaction=false;
         return result;
       } catch(error: any) {
-        if(inTransaction)await client.query('ROLLBACK').catch(()=>{});
-        // 40001 serialization and 40P01 deadlocks are safe to retry AFTER rollback.
-        if((error?.code==='40001'||error?.code==='40P01') && attempt<3){
-          await new Promise(resolve=>setTimeout(resolve,20*(attempt+1)));
-          continue;
+        if(inTransaction) {
+          try { await client.query('ROLLBACK'); }
+          catch { brokenConnection=true; }
         }
-        throw error;
-      } finally {client.release();}
+        // Retry only after a confirmed rollback. A broken connection is discarded.
+        retryable=!brokenConnection &&
+          (error?.code==='40001'||error?.code==='40P01') && attempt<3;
+        if(!retryable)throw error;
+      } finally {
+        client.release(brokenConnection);
+      }
+      // Never hold a pooled DB connection while backing off. This matters for
+      // eight concurrent HTTP requests sharing the four-connection staging pool.
+      if(retryable)await new Promise(resolve=>setTimeout(resolve,20*(attempt+1)));
     }
     return reject(503,'Staging SQL serialization retries exhausted.');
   }
