@@ -38,6 +38,10 @@ jobs:
         run: npm run smoke
       - name: Multi-role API access smoke test (throwaway DB)
         run: npm run smoke:roles
+      - name: Every business API authentication and wrong-role matrix
+        run: npm run smoke:api-matrix
+      - name: Independently pinned Ed25519 reviewer chain and RPO/RTO no-go smoke
+        run: npm run smoke:review-signoff
       - name: Production data-path and offline backup smoke test
         run: npm run smoke:data
       - name: Customer migration preflight (read-only, isolated fixtures)

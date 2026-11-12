@@ -220,3 +220,31 @@ restore/RLS checks. The production/Hostinger DB is never used.
 See [Phase 10.5F report and migration review gates](docs/PHASE_10_5F_HISTORICAL_OWNERSHIP_RECOVERY_2026-11-12.md).
 
 **Phase 10.5F verified code:** [Push #43228070837](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43228070837) and [Draft PR #43228083159](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43228083159) both green at `2a20b094`. New RLS matrix 79/79, legacy review and staging 41/41, and isolated restore-corrupt-restore acceptance passed. **Human mapping sign-offs and live migration remain pending**.
+
+## Phase 10.5G — independently signed reviewer evidence and business API authorization inventory
+
+A separate, read-only **offline review verifier** accepts immutable private
+source/review/restore evidence, an explicit RPO/RTO/write-freeze/rollback plan,
+an externally pinned public-key registry and a four-step Ed25519 signature
+hash chain for data custodian, security/privacy reviewer, DBA restore reviewer
+and release manager. `npm run assess:review-signoff -- --source /private/source.json --review /private/review.json --trust /private/trust.json --signoffs /private/signoffs.json --plan /private/plan.json --evidence /private/evidence.json`
+requires `APEX_REVIEW_STAGING_ACK=OFFLINE_ONLY_NEVER_CUTOVER` and
+`APEX_REVIEW_TRUST_SHA256=<sha256-from-independent-custody>`.
+**A cryptographically valid bundle still returns exit code 3 (BLOCKED)**:
+private keys are never stored in the repository, no real-world identity
+certification or authorization can be inferred from self-generated test keys,
+and no migration is executed. Synthetic negative-control tests cover trust
+substitution, signature tampering, role confusion, missing customer decisions,
+RPO/RTO failures, expired attestations, and replay/mismatched evidence.
+
+`npm run smoke:api-matrix` inventories every registered normal and
+PostgreSQL-pilot business route via a TypeScript syntax-tree scan, requires
+authenticated entry for each nonpublic route and exercises anonymous denial
+and wrong-role denial for **all** normal business APIs. The pilot HTTP suite
+also checks every registered staging route without a session. These are
+**authentication and route-level RBAC** checks, not proof of full object/tenant
+authorization across all JSON business operations. Existing BOLA and
+PostgreSQL two-tenant suites remain required.
+
+Full details: [Phase 10.5G audited reviewer preflight and operator objectives](docs/PHASE_10_5G_REVIEW_AUTHORIZATION_REHEARSAL_2026-11-12.md).
+No new business endpoint is switched to SQL. Production remains BLOCKED.

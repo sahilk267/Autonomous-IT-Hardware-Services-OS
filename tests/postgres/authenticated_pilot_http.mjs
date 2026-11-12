@@ -8,6 +8,7 @@ import net from 'node:net';
 import {spawn, spawnSync} from 'node:child_process';
 import {randomBytes, scryptSync, createHmac} from 'node:crypto';
 import pg from 'pg';
+import {discoverRoutes,pathForSmoke} from '../business_route_inventory.mjs';
 
 if(process.env.APEX_PG_STAGING_ACK!=='STAGING_ONLY_NO_PRODUCTION' ||
   !/^apex_stage_/.test(process.env.APEX_PG_PILOT_DB||'')) {
@@ -133,6 +134,17 @@ try {
     await new Promise(resolve=>setTimeout(resolve,110));
   }
   if(!ready)throw Error('Staging HTTP server not ready: '+logs);
+  const routeInventory=discoverRoutes('server/postgres_pilot.ts');
+  for(const route of routeInventory){
+    const check=await api(pathForSmoke(route.path),{
+      method:route.method,
+      ...(route.method==='GET'?{}:{body:{}})
+    });
+    test('Unsigned/anonymous SQL pilot '+route.method+' '+route.path+' denied',()=>{
+      assert.equal(check.status,401,JSON.stringify(check.data));
+      assert.equal(check.data.data,undefined);
+    });
+  }
   let r=await api('/api/pg-pilot/customers');
   test('Anonymous SQL pilot access denied by existing cookie middleware',()=>assert.equal(r.status,401));
   for(const [username] of roles){
