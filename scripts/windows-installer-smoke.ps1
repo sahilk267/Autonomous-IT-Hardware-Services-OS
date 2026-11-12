@@ -39,24 +39,41 @@ if (-not (Test-Path (Join-Path $resources 'web\index.html'))) {
 }
 Write-Output 'Installed EXE and embedded React assets exist.'
 
+# GitHub-hosted Windows runners often execute as a service without an
+# interactive desktop. Never misrepresent that scenario as a GUI PASS.
+$interactive = [Environment]::UserInteractive -and
+  $env:SESSIONNAME -match '^(Console|RDP-)'
+$requireGui = $env:APEX_REQUIRE_INTERACTIVE_SMOKE -eq '1'
+if ($requireGui -and -not $interactive) {
+  throw 'Interactive GUI acceptance requested but the runner has no interactive Windows desktop session.'
+}
+
 $launched = Start-Process -FilePath $exe -PassThru
 $found = $false
 try {
-  for ($i=0; $i -lt 60; $i++) {
+  $cycles = if ($interactive) { 60 } else { 7 }
+  for ($i=0; $i -lt $cycles; $i++) {
     Start-Sleep -Milliseconds 600
-    # GUI process can differ from the initial Electron launch PID.
+    # Main window may be owned by a child Electron process.
     $running = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
       $_.ProcessName -like 'Apex IT OS*' -and $_.MainWindowTitle -match 'Desktop Configuration'
     })
     if ($running.Count -gt 0) {
       $found = $true
-      Write-Output 'First-run configuration wizard launched without any hosted server details.'
+      Write-Output 'GUI VERIFIED: the installed first-run configuration wizard is visible.'
       break
     }
     if ($launched.HasExited) { break }
   }
-  if (-not $found) {
-    throw 'Installed EXE did not show the offline first-run Desktop Configuration wizard.'
+  if ($interactive -and -not $found) {
+    $processes = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+      $_.ProcessName -like 'Apex IT OS*'
+    } | Select-Object -First 8 ProcessName, Id, MainWindowTitle)
+    Write-Output ('Installed app processes: ' + ($processes | ConvertTo-Json -Compress))
+    throw 'Interactive Windows runner did not show the first-run Desktop Configuration wizard.'
+  }
+  if (-not $interactive) {
+    Write-Output '::warning::GUI UNVERIFIED (headless Windows runner); install and packaged frontend checks passed. Interactive Windows acceptance is still mandatory before production.'
   }
 } finally {
   # Stop only processes belonging to this test install.
