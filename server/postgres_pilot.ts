@@ -68,7 +68,8 @@ export function registerPostgresPilotRoutes(
     ...options,max:4,connectionTimeoutMillis:2500,
     idleTimeoutMillis:5000,statement_timeout:5000,query_timeout:7000,ssl:false
   });
-  async function transact(req: Request, operation: PilotOperation): Promise<PilotResult> {
+  async function transact(req: Request, operation: PilotOperation,
+    readOnly=false): Promise<PilotResult> {
     const session=(req as any).user as {userId?:string;role?:UserRole};
     const user=session?.userId ? store.getUserById(session.userId) : undefined;
     const currentTenant=store.getState().tenant.id;
@@ -86,7 +87,9 @@ export function registerPostgresPilotRoutes(
       let retryable=false;
       let brokenConnection=false;
       try {
-        await client.query('BEGIN ISOLATION LEVEL SERIALIZABLE');
+        await client.query(readOnly?
+          'BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY':
+          'BEGIN ISOLATION LEVEL SERIALIZABLE');
         inTransaction=true;
         const nonce=await client.query(
           'SELECT txid_current()::text AS txid, pg_backend_pid()::text AS backend');
@@ -157,10 +160,10 @@ export function registerPostgresPilotRoutes(
     return {id:existing.rows[0].resource_id,replay:true};
   }
 
-  const handler=(operation:PilotOperation):RequestHandler=>async(req,res)=>{
+  const handler=(operation:PilotOperation,readOnly=false):RequestHandler=>async(req,res)=>{
     res.setHeader('Cache-Control','no-store');
     try{
-      const result=await transact(req,operation);
+      const result=await transact(req,operation,readOnly);
       res.status(result.status).json({
         success:true,data:result.data,mode:'LOCAL_POSTGRES_STAGING_PILOT',
         jsonRuntimeUnchanged:true,productionCutover:false
@@ -191,7 +194,7 @@ export function registerPostgresPilotRoutes(
       requireRole('BUSINESS_OWNER'),handler(async(client,actor)=>{
         const report=await compareStagingRepository(client,store,actor.tenantId);
         return {status:200,data:report};
-      }));
+      },true));
   }
   app.get('/api/pg-pilot/customers',requireAuth,handler(async client=>{
     const result=await client.query(

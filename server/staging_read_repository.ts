@@ -64,6 +64,9 @@ export async function compareStagingRepository(
   repo:StagingReadRepository=new PostgresStagingReadRepository()
 ):Promise<ShadowReadReport>{
   const state=store.getState();
+  const mode=await client.query('SHOW transaction_read_only');
+  if(mode.rows[0]?.transaction_read_only!=='on')
+    throw Error('Repository shadow must execute in read-only SQL transaction');
   if(state.tenant.id!==tenantId)
     throw Error('Staging repository JSON tenant does not match signed actor');
   const comparisons:ShadowDomainComparison[]=[];
