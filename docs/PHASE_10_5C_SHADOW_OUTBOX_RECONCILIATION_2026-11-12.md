@@ -50,3 +50,7 @@
 **Next recommended phase 10.5D / 10.6:** reviewed repository abstraction for a selected existing business route, gated nonproduction shadow reads under authenticated tenant context, reconciled customer-specific crosswalk without PII, and audited provider-independent outbox dispatcher *design* (delivery still off) before any staged customer cutover.
 
 **Keep Draft PR #1 unmerged, `main` unchanged, live Hostinger and customer production data untouched.**
+
+## Phase 10.5D follow-on verification
+
+The staging-only **typed** PostgreSQL repository adapter adds an owner-only, feature-gated, SQL READ ONLY comparison endpoint for five JSON business domains. Historical reconciliation additionally verifies project/proposal, asset/RMA and staff custody/share links. A separate read-only outbox preflight checks existing pending events but **cannot send**, and future dispatch remains design-only. [Phase 10.5D report](PHASE_10_5D_REPOSITORY_CROSSMODULE_DISPATCH_DESIGN_2026-11-12.md).
