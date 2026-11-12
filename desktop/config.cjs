@@ -33,12 +33,16 @@ function validateDesktopSettings(raw, defaultDataDirectory) {
     tenantMode: 'fixed',
     tenantId: '',
     serverUrl: '',
+    connectionPending: true,
   };
   if (mode === 'hosted') {
     // It is legitimate to install the client before the server is deployed.
     // An empty origin stays in pending-configuration mode until entered later.
     configuration.serverUrl = raw.serverUrl?.trim()
       ? validateHostedOrigin(raw.serverUrl.trim()) : '';
+    // Persist the deferred choice. Otherwise a saved but not-yet-verified URL
+    // would be auto-opened at the next launch without the user's consent.
+    configuration.connectionPending = !configuration.serverUrl || raw.connectionPending !== false;
     return Object.freeze(configuration); // NEVER persist local DB or integration secrets in a remote client.
   }
   if (mode === 'postgres') {

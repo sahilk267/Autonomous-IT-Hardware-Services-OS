@@ -28,15 +28,33 @@ jobs:
       - run: npm run test:desktop-hosted
       - run: npm run test:desktop-syntax
       - run: npm run package:windows
+        env:
+          # PR builds must remain unsigned; signing secrets never run on PR code.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Verify installer artifact exists
         shell: pwsh
         run: |
           $artifact = Get-ChildItem -Path "release/windows" -Filter "*Setup-x64.exe" -Recurse
           if ($artifact.Count -lt 1) { throw "No NSIS x64 installer was created" }
           $artifact | ForEach-Object { Write-Output "$($_.Name): $($_.Length) bytes" }
+      - name: Verify unsigned preview and generate SHA-256 manifest
+        shell: pwsh
+        run: |
+          $setup = @(Get-ChildItem -Path "release/windows" -Filter "*Setup-x64.exe" -Recurse -File)
+          if ($setup.Count -ne 1) { throw "Expected one installer" }
+          $signature = Get-AuthenticodeSignature -FilePath $setup[0].FullName
+          if ($signature.Status -eq 'Valid') { throw "Preview workflow unexpectedly used a production signing identity" }
+          $hash = (Get-FileHash -Path $setup[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($setup[0].Name)" | Set-Content -Path 'release/windows/SHA256SUMS.txt' -Encoding utf8
+          Write-Output "Preview SHA256: $hash"
+      - name: Smoke-test installed EXE (first-run wizard and uninstall)
+        shell: pwsh
+        run: ./scripts/windows-installer-smoke.ps1
       - uses: actions/upload-artifact@v4
         with:
           name: apex-it-os-windows-x64-unsigned-preview
-          path: release/windows/*Setup-x64.exe
+          path: |
+            release/windows/*Setup-x64.exe
+            release/windows/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 14
