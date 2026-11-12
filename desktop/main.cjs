@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage, Menu, session } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, Menu, session, net: electronNet } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -205,13 +205,23 @@ function hostedAppWindow(origin) {
   window.show();
 }
 
+// Chromium's network stack shares Windows certificate trust and system proxy
+// behavior with the hosted BrowserWindow. Preflight always omits cookies.
+async function checkHostedConnection(origin) {
+  return probeHostedServer(origin, {
+    fetcher: (url, init) => electronNet.fetch(url, {
+      ...init, credentials: 'omit', redirect: 'manual', bypassCustomProtocolHandlers: true,
+    }),
+  });
+}
+
 async function connectHosted(settings) {
   if (!settings.serverUrl) {
     connectionError = 'Server not deployed yet. Enter its HTTPS address after deployment.';
     setupDialog();
     return null;
   }
-  const verified = await probeHostedServer(settings.serverUrl);
+  const verified = await checkHostedConnection(settings.serverUrl);
   connectionError = null;
   hostedAppWindow(verified.origin);
   return verified;
@@ -341,7 +351,7 @@ app.whenReady().then(async () => {
           // HTTPS check is performed BEFORE saving or shutting down an existing
           // working server. A typo, stale TLS cert, redirect, or wrong product
           // does not overwrite a previously working connection.
-          await probeHostedServer(config.serverUrl);
+          await checkHostedConnection(config.serverUrl);
         }
         writeSettings(config);
         currentSettings = config;
