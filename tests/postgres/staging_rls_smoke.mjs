@@ -151,12 +151,33 @@ try {
        'products','suppliers','rfqs','telegramMessages','licenses','providers',
        'workflows','connectors'].reduce((n,kind)=>n+(baseline[kind]||[]).length,0));
     assert.equal(report.databaseModified,false);
+    assert.equal(report.crossModuleRelationsVerified,true);
+    assert.equal(report.linkedProjectAssetRelationships,4);
+    assert.equal(report.scopedProjectShares,2);
+    assert.deepEqual(report.customerManifests.map(x=>x.linkedRelations).sort(),[2,2]);
   });
   reconciled=reconcile({PGDATABASE:'postgres'});
   test('Historical migration manifest refuses default/non-staging DB',()=>{
     assert.equal(reconciled.status,2);
     assert.match(reconciled.stderr,/RECONCILIATION REFUSED/);
   });
+  await asyncTest('Composite SQL foreign key denies a cross-customer proposal→project rewrite',async()=>{
+    await assert.rejects(
+      db.query("UPDATE apex.customer_records SET related_id='project-b' "+
+        "WHERE kind='proposals' AND source_id='proposal-a'"),
+      err=>err.code==='23503'
+    );
+  });
+  await db.query("UPDATE apex.project_shares SET staff_id='it-a' "+
+    "WHERE project_id='project-a' AND staff_id='sales-a'");
+  reconciled=reconcile();
+  test('Historical reconciliation catches cross-module collaborator membership drift',()=>{
+    assert.equal(reconciled.status,1);
+    assert.match(reconciled.stderr,/project collaborator cross-module share drift/);
+  });
+  await db.query("UPDATE apex.project_shares SET staff_id='sales-a' "+
+    "WHERE project_id='project-a' AND staff_id='it-a'");
+  assert.equal(reconcile().status,0,'Restored historical project share graph matches source');
   parityResult=parity({PGDATABASE:'postgres'});
   test('Parity checker refuses default or non-staging database',()=>{
     assert.equal(parityResult.status,2);
