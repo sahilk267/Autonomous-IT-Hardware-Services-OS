@@ -83,10 +83,21 @@ try {
     assert.notEqual(invalid.status,0);
     assert.match(invalid.stderr,/STAGING PILOT SAFETY/);
   });
+  const detachedShadow=spawnSync(process.execPath,['dist/server.cjs'],{
+    env:{...process.env,NODE_ENV:'staging',PORT:String(port),
+      APEX_DATA_FILE:dataFile,APEX_PG_PILOT_ENABLED:'false',
+      APEX_PG_REPOSITORY_SHADOW_READS:'true'},
+    encoding:'utf8',timeout:6000
+  });
+  test('Repository shadow cannot start without signed nonproduction SQL pilot',()=>{
+    assert.notEqual(detachedShadow.status,0);
+    assert.match(detachedShadow.stderr,/REPOSITORY SHADOW SAFETY/);
+  });
   child=spawn(process.execPath,['dist/server.cjs'],{
     env:{...process.env,NODE_ENV:'staging',PORT:String(port),
       APEX_DATA_FILE:dataFile,APEX_PG_PILOT_ENABLED:'true',
       APEX_PG_PILOT_ACK:'LOCAL_STAGING_ONLY_NO_CUTOVER',
+      APEX_PG_REPOSITORY_SHADOW_READS:'true',
       APEX_ALLOW_PRODUCTION_RESET:'false',GEMINI_API_KEY:'',
       TELEGRAM_BOT_TOKEN:''},
     stdio:['ignore','pipe','pipe']
@@ -114,6 +125,31 @@ try {
     assert.equal(r.status,200);
     assert.equal(r.data.data.applicationStorage,'json');
     assert.equal(r.data.productionCutover,false);
+  });
+  const originalJsonCustomerView=await api('/api/customers',{cookie:owner});
+  r=await api('/api/pg-pilot/repository-shadow',{cookie:owner});
+  test('Owner-only flagged repository compares five domain projections in READ ONLY SQL',()=>{
+    assert.equal(r.status,200,JSON.stringify(r.data));
+    assert.equal(r.data.data.mode,'NONPRODUCTION_READ_ONLY_REPOSITORY_SHADOW');
+    assert.equal(r.data.data.sourceOfTruth,'json');
+    assert.equal(r.data.data.repository,'postgres-rls');
+    assert.equal(r.data.data.comparisons.length,5);
+    assert.equal(r.data.data.databasesWritten,false);
+    assert.equal(r.data.data.automaticReconciliation,false);
+    assert.equal(r.data.data.productionCutover,false);
+    assert.equal(r.data.data.matched,false); // SQL import intentionally independent of JSON fixture
+    const customers=r.data.data.comparisons.find(x=>x.domain==='customers');
+    assert.equal(customers.jsonCount,originalJsonCustomerView.data.data.length);
+    assert.equal(customers.postgresCount,2);
+    assert.ok(!JSON.stringify(r.data).includes('Customer A'));
+  });
+  r=await api('/api/pg-pilot/repository-shadow',{cookie:sales});
+  test('Sales cannot query owner-only repository shadow metrics',()=>assert.equal(r.status,403));
+  r=await api('/api/pg-pilot/repository-shadow');
+  test('Anonymous repository diagnostics require real cookie login',()=>assert.equal(r.status,401));
+  const jsonViewAfterShadow=await api('/api/customers',{cookie:owner});
+  test('Repository shadow does not alter the JSON-primary customer HTTP endpoint',()=>{
+    assert.deepEqual(jsonViewAfterShadow.data,originalJsonCustomerView.data);
   });
   r=await api('/api/pg-pilot/customers',{cookie:owner});
   test('PostgreSQL owner sees imported customer A and B',()=>{
