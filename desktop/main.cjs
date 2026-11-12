@@ -150,7 +150,10 @@ function mainAppWindow() {
   const appUrl = `http://127.0.0.1:${backendPort}/`;
   void mainWindow.loadURL(appUrl);
   restrictNavigation(mainWindow, () => `http://127.0.0.1:${backendPort}/`);
-  mainWindow.on('closed', () => mainWindow = null);
+  const localWindow = mainWindow;
+  localWindow.on('closed', () => {
+    if (mainWindow === localWindow) mainWindow = null;
+  });
 }
 /**
  * Hosted mode does not launch the bundled Node server or access DATABASE_URL.
@@ -265,7 +268,7 @@ async function startBackend(settings) {
   child.stderr.on('data', chunk => console.error('[Apex backend]', String(chunk).slice(0, 2000)));
   backend = child;
   for (let i = 0; i < 100; i++) {
-    if (child.exitCode !== null) break;
+    if (child.exitCode !== null || child.signalCode !== null) break;
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
         signal: AbortSignal.timeout(800),
