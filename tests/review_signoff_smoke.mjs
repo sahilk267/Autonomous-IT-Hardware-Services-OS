@@ -139,10 +139,10 @@ try{
   },'recovery objective');
   bad('Evidence that claims production ready is forbidden',b=>{
     b.evidence.productionCutoverReady=true;
-  },'not independently staged');
+  });
   bad('A restore proof from another source cannot approve this source',b=>{
     b.evidence.originalSourceSha256='f'.repeat(64);
-  },'restore provenance');
+  });
   bad('Expiration cannot exceed 90-day signature validity cap',b=>{
     b.chain.records[0].attestation.expiresAt='2099-01-01T00:00:00Z';
   },'too distant');
