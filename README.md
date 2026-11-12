@@ -203,18 +203,20 @@ remain **BLOCKED**. Keep Draft PR #1 unmerged.
 
 An *isolated, read-only* historical review command is available only for
 private absolute-path snapshots already imported into a disposable local
-PostgreSQL 16 stage: \`npm run verify:pg:owner-review -- --source /private/snapshot.json --review /private/review.json\`.
+PostgreSQL 16 stage: `npm run verify:pg:owner-review -- --source /private/snapshot.json --review /private/review.json`.
 Every owner-only record must have exactly one reviewed **proposal** bound to
 the immutable source SHA and staging SQL import; two distinct claimed reviewer
 references are checked for format but **not cryptographically verified**.
 No customer grant or ownership transfer is applied, and a valid report always
-states \`externalSignatureVerified:false\` and \`productionCutoverReady:false\`.
+states `externalSignatureVerified:false` and `productionCutoverReady:false`.
 
-The staging CI now additionally executes \`npm run smoke:pg:tenant-matrix\`
+The staging CI now additionally executes `npm run smoke:pg:tenant-matrix`
 (two independent tenants; colliding IDs; signed role/customer/assignment RLS
 across six domains) and an independent full PostgreSQL restore-evidence
-comparison via \`npm run assess:pg:rehearsal\`. It purposely corrupts only
+comparison via `npm run assess:pg:rehearsal`. It purposely corrupts only
 a disposable restore clone, demands mismatch detection, destroys/recreates
 the clone from the original SHA256-verified archive, and repeats all
 restore/RLS checks. The production/Hostinger DB is never used.
 See [Phase 10.5F report and migration review gates](docs/PHASE_10_5F_HISTORICAL_OWNERSHIP_RECOVERY_2026-11-12.md).
+
+**Phase 10.5F verified code:** [Push #43228070837](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43228070837) and [Draft PR #43228083159](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43228083159) both green at `2a20b094`. New RLS matrix 79/79, legacy review and staging 41/41, and isolated restore-corrupt-restore acceptance passed. **Human mapping sign-offs and live migration remain pending**.
