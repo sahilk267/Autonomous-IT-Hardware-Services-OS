@@ -90,11 +90,15 @@ export async function productionRestoreDrill(environment = process.env) {
   const conf = validateRestoreDrillConfiguration(environment);
   if (!conf.ok) throw new Error('Recovery preflight failed: ' + conf.errors.join('; '));
   const started = Date.now();
-  const origin = await adminClient(conf.source.href);
+  let origin;
   let destination;
   let folder;
+  let phase = 'SOURCE_CONNECTION';
   try {
+    origin = await adminClient(conf.source.href);
+    phase = 'TARGET_CONNECTION';
     destination = await adminClient(conf.target.href);
+    phase = 'TARGET_EMPTY_CHECK';
     const tables = await destination.query(`
       SELECT tablename FROM pg_catalog.pg_tables
       WHERE schemaname NOT IN ('pg_catalog','information_schema')
@@ -111,6 +115,7 @@ export async function productionRestoreDrill(environment = process.env) {
       throw new Error('Restore target has nonstandard extensions and is not considered empty.');
     }
 
+    phase = 'CREATE_PRIVATE_SNAPSHOT';
     folder = fs.mkdtempSync(path.join(conf.scratch, 'apex-restore-'), { mode: 0o700 });
     const archive = path.join(folder, 'snapshot.pgcustom');
     const sourceEnv = connectionEnvironment(conf.source, environment);
@@ -118,6 +123,7 @@ export async function productionRestoreDrill(environment = process.env) {
     const dumpStarted = Date.now();
     // All secrets go in PG* child environment, NEVER in CLI arguments,
     // GitHub logs, or user-facing reports.
+    phase = 'PG_DUMP';
     await runPgTool('pg_dump', ['--format=custom','--no-owner','--file', archive], sourceEnv);
     fs.chmodSync(archive, 0o600);
     const bytes = fs.statSync(archive).size;
@@ -130,14 +136,18 @@ export async function productionRestoreDrill(environment = process.env) {
     // Do not create/drop a DB. Restore into the already verified empty target
     // in a single transaction so a mid-restore error does not leave partial rows.
     const restoreStarted = Date.now();
+    phase = 'PG_RESTORE';
     await runPgTool('pg_restore', [
       '--no-owner', '--single-transaction', '--exit-on-error', '--dbname',
       conf.target.pathname.slice(1), archive,
     ], targetEnv);
     const restoreSeconds = Math.round((Date.now()-restoreStarted)/1000);
 
+    phase = 'SOURCE_RECONCILIATION';
     const sourceFingerprint = await fingerprint(origin);
+    phase = 'TARGET_RECONCILIATION';
     const restoredFingerprint = await fingerprint(destination);
+    phase = 'COMPARE_DIGESTS';
     if (JSON.stringify(sourceFingerprint) !== JSON.stringify(restoredFingerprint)) {
       throw new Error('Restore verification FAILED: source and target membership, audit, finance/inventory or migration digests differ');
     }
@@ -148,8 +158,16 @@ export async function productionRestoreDrill(environment = process.env) {
       dumpSeconds, restoreSeconds, totalSeconds: Math.round((Date.now()-started)/1000),
       note: 'Source not modified; target was empty and disposable. Temporary sensitive dump deleted. Real RTO/RPO and encrypted backups require operational signoff.',
     };
+  } catch (error) {
+    if (/^(Restore target|Full-tenant|Rehearsal verifier|Restore verification FAILED|Backup archive)/.test(error.message)) {
+      throw error;
+    }
+    const code = typeof error?.code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(error.code)
+      ? error.code : 'UNCLASSIFIED';
+    // Never echo PostgreSQL connection strings or raw libpq error messages.
+    throw new Error(`RECOVERY_STAGE_${phase}_FAILED [${code}]`);
   } finally {
-    await Promise.allSettled([origin.end(), destination?.end()]);
+    await Promise.allSettled([origin?.end(), destination?.end()]);
     if (folder) fs.rmSync(folder, { recursive: true, force: true });
   }
 }
@@ -160,7 +178,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     .catch(error => {
       // Error messages from our validation are secret-free; driver/library
       // exceptions are not printed verbatim because they might contain URLs.
-      if (/^Recovery preflight failed|^Restore target|^Full-tenant|^Rehearsal verifier|^Restore verification FAILED|^Backup archive/.test(error.message)) {
+      if (/^Recovery preflight failed|^RECOVERY_STAGE_|^Restore target|^Full-tenant|^Rehearsal verifier|^Restore verification FAILED|^Backup archive/.test(error.message)) {
         console.error(error.message);
       } else {
         console.error('Recovery drill FAILED; inspect the protected operator environment for details (connection secrets withheld).');
