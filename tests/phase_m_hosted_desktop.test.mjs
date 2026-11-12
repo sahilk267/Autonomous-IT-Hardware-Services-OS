@@ -122,7 +122,7 @@ test('preflight blocks wrong product, local backend, incompatible API and unread
 });
 test('preflight fails closed when missing, oversized or malformed JSON is returned', async () => {
   const wrongs = [
-    response({ ...base.handshake, payload: 'x'.repeat(16000) }),
+    response({ ...base.handshake, payload: 'x'.repeat(17000) }),
     new Response('not-json', { status: 200, headers: { 'content-type': 'application/json' } }),
     new Response('{}', { status: 200, headers: { 'content-type': 'application/json', 'content-length': '20000' } }),
   ];
