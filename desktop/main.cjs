@@ -65,18 +65,23 @@ function createNativeMenu() {
       { label: 'Retry Connection', click: () => {
         if (currentSettings?.storageMode === 'hosted' && currentSettings.serverUrl) {
           void connectHosted(currentSettings).catch(error => {
-            connectionError = error.message;
+            connectionError = 'Could not connect to your saved server. ' + error.message;
             setupDialog();
           });
         }
       }},
       { label: 'Forget Hosted Login on This PC', click: () => {
         if (currentSettings?.storageMode === 'hosted' && currentSettings.serverUrl) {
+          // Close renderer FIRST so old service workers cannot re-create a
+          // session after storage is cleared, then require a fresh login.
+          const old = mainWindow;
+          if (old && windowKind === 'hosted' && !old.isDestroyed()) old.close();
           void session.fromPartition(hostedPartition(currentSettings.serverUrl))
-            .clearStorageData().then(() => {
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                void mainWindow.loadURL(currentSettings.serverUrl + '/');
-              }
+            .clearStorageData()
+            .then(() => connectHosted(currentSettings))
+            .catch(error => {
+              connectionError = 'Could not clear hosted login or reconnect: ' + error.message;
+              setupDialog();
             });
         }
       }},
@@ -222,6 +227,13 @@ async function connectHosted(settings) {
     return null;
   }
   const verified = await checkHostedConnection(settings.serverUrl);
+  // Only an explicit successful verification can promote a deferred URL into
+  // active mode. A failed connect leaves the encrypted pending flag intact.
+  if (settings.connectionPending) {
+    const active = { ...settings, connectionPending: false };
+    writeSettings(active);
+    currentSettings = active;
+  }
   connectionError = null;
   hostedAppWindow(verified.origin);
   return verified;
@@ -343,10 +355,14 @@ app.whenReady().then(async () => {
         throw new Error('Confirm that switching servers/modes does NOT migrate data or active sessions.');
       }
       const token = prior?.setupToken || crypto.randomBytes(32).toString('hex');
-      const config = { ...next, setupToken: token };
+      const pending = next.storageMode === 'hosted' &&
+        (!next.serverUrl || submitted.deferConnection === 'on');
+      const config = {
+        ...next, setupToken: token,
+        connectionPending: next.storageMode === 'hosted' ? pending : false,
+      };
 
       if (config.storageMode === 'hosted') {
-        const pending = !config.serverUrl || submitted.deferConnection === 'on';
         if (!pending) {
           // HTTPS check is performed BEFORE saving or shutting down an existing
           // working server. A typo, stale TLS cert, redirect, or wrong product
@@ -437,9 +453,12 @@ app.whenReady().then(async () => {
     if (!currentSettings) {
       setupDialog();
     } else if (currentSettings.storageMode === 'hosted') {
-      if (currentSettings.serverUrl) await connectHosted(currentSettings);
-      else {
-        connectionError = 'Server is not configured yet. Enter its HTTPS URL after deployment.';
+      if (currentSettings.serverUrl && !currentSettings.connectionPending) {
+        await connectHosted(currentSettings);
+      } else {
+        connectionError = currentSettings.serverUrl
+          ? 'Server address saved for later. Verify it when your deployment is live.'
+          : 'Server is not configured yet. Enter its HTTPS URL after deployment.';
         setupDialog();
       }
     } else {
