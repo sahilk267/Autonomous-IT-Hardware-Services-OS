@@ -1,0 +1,85 @@
+name: Phase M — Protected signed Windows candidate
+
+# Signing keys must NEVER be available to pull-request code. This workflow
+# runs only by explicit operator action on protected main + environment review.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-signed-release
+  cancel-in-progress: false
+
+jobs:
+  signed-windows:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    environment: windows-release-signing
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Require provisioned signing secrets
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          EXPECTED_SIGNER_SUBJECT: ${{ secrets.APEX_WINDOWS_SIGNER_SUBJECT }}
+        run: |
+          if (-not $env:WIN_CSC_LINK -or -not $env:WIN_CSC_KEY_PASSWORD -or -not $env:EXPECTED_SIGNER_SUBJECT) {
+            throw 'Missing authorized code-signing cert, password, or expected signer. Protected release is blocked.'
+          }
+      - run: npm install --no-audit --no-fund
+      - run: npm run lint
+      - run: npm test
+      - name: Build release — code signing MANDATORY
+        shell: pwsh
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Production build failed' }
+          npx electron-builder --win nsis --x64 --config.forceCodeSigning=true
+          if ($LASTEXITCODE -ne 0) { throw 'Mandatory Windows Authenticode code signing failed' }
+      - name: Independently verify signer on both installed app and NSIS installer
+        shell: pwsh
+        env:
+          EXPECTED_SIGNER_SUBJECT: ${{ secrets.APEX_WINDOWS_SIGNER_SUBJECT }}
+        run: |
+          $installer = @(Get-ChildItem release/windows -Filter '*Setup-x64.exe' -Recurse -File)
+          $appExe = @(Get-ChildItem release/windows -Filter 'Apex IT OS Desktop.exe' -Recurse -File)
+          if ($installer.Count -ne 1 -or $appExe.Count -ne 1) {
+            throw 'Expected one signed NSIS installer and one signed application EXE'
+          }
+          foreach ($file in @($installer[0], $appExe[0])) {
+            $sig = Get-AuthenticodeSignature -FilePath $file.FullName
+            if ($sig.Status -ne 'Valid' -or -not $sig.SignerCertificate) {
+              throw "Authenticode validation failed for $($file.Name): $($sig.Status)"
+            }
+            if (-not $sig.SignerCertificate.Subject.Contains($env:EXPECTED_SIGNER_SUBJECT)) {
+              throw "Signer of $($file.Name) does not match the approved publisher"
+            }
+            if ($sig.SignerCertificate.NotAfter -le (Get-Date).AddDays(7)) {
+              throw "Publisher certificate is expired or within one week of expiration"
+            }
+            Write-Output "Trusted Authenticode signer verified: $($file.Name)"
+          }
+          $digest = (Get-FileHash -Path $installer[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$digest  $($installer[0].Name)" | Set-Content 'release/windows/SHA256SUMS.txt' -Encoding utf8
+          Write-Output "Signed installer SHA256: $digest"
+      - name: Install, launch offline wizard and uninstall signed installer
+        shell: pwsh
+        run: ./scripts/windows-installer-smoke.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apex-it-os-windows-x64-authenticode-verified
+          path: |
+            release/windows/*Setup-x64.exe
+            release/windows/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
