@@ -1,19 +1,15 @@
 #!/usr/bin/env node
 /** Read-only public HTTPS deployment acceptance (no credentials needed). */
 import tls from 'node:tls';
-import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { validateHostedOrigin } = require('../desktop/hosted.cjs');
 import { fileURLToPath } from 'node:url';
 
 export function parseAcceptanceOrigin(input) {
-  if (typeof input !== 'string' || !input) throw new Error('Pass an explicit HTTPS deployment origin');
-  const url = new URL(input);
-  if (url.protocol !== 'https:' || url.username || url.password || url.search ||
-      url.hash || url.pathname !== '/' || !url.hostname ||
-      ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
-    throw new Error('Acceptance requires an explicit public HTTPS origin without credentials, path or query');
-  }
-  return url.origin;
+  try { return validateHostedOrigin(input); }
+  catch { throw new Error('Acceptance requires an exact public HTTPS domain without credentials, paths or queries.'); }
 }
 
 export async function certificateInfo(url) {
