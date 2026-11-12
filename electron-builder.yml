@@ -20,7 +20,9 @@ win:
     - target: nsis
       arch:
         - x64
-  signAndEditExecutable: false
+  # Allow code signing when trusted credentials are supplied by protected CI.
+  # Preview builds deliberately have no credentials and remain unsigned.
+  signAndEditExecutable: true
 nsis:
   oneClick: false
   perMachine: false
