@@ -70,7 +70,7 @@ async function fingerprint(client) {
   const counts = {};
   const hashes = {};
   for (const table of SQL_TABLES) {
-    const rows = await client.query(`SELECT to_jsonb(t) AS record FROM ${table} AS t`);
+    const rows = await client.query(`SELECT to_jsonb(t) AS record FROM ${table} AS t LIMIT 100001`);
     if (rows.rowCount > 100000) {
       throw new Error('Rehearsal verifier row budget exceeded: use an approved streaming audit tool for this dataset');
     }
@@ -91,9 +91,10 @@ export async function productionRestoreDrill(environment = process.env) {
   if (!conf.ok) throw new Error('Recovery preflight failed: ' + conf.errors.join('; '));
   const started = Date.now();
   const origin = await adminClient(conf.source.href);
-  const destination = await adminClient(conf.target.href);
+  let destination;
   let folder;
   try {
+    destination = await adminClient(conf.target.href);
     const tables = await destination.query(`
       SELECT tablename FROM pg_catalog.pg_tables
       WHERE schemaname NOT IN ('pg_catalog','information_schema')
@@ -121,7 +122,9 @@ export async function productionRestoreDrill(environment = process.env) {
     fs.chmodSync(archive, 0o600);
     const bytes = fs.statSync(archive).size;
     if (bytes < 1000) throw new Error('Backup archive is suspiciously small');
-    const digest = crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex');
+    const hash = crypto.createHash('sha256');
+    for await (const chunk of fs.createReadStream(archive)) hash.update(chunk);
+    const digest = hash.digest('hex');
     const dumpSeconds = Math.round((Date.now()-dumpStarted)/1000);
 
     // Do not create/drop a DB. Restore into the already verified empty target
@@ -146,7 +149,7 @@ export async function productionRestoreDrill(environment = process.env) {
       note: 'Source not modified; target was empty and disposable. Temporary sensitive dump deleted. Real RTO/RPO and encrypted backups require operational signoff.',
     };
   } finally {
-    await Promise.allSettled([origin.end(), destination.end()]);
+    await Promise.allSettled([origin.end(), destination?.end()]);
     if (folder) fs.rmSync(folder, { recursive: true, force: true });
   }
 }
