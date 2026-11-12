@@ -1,4 +1,5 @@
 const path = require('node:path');
+const { validateHostedOrigin } = require('./hosted.cjs');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SIMPLE_KEYS = ['geminiApiKey', 'telegramBotToken', 'telegramWebhookSecret',
@@ -19,8 +20,8 @@ function validateDesktopSettings(raw, defaultDataDirectory) {
   if (process.platform !== 'win32' && process.env.NODE_ENV === 'production' && !process.env.APEX_DESKTOP_TEST) {
     throw new Error('Packaged desktop configuration is supported only on Windows');
   }
-  const mode = raw.storageMode === 'postgres' ? 'postgres' : raw.storageMode === 'single' ? 'single' : null;
-  if (!mode) throw new Error('Choose local JSON or PostgreSQL storage');
+  const mode = ['hosted', 'single', 'postgres'].includes(raw.storageMode) ? raw.storageMode : null;
+  if (!mode) throw new Error('Choose Hosted, Local JSON or Local PostgreSQL mode');
   let directory = typeof raw.dataDirectory === 'string' && raw.dataDirectory.trim()
     ? path.resolve(raw.dataDirectory.trim()) : path.resolve(defaultDataDirectory);
   if (!path.isAbsolute(directory) || directory.length > 1024) throw new Error('Data directory must be a local absolute path');
@@ -31,7 +32,15 @@ function validateDesktopSettings(raw, defaultDataDirectory) {
     databaseUrl: '',
     tenantMode: 'fixed',
     tenantId: '',
+    serverUrl: '',
   };
+  if (mode === 'hosted') {
+    // It is legitimate to install the client before the server is deployed.
+    // An empty origin stays in pending-configuration mode until entered later.
+    configuration.serverUrl = raw.serverUrl?.trim()
+      ? validateHostedOrigin(raw.serverUrl.trim()) : '';
+    return Object.freeze(configuration); // NEVER persist local DB or integration secrets in a remote client.
+  }
   if (mode === 'postgres') {
     const url = validOptional(raw.databaseUrl, 'PostgreSQL connection');
     let parsed;
@@ -58,6 +67,9 @@ function validateDesktopSettings(raw, defaultDataDirectory) {
 }
 
 function environmentForDesktop(settings, port, setupToken, distDirectory) {
+  if (settings?.storageMode === 'hosted') {
+    throw new Error('Hosted desktop clients must never start a local database or backend');
+  }
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid desktop local port');
   if (typeof setupToken !== 'string' || setupToken.length < 32) throw new Error('Missing generated desktop setup token');
   const env = {
