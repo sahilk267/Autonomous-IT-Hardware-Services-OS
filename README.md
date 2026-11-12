@@ -197,3 +197,24 @@ transactional all-module SQL runtime, live provider dispatch and deployment
 remain **BLOCKED**. Keep Draft PR #1 unmerged.
 
 **Phase 10.5E integrated code CI:** [push #43215153638](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215153638) and [PR #43215162295](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215162295) both succeeded on SHA `e0d69cc`, with 18/18 independent tenant canary assertions. Final docs-only commit requires separate CI confirmation. Production cutover remains BLOCKED.
+
+
+## Phase 10.5F — owner-only customer mapping review and independent recovery evidence
+
+An *isolated, read-only* historical review command is available only for
+private absolute-path snapshots already imported into a disposable local
+PostgreSQL 16 stage: \`npm run verify:pg:owner-review -- --source /private/snapshot.json --review /private/review.json\`.
+Every owner-only record must have exactly one reviewed **proposal** bound to
+the immutable source SHA and staging SQL import; two distinct claimed reviewer
+references are checked for format but **not cryptographically verified**.
+No customer grant or ownership transfer is applied, and a valid report always
+states \`externalSignatureVerified:false\` and \`productionCutoverReady:false\`.
+
+The staging CI now additionally executes \`npm run smoke:pg:tenant-matrix\`
+(two independent tenants; colliding IDs; signed role/customer/assignment RLS
+across six domains) and an independent full PostgreSQL restore-evidence
+comparison via \`npm run assess:pg:rehearsal\`. It purposely corrupts only
+a disposable restore clone, demands mismatch detection, destroys/recreates
+the clone from the original SHA256-verified archive, and repeats all
+restore/RLS checks. The production/Hostinger DB is never used.
+See [Phase 10.5F report and migration review gates](docs/PHASE_10_5F_HISTORICAL_OWNERSHIP_RECOVERY_2026-11-12.md).

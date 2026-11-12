@@ -93,6 +93,27 @@ try {
   assert.equal(importRows.length,1,'expected single verified import');
   assert.equal(importRows[0].tenant_id,src.tenant.id,'tenant ID changed');
   assert.equal(importRows[0].sha256,sha,'snapshot source SHA mismatch');
+  // Source staff identities, roles and disabled-account status must survive
+  // migration exactly, without copying hashes, tokens or sessions to SQL.
+  const staffPG=(await db.query(
+    'SELECT tenant_id,staff_id,role,disabled_at FROM apex.staff')).rows;
+  assert.equal(staffPG.length,expectedStaff.size,'missing or extra SQL staff');
+  for(const row of staffPG){
+    assert.equal(row.tenant_id,src.tenant.id,'foreign tenant SQL staff');
+    const expectedUser=expectedStaff.get(row.staff_id);
+    assert.ok(expectedUser,'SQL staff identity not present in source');
+    assert.equal(row.role,expectedUser.role,'historical staff role drift');
+    assert.equal(row.disabled_at?new Date(row.disabled_at).toISOString():null,
+      expectedUser.disabledAt?new Date(expectedUser.disabledAt).toISOString():null,
+      'historical disabled staff status drift');
+  }
+  const grantKeys=new Set();
+  for(const grant of expectedGrants){
+    assert.ok(expectedStaff.has(grant.staffId),'grant references non-existent staff');
+    const key=grant.customerId+'\u0000'+grant.staffId;
+    assert.ok(!grantKeys.has(key),'duplicated source customer membership');
+    grantKeys.add(key);
+  }
   const customersPG=(await db.query(
     'SELECT tenant_id,customer_id,display_name FROM apex.customers')).rows;
   assert.equal(customersPG.length,src.customers.length,'missing or extra customer');
@@ -129,6 +150,12 @@ try {
   assert.equal(hash(expectedShares),hash(sharesPG.map(x=>({
     customerId:x.customer_id,projectId:x.project_id,staffId:x.staff_id
   }))),'project collaborator cross-module share drift');
+  const shareKeys=new Set();
+  for(const share of expectedShares){
+    const key=[share.customerId,share.projectId,share.staffId].join('\u0000');
+    assert.ok(!shareKeys.has(key),'duplicated historic project share');
+    shareKeys.add(key);
+  }
 
   const manifests=[];
   for(const [customerId,c] of customers){
@@ -170,6 +197,8 @@ try {
     linkedProjectAssetRelationships:linked.length,
     scopedProjectShares:expectedShares.length,
     crossModuleRelationsVerified:true,
+    historicalStaffRoleAndDisabledParity:true,
+    historicalStaffCount:staffPG.length,
     customerManifests:manifests.sort((a,b)=>a.customerKeySha256.localeCompare(b.customerKeySha256)),
     unmappedOwnerOnlyRecords:legacySource.length,
     ownerOnlyMappingApproved:false,productionCutoverReady:false,

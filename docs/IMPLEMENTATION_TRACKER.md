@@ -294,3 +294,17 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 - Named staging customer migration acceptance gates and evidence requirements in [Phase 10.5E runbook](PHASE_10_5E_CRM_CANARY_MIGRATION_ACCEPTANCE_2026-11-12.md): source immutable, exact per-customer record/grant/link parity, explicit owner-only legacy mapping signoffs, reversible rehearsed restore and multi-tenant access proofs. None implies release approval.
 - **CI verified on code SHA `e0d69cc`:** [Push #43215153638](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215153638) and [PR #43215162295](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215162295) both **SUCCESS**, including TypeScript/build, backend, Chromium and full PostgreSQL staging+restore. Separate two-tenant CRM canary suite **18/18 PASS**. Documentation-only commit has its own CI.
 - **No production/Hostinger customer migration**, dispatch worker, KMS identity solution or legal finance-provider integration. Leave main unchanged and PR Draft.
+
+
+---
+
+## Phase 10.5F — historical ownership review, restore rollback evidence and cross-domain tenant RLS (12 November 2026)
+
+**Branch:** \`fix/phase1-security-integrity-20261106\`; Draft PR #1; production cutover **BLOCKED**.
+
+- New \`scripts/postgres/owner_legacy_review.mjs\`: strictly private, read-only source/reviewer proposal with exact source SHA, SQL import provenance, complete 12-class legacy row coverage, distinct claimed data owner/security reviewer references, customer ID registration and row-level content hashes. It *never* verifies external signatures, applies reassignment or flips the source of truth.
+- \`customer_reconciliation_manifest.mjs\` extends full scoped/customer-link digest checks to exact historic staff role, disabled status, duplicate grant and project-collaborator detection. Synthetic negative tests reject missing review coverage, invalid proposed owner, reviewer duplication and stale source SHA.
+- \`tests/postgres/tenant_domain_matrix.mjs\` independently checks **two** real tenant identities with overlapping customer/record IDs, six domain kinds (\`crmOpportunities\`, projects, assets, tickets, jobs, quotes), role/assignment/customer RLS, signed context mismatch, cross-tenant insert denial, immutable customer custody, disabled account exclusion and immediate grant revocation.
+- \`scripts/postgres/rehearsal_evidence.mjs\` compares the source stage DB with a separate PG16 clone using read-only independent transactions, all 18 tables (16 FORCE RLS), policies, FK/check constraints, indexes, staging markers, immutable import provenance and canonical hashes. CI deliberately corrupts *only* the restored clone, must detect drift, then recreates it from an unchanged SHA256 archive and rechecks full RLS/restore smoke acceptance.
+- **Release:** review references do not prove legal authorization; real customer-data snapshot, approval signatures, encrypted offsite backup, live tenant identities, operational rollback and Hostinger are **not verified**. Cutover and outbox remain BLOCKED.
+- **CI status:** check the code and documentation SHA's independent GitHub push and PR workflows; do not assume success from git push. Phase report: [10.5F historical ownership and recovery](PHASE_10_5F_HISTORICAL_OWNERSHIP_RECOVERY_2026-11-12.md).

@@ -30,6 +30,9 @@
     "smoke:pg:cutover": "node tests/postgres/readiness_gate_smoke.mjs",
     "smoke:pg:multi-instance": "node tests/postgres/multi_instance_workorders.mjs",
     "smoke:pg:crm-tenants": "node tests/postgres/crm_read_through_tenants.mjs",
+    "smoke:pg:tenant-matrix": "node tests/postgres/tenant_domain_matrix.mjs",
+    "verify:pg:owner-review": "node scripts/postgres/owner_legacy_review.mjs",
+    "assess:pg:rehearsal": "node scripts/postgres/rehearsal_evidence.mjs",
     "smoke:pg:outbox-plan": "node tests/postgres/outbox_dispatch_plan_smoke.mjs",
     "assess:pg:outbox-plan": "node scripts/postgres/outbox_dispatch_plan.mjs"
   },

@@ -152,10 +152,89 @@ try {
        'workflows','connectors'].reduce((n,kind)=>n+(baseline[kind]||[]).length,0));
     assert.equal(report.databaseModified,false);
     assert.equal(report.crossModuleRelationsVerified,true);
+    assert.equal(report.historicalStaffRoleAndDisabledParity,true);
+    assert.equal(report.historicalStaffCount,baseline.users.length);
     assert.equal(report.linkedProjectAssetRelationships,4);
     assert.equal(report.scopedProjectShares,2);
     assert.deepEqual(report.customerManifests.map(x=>x.linkedRelations).sort(),[2,2]);
   });
+  // Review file is an untrusted proposal, NOT signed customer assignment.
+  const reviewFile=path.join(folder,'ownership-review.json');
+  const legacyKinds=['invoices','marketplaceDisputes','knowledgeArticles',
+    'inventoryTransactions','products','suppliers','rfqs','telegramMessages',
+    'licenses','providers','workflows','connectors'];
+  const decisions=legacyKinds.flatMap(kind=>(baseline[kind]||[]).map(row=>({
+    kind,id:row.id,disposition:'RETAIN_OWNER_ONLY',customerId:null,
+    evidenceSha256:crypto.createHash('sha256').update(kind+':'+row.id).digest('hex'),
+    reviewerRefs:['fixture-data-owner','fixture-security-reviewer']
+  })));
+  // Exercise the proposed-mapping path without applying it or pretending
+  // fixture reviewer references are independently verified attestations.
+  if(decisions.length){
+    decisions[0]={...decisions[0],disposition:'PROPOSE_CUSTOMER',customerId:'cust-a'};
+  }
+  const review={sourceSha256:expectedSha,tenantId:tenant,decisions};
+  fs.writeFileSync(reviewFile,JSON.stringify(review),{mode:0o600});
+  const reviewCli=(extraEnv={})=>spawnSync(process.execPath,
+    ['scripts/postgres/owner_legacy_review.mjs','--source',source,'--review',reviewFile],
+    {encoding:'utf8',env:{...process.env,...extraEnv},timeout:20000});
+  let reviewResult=reviewCli();
+  test('Historical owner-only review proposals bind every row to immutable source and SQL',()=>{
+    assert.equal(reviewResult.status,0,reviewResult.stderr);
+    const report=JSON.parse(reviewResult.stdout);
+    assert.equal(report.recordCount,decisions.length);
+    assert.equal(report.completeCoverage,true);
+    assert.equal(report.provenanceVerified,true);
+    assert.equal(report.sqlReadOnly,true);
+    assert.equal(report.customerMappingApplied,false);
+    assert.equal(report.productionCutoverReady,false);
+    assert.equal(report.externalReviewerIdentityVerified,false);
+    assert.equal(report.externalSignatureVerified,false);
+    assert.equal(report.reviewManifest.length,decisions.length);
+    assert.equal(report.proposedCustomerCount,decisions.length?1:0);
+    assert.equal(report.retainOwnerOnlyCount,Math.max(decisions.length-1,0));
+    assert.ok(!reviewResult.stdout.includes('invoice-private'));
+  });
+  const sourceBeforeReview=hashFile();
+  review.decisions=review.decisions.slice(1);
+  fs.writeFileSync(reviewFile,JSON.stringify(review),{mode:0o600});
+  reviewResult=reviewCli();
+  test('Missing one legacy ownership review is a hard NO-GO',()=>{
+    assert.equal(reviewResult.status,1);
+    assert.match(reviewResult.stderr,/every historical owner-only row/);
+  });
+  review.decisions=decisions.map(x=>({...x}));
+  review.decisions[0].customerId='cust-nonexistent';
+  fs.writeFileSync(reviewFile,JSON.stringify(review),{mode:0o600});
+  reviewResult=reviewCli();
+  test('Ownership reviewer cannot propose an unregistered customer',()=>{
+    assert.equal(reviewResult.status,1);
+    assert.match(reviewResult.stderr,/registered customer/);
+  });
+  review.decisions=decisions.map(x=>({...x}));
+  review.decisions[0].reviewerRefs=['fixture-data-owner','fixture-data-owner'];
+  fs.writeFileSync(reviewFile,JSON.stringify(review),{mode:0o600});
+  reviewResult=reviewCli();
+  test('Duplicate claimed reviewers cannot pass independent evidence format',()=>{
+    assert.equal(reviewResult.status,1);
+    assert.match(reviewResult.stderr,/distinct data-custodian/);
+  });
+  review.decisions=decisions;
+  review.sourceSha256='0'.repeat(64);
+  fs.writeFileSync(reviewFile,JSON.stringify(review),{mode:0o600});
+  reviewResult=reviewCli();
+  test('Historical review cannot be replayed against a different source hash',()=>{
+    assert.equal(reviewResult.status,1);
+    assert.match(reviewResult.stderr,/not bound to this exact/);
+  });
+  review.sourceSha256=expectedSha;
+  fs.writeFileSync(reviewFile,JSON.stringify(review),{mode:0o600});
+  reviewResult=reviewCli({PGDATABASE:'postgres'});
+  test('Historical review rejects the non-staging PostgreSQL database',()=>{
+    assert.equal(reviewResult.status,2);
+    assert.match(reviewResult.stderr,/OWNERSHIP REVIEW REFUSED/);
+  });
+  assert.equal(hashFile(),sourceBeforeReview,'Read-only ownership review modified JSON source');
   reconciled=reconcile({PGDATABASE:'postgres'});
   test('Historical migration manifest refuses default/non-staging DB',()=>{
     assert.equal(reconciled.status,2);

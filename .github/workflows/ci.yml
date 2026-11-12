@@ -159,6 +159,14 @@ jobs:
           APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
           APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
         run: npm run smoke:pg:crm-tenants
+      - name: Independent signed two-tenant six-domain authorization matrix
+        env:
+          APEX_PG_PILOT_HOST: 127.0.0.1
+          APEX_PG_PILOT_DB: apex_stage_ci
+          APEX_PG_PILOT_USER: apex_pilot_login
+          APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
+          APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
+        run: npm run smoke:pg:tenant-matrix
       - name: Auditable read-only outbox delivery-denial design preflight
         run: npm run smoke:pg:outbox-plan
       - name: Fail-closed PostgreSQL production cutover readiness assessment
@@ -176,4 +184,27 @@ jobs:
           docker exec "$postgres_container" pg_dump -U postgres -Fc --no-owner -d apex_stage_ci > "$dump"
           docker exec -i "$postgres_container" pg_restore -U postgres --no-owner --exit-on-error \
             -d "$PGRESTORE_DATABASE" < "$dump"
+          npm run smoke:pg:restore
+          # Phase 10.5F: independently compare complete restored data and
+          # FORCE RLS/policies/constraints/indexes before any destructive probe.
+          export APEX_PG_REHEARSAL_ACK=DISPOSABLE_RESTORED_COPY_ONLY
+          npm run assess:pg:rehearsal
+          archive_sha="$(sha256sum "$dump" | cut -d' ' -f1)"
+          # Deliberately corrupt ONLY the disposable restored clone. Never the
+          # imported source or any customer/hosted database.
+          psql -d "$PGRESTORE_DATABASE" -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO apex.tenants(tenant_id,display_name) VALUES ('phase105f_recovery_probe','Disposable rollback drill')"
+          set +e
+          npm run assess:pg:rehearsal
+          tamper_status=$?
+          set -e
+          test "$tamper_status" -eq 1 || { echo 'Rehearsal verifier failed to detect restore clone corruption'; exit 1; }
+          # Recreate the isolated clone from the SAME immutable dump; verify
+          # archive integrity and rerun independent RLS/restore acceptance.
+          psql -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE $PGRESTORE_DATABASE WITH (FORCE)"
+          psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE $PGRESTORE_DATABASE"
+          test "$(sha256sum "$dump" | cut -d' ' -f1)" = "$archive_sha"
+          docker exec -i "$postgres_container" pg_restore -U postgres --no-owner --exit-on-error \
+            -d "$PGRESTORE_DATABASE" < "$dump"
+          npm run assess:pg:rehearsal
           npm run smoke:pg:restore
