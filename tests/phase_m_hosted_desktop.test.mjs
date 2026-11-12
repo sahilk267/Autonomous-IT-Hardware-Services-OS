@@ -30,7 +30,7 @@ function mockFetch(overrides={}) {
   };
   const fetcher = async (url, opts) => {
     calls.push({ url, opts });
-    const route = new URL(url).pathname;
+    const route = new globalThis.URL(url).pathname;
     if (!routes[route]) throw Error('Unexpected requested route: ' + route);
     return routes[route];
   };
@@ -96,7 +96,7 @@ test('remote compatibility preflight verifies the actual server without sending 
   assert.equal(connected.tenantMode, 'dynamic');
   assert.equal(calls.length, 3);
   for (const { url, opts } of calls) {
-    assert.equal(new URL(url).origin, URL);
+    assert.equal(new globalThis.URL(url).origin, URL);
     assert.equal(opts.method, 'GET');
     assert.equal(opts.credentials, 'omit');
     assert.equal(opts.redirect, 'manual');
