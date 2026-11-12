@@ -59,6 +59,30 @@ try {
     keys.add(key);
     expected.push({customerId,kind,id:row.id,payload:row});
   }
+  // Verify cross-module relationship graph independently of imported payloads:
+  // project→proposal, asset→RMA, creator/assignment/reporter custody,
+  // and customer/project collaborator membership.
+  const linked=expected.filter(x=>x.kind==='proposals'||x.kind==='rmaClaims')
+    .map(x=>{
+      const kind=x.kind==='proposals'?'projects':'assets';
+      const targetId=x.kind==='proposals'?x.payload.projectId:x.payload.assetId;
+      const parent=(x.kind==='proposals'?projects:assets).get(targetId);
+      assert.ok(parent,'orphaned source '+x.kind+' relationship');
+      assert.equal(parent.customerId,x.customerId,'cross-customer relationship');
+      return {customerId:x.customerId,kind:x.kind,id:x.id,relatedKind:kind,relatedId:targetId};
+    });
+  const expectedShares=(src.projects||[]).flatMap(p=>
+    (p.collaboratorUserIds||[]).map(staffId=>({
+      customerId:p.customerId,projectId:p.id,staffId
+    })));
+  const expectedStaff=new Map(src.users.map(x=>[x.id,x]));
+  assert.equal(expectedStaff.size,src.users.length,'duplicate historic staff identity');
+  for(const share of expectedShares){
+    assert.ok(expectedStaff.has(share.staffId),'project collaborator missing staff');
+    const customer=customers.get(share.customerId);
+    assert.ok((customer.staffUserIds||[]).includes(share.staffId),
+      'project collaborator lacks customer membership');
+  }
   const expectedGrants=src.customers.flatMap(c=>(c.staffUserIds||[]).map(staffId=>({
     customerId:c.id,staffId
   })));
@@ -78,8 +102,34 @@ try {
     customerId:g.customer_id,staffId:g.staff_id
   }))),'missing, orphaned or swapped customer staff grant');
   const recordsPG=(await db.query(
-    'SELECT tenant_id,customer_id,kind,source_id,payload FROM apex.customer_records')).rows;
+    'SELECT tenant_id,customer_id,kind,source_id,payload,related_kind,related_id,'+
+    'created_by_staff_id,assigned_staff_id,reported_by_staff_id FROM apex.customer_records')).rows;
   assert.equal(recordsPG.length,expected.length,'missing/extra customer record');
+  const linkedPG=recordsPG.filter(x=>x.kind==='proposals'||x.kind==='rmaClaims')
+    .map(x=>({
+      customerId:x.customer_id,kind:x.kind,id:x.source_id,
+      relatedKind:x.related_kind,relatedId:x.related_id
+    }));
+  assert.equal(hash(linked),hash(linkedPG),
+    'proposal/project or RMA/asset relational link drift');
+  for(const record of recordsPG){
+    const sourceRow=expected.find(x=>x.kind===record.kind && x.id===record.source_id);
+    assert.ok(sourceRow,'unexpected cross-module row');
+    assert.equal(record.created_by_staff_id,sourceRow.payload.createdByUserId||null,
+      'creator reference drift');
+    assert.equal(record.assigned_staff_id,sourceRow.payload.assignedUserId||null,
+      'engineer asset/job custody drift');
+    assert.equal(record.reported_by_staff_id,sourceRow.payload.reportedByUserId||null,
+      'ticket reporter reference drift');
+    if(record.kind!=='proposals'&&record.kind!=='rmaClaims')
+      assert.ok(!record.related_id && !record.related_kind,'unexpected source relation');
+  }
+  const sharesPG=(await db.query(
+    'SELECT tenant_id,customer_id,project_id,staff_id FROM apex.project_shares')).rows;
+  assert.equal(hash(expectedShares),hash(sharesPG.map(x=>({
+    customerId:x.customer_id,projectId:x.project_id,staffId:x.staff_id
+  }))),'project collaborator cross-module share drift');
+
   const manifests=[];
   for(const [customerId,c] of customers){
     const p=customersPG.find(x=>x.customer_id===customerId);
@@ -97,6 +147,8 @@ try {
     manifests.push({
       customerKeySha256:crypto.createHash('sha256').update(customerId).digest('hex'),
       recordCount:actualRows.length,grantCount:memberships.length,
+      linkedRelations:linked.filter(x=>x.customerId===customerId).length,
+      projectCollaborators:expectedShares.filter(x=>x.customerId===customerId).length,
       scopedRecordSha256:hash(actualRows)
     });
   }
@@ -115,6 +167,9 @@ try {
     matched:true,mode:'PRIVATE_STAGING_PER_CUSTOMER_RECONCILIATION',
     sourceSha256:sha,tenantCount:1,customerCount:manifests.length,
     scopedRecordCount:expected.length,customerGrantCount:expectedGrants.length,
+    linkedProjectAssetRelationships:linked.length,
+    scopedProjectShares:expectedShares.length,
+    crossModuleRelationsVerified:true,
     customerManifests:manifests.sort((a,b)=>a.customerKeySha256.localeCompare(b.customerKeySha256)),
     unmappedOwnerOnlyRecords:legacySource.length,
     ownerOnlyMappingApproved:false,productionCutoverReady:false,
