@@ -15,6 +15,11 @@ test('Hostinger acceptance collects minimal read-only checks and rejects insecur
   const calls = [];
   const probe = async (_base, url, options = {}) => {
     calls.push({ url, options });
+    if (url === '/api/desktop/handshake') return {
+      status: 200, headers: {}, json: {
+        product: 'apex-it-os', deploymentMode: 'hosted', desktopProtocol: { min: 1, max: 1 },
+      },
+    };
     if (url === '/api/health') return { status: 200,
       json: { status: 'ok', database: { status: 'ready' } },
       headers: { 'strict-transport-security': 'max-age=31536000',
@@ -32,7 +37,7 @@ test('Hostinger acceptance collects minimal read-only checks and rejects insecur
   const tls = async () => ({ daysRemaining: 100, validUntil: '2027-05-01' });
   const result = await runHostingerAcceptance(site, probe, tls);
   assert.equal(result.passed, true);
-  assert.equal(result.checks.length, 11);
+  assert.equal(result.checks.length, 12);
   assert.equal(calls.filter(x => x.options.method === 'POST').length, 1);
   const bad = await runHostingerAcceptance(site, async (...args) => {
     const baseResult = await probe(...args);
