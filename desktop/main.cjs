@@ -357,8 +357,11 @@ app.whenReady().then(async () => {
         currentSettings = config;
         if (backend) await stopBackend(prior);
         if (previousRemote && previousRemote !== config.serverUrl) {
-          // Old cookies, indexed DB and service workers cannot be reused
-          // after switching to another hosted organization/server.
+          // Close the OLD renderer BEFORE clearing storage: an open old page
+          // could otherwise recreate session cookies after the purge.
+          if (windowKind === 'hosted' && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.close();
+          }
           await session.fromPartition(hostedPartition(previousRemote)).clearStorageData();
         }
         if (pending) {
@@ -389,6 +392,9 @@ app.whenReady().then(async () => {
         throw error;
       }
       if (previousRemote) {
+        if (windowKind === 'hosted' && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.close();
+        }
         await session.fromPartition(hostedPartition(previousRemote)).clearStorageData();
       }
       connectionError = null;
