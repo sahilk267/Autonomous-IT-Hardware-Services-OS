@@ -286,11 +286,11 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 
 ## Phase 10.5E — controlled CRM read-through + two-tenant authorization acceptance (12 November 2026)
 
-**Branch:** \`fix/phase1-security-integrity-20261106\`; Draft PR #1. **Status:** implementation pushed for CI review; production rollout **BLOCKED**.
+**Branch:** `fix/phase1-security-integrity-20261106`; Draft PR #1. **Status:** implementation pushed for CI review; production rollout **BLOCKED**.
 
-- Opt-in \`APEX_PG_CRM_READ_THROUGH=true\` + mandatory explicit staff ID allowlist under the existing signed staging-only SQL pilot; default \`GET /api/crm\` remains JSON. Only the single CRM GET route participates.
+- Opt-in `APEX_PG_CRM_READ_THROUGH=true` + mandatory explicit staff ID allowlist under the existing signed staging-only SQL pilot; default `GET /api/crm` remains JSON. Only the single CRM GET route participates.
 - Read-only SQL transaction, authenticated signed tenant/user context and forced RLS; full per-actor CRM JSON/SQL content, ID and customer custody parity; no response rows on drift (409) or SQL outage (503). No automatic backfill, writes, source switch or audit telemetry containing customer IDs.
 - Real independent two-tenant, two-process PostgreSQL acceptance with same per-tenant CRM/customer IDs, cookie isolation, manager role gates, signed vs forged context, grant drift, SQL payload tamper and no read-triggered audit writes.
 - Named staging customer migration acceptance gates and evidence requirements in [Phase 10.5E runbook](PHASE_10_5E_CRM_CANARY_MIGRATION_ACCEPTANCE_2026-11-12.md): source immutable, exact per-customer record/grant/link parity, explicit owner-only legacy mapping signoffs, reversible rehearsed restore and multi-tenant access proofs. None implies release approval.
-- **CI status:** pending independent green build, Node regression, Chromium and PG staging+restore verification on this commit; do not assume testing passed on commit alone.
+- **CI verified on code SHA `e0d69cc`:** [Push #43215153638](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215153638) and [PR #43215162295](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215162295) both **SUCCESS**, including TypeScript/build, backend, Chromium and full PostgreSQL staging+restore. Separate two-tenant CRM canary suite **18/18 PASS**. Documentation-only commit has its own CI.
 - **No production/Hostinger customer migration**, dispatch worker, KMS identity solution or legal finance-provider integration. Leave main unchanged and PR Draft.

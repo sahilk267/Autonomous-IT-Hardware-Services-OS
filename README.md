@@ -173,20 +173,20 @@ A real PostgreSQL 16 schema with tenant/customer composite FKs and forced RLS, r
 
 ## Phase 10.5E — staged CRM read-through canary (NOT a production cutover)
 
-The normal \`GET /api/crm\` remains JSON-only by default. **Only** an isolated
-\`NODE_ENV=staging\` signed PostgreSQL pilot may enable
-\`APEX_PG_CRM_READ_THROUGH=true\`, with a mandatory named
-\`APEX_PG_CRM_CANARY_STAFF_IDS=staff-id-1,staff-id-2\` allowlist. The existing
+The normal `GET /api/crm` remains JSON-only by default. **Only** an isolated
+`NODE_ENV=staging` signed PostgreSQL pilot may enable
+`APEX_PG_CRM_READ_THROUGH=true`, with a mandatory named
+`APEX_PG_CRM_CANARY_STAFF_IDS=staff-id-1,staff-id-2` allowlist. The existing
 cookie, role, customer visibility and PostgreSQL signed RLS checks must ALL
 pass. Each canary read must match the full actor-visible JSON CRM collection
 after canonical comparison; any SQL/JSON grant or payload drift returns 409
 **without returning records**, and SQL failure returns 503. A verified response
-has the unchanged \`{success:true,data:[...]}\` JSON shape and
-\`X-Apex-CRM-Read: postgres-parity-verified\` marker; non-canary sessions
+has the unchanged `{success:true,data:[...]}` JSON shape and
+`X-Apex-CRM-Read: postgres-parity-verified` marker; non-canary sessions
 continue to use the JSON implementation. This diagnostic is not safe to enable
 in production, including Hostinger.
 
-Run \`npm run smoke:pg:crm-tenants\` with disposable signed PostgreSQL 16
+Run `npm run smoke:pg:crm-tenants` with disposable signed PostgreSQL 16
 and the existing isolated CI pilot environment; it verifies independent tenant
 sessions, colliding record IDs, SQL/JSON grant revocation drift, tampered SQL
 payloads, blocked unsigned SQL identity, no read-generated audit writes and
@@ -195,3 +195,5 @@ unchanged JSON routing outside the allowlist. See
 The real production migration, historical customer ownership approval,
 transactional all-module SQL runtime, live provider dispatch and deployment
 remain **BLOCKED**. Keep Draft PR #1 unmerged.
+
+**Phase 10.5E integrated code CI:** [push #43215153638](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215153638) and [PR #43215162295](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215162295) both succeeded on SHA `e0d69cc`, with 18/18 independent tenant canary assertions. Final docs-only commit requires separate CI confirmation. Production cutover remains BLOCKED.
