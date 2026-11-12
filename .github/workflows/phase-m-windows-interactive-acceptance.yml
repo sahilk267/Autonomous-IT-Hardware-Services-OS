@@ -1,0 +1,44 @@
+name: Phase M — Interactive Windows desktop acceptance (operator runner)
+
+# This job must run on an interactive, logged-in Windows test workstation.
+# A GitHub-hosted Windows service runner is NOT enough to validate the GUI.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-interactive-acceptance
+  cancel-in-progress: false
+
+jobs:
+  interactive-smoke:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows, X64, interactive-desktop]
+    environment: windows-gui-acceptance
+    timeout-minutes: 60
+    env:
+      APEX_REQUIRE_INTERACTIVE_SMOKE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - run: npm run lint
+      - run: npm run test:desktop-hosted
+      - run: npm run test:desktop-syntax
+      - run: npm run package:windows
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Require visible first-run wizard and verify NSIS uninstall
+        shell: pwsh
+        run: ./scripts/windows-installer-smoke.ps1
+      - name: Report interactive machine details (no machine secrets)
+        shell: pwsh
+        run: |
+          Write-Output "Windows GUI acceptance PASS on $([Environment]::OSVersion.VersionString)"
+          Write-Output 'Tested installer on a logged-in interactive runner, with no configured hosted server.'
