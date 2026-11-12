@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import type { Express, Request, RequestHandler } from 'express';
 import type { PersistentStore } from './db.ts';
+import { compareStagingRepository } from './staging_read_repository.ts';
 import type { UserRole } from '../src/types.ts';
 
 type Actor = { userId: string; role: UserRole; tenantId: string };
@@ -30,6 +31,14 @@ export function registerPostgresPilotRoutes(
   requireRole: (...roles: UserRole[]) => RequestHandler,
   store: PersistentStore
 ) {
+  // Reject an isolated shadow toggle without the existing signed SQL pilot.
+  // A production environment is always forbidden even when both flags are set.
+  const repositoryShadowEnabled=process.env.APEX_PG_REPOSITORY_SHADOW_READS==='true';
+  if(repositoryShadowEnabled &&
+    (process.env.NODE_ENV!=='staging' ||
+      process.env.APEX_PG_PILOT_ENABLED!=='true')) {
+    throw new Error('REPOSITORY SHADOW SAFETY: staging signed SQL pilot required.');
+  }
   if(process.env.APEX_PG_PILOT_ENABLED!=='true') return;
 
   const options={
@@ -175,6 +184,15 @@ export function registerPostgresPilotRoutes(
     status:200,data:{stageOnly:true,storage:'postgres',applicationStorage:'json',
       writableKinds:['customers','customer_grants','crmOpportunities','projects','project_shares','tickets','assets','jobs','quotes','proposals','rmaClaims','pilot_procurement_drafts','pilot_finance_previews','pilot_service_work_orders','pilot_service_work_order_events','pilot_service_outbox'],externalTransactionsEnabled:false,outboxDeliveryEnabled:false}
   })));
+  // Explicitly feature-gated, owner-only read diagnostic. No live /api/*
+  // route calls this adapter, no automatic backfill, no source switch.
+  if(repositoryShadowEnabled) {
+    app.get('/api/pg-pilot/repository-shadow',requireAuth,
+      requireRole('BUSINESS_OWNER'),handler(async(client,actor)=>{
+        const report=await compareStagingRepository(client,store,actor.tenantId);
+        return {status:200,data:report};
+      }));
+  }
   app.get('/api/pg-pilot/customers',requireAuth,handler(async client=>{
     const result=await client.query(
       'SELECT customer_id AS id, display_name AS name FROM apex.customers ORDER BY display_name,customer_id');
