@@ -23,6 +23,23 @@ const SQL_TABLES = [
 
 const sha = text => crypto.createHash('sha256').update(text).digest('hex');
 
+function classifyPgToolFailure(stderr = '') {
+  // Only return SAFE error categories. Raw pg_restore stderr can contain
+  // SQL business values, usernames, connection details or table payloads.
+  const e = String(stderr).toLowerCase();
+  if (/unsupported version|version mismatch|archive version/.test(e)) return 'VERSION_MISMATCH';
+  if (/role .* does not exist|role .* is not a member/.test(e)) return 'MISSING_DATABASE_ROLE';
+  if (/already exists|duplicate object/.test(e)) return 'TARGET_NOT_EMPTY';
+  if (/permission denied|must be owner|not permitted/.test(e)) return 'DATABASE_PERMISSION';
+  if (/unrecognized configuration parameter|unknown configuration parameter/.test(e)) return 'CLIENT_SERVER_VERSION';
+  if (/violates row-level security/.test(e)) return 'ROW_LEVEL_SECURITY';
+  if (/violates foreign key|violates check constraint|duplicate key/.test(e)) return 'DATA_INTEGRITY';
+  if (/could not open|no such file|no space left/.test(e)) return 'FILE_IO';
+  if (/connection refused|could not connect|timeout expired/.test(e)) return 'CONNECTION';
+  if (/error:/.test(e)) return 'SQL_RESTORE_ERROR';
+  return 'TOOL_FAILURE';
+}
+
 function runPgTool(name, args, env, timeoutMs = 20 * 60 * 1000) {
   return new Promise((resolve, reject) => {
     const processHandle = spawn(name, args, {
@@ -45,7 +62,11 @@ function runPgTool(name, args, env, timeoutMs = 20 * 60 * 1000) {
       if (finished) return;
       finished = true;
       if (code === 0) resolve();
-      else reject(new Error(`${name} failed with exit code ${code}; inspect private operator logs (details withheld from output)`));
+      else {
+        const failure = new Error(`${name} failed. Raw PostgreSQL details withheld.`);
+        failure.code = classifyPgToolFailure(err);
+        reject(failure);
+      }
     });
   });
 }
