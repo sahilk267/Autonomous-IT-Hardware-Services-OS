@@ -24,7 +24,7 @@ const canonical=(value:unknown):unknown=>{
   }
   return value;
 };
-const fingerprint=(rows:Projection[]):string=>{
+const fingerprint=(rows:ReadonlyArray<{id:string}>):string=>{
   const ids=rows.map(x=>x.id);
   if(ids.some(x=>typeof x!=='string'||x.length===0) ||
     new Set(ids).size!==ids.length)throw Error('Shadow repository contains duplicate/missing identity');
@@ -93,8 +93,8 @@ export async function compareStagingRepository(
 // Compare the *actor-visible* JSON contract, not the owner's whole JSON table.
 // PostgreSQL is eligible to answer only on full canonical row + membership parity.
 export async function readVerifiedCrmThrough(
-  client:PoolClient,tenantId:string,jsonRows:Projection[]
-):Promise<{matched:boolean;rows:Projection[]}>{
+  client:PoolClient,tenantId:string,jsonRows:Array<{id:string}>
+):Promise<{matched:boolean;rows:Array<{id:string}>}>{
   const mode=await client.query('SHOW transaction_read_only');
   if(mode.rows[0]?.transaction_read_only!=='on')
     throw Error('CRM read-through requires a read-only SQL transaction');
