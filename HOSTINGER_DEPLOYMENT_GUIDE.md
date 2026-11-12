@@ -10,6 +10,20 @@ Hostinger Business Plan par aap ise do tareeqon se deploy kar sakte hain:
 
 ---
 
+## Windows client connects AFTER hosted deployment
+
+**Same installer, any future server domain:** The Windows x64 preview installer now defaults to **Connect to hosted server**. Before your domain or Hostinger plan is finalized, leave the server URL blank and select **Save server details for later**. After this full-stack Express backend is live on HTTPS, open **Server → Configure / Change Server** in the Windows app, enter `https://your-domain.example` and test the connection. Desktop only receives the public web URL, not `DATABASE_URL`, `APEX_SETUP_TOKEN` or integration secrets.
+
+**Required new API:** `GET /api/desktop/handshake` must return `product: "apex-it-os"`, a compatible desktop protocol and `deploymentMode: "hosted"`. React HTML and API must come from the **same HTTPS origin**. A static-only frontend is NOT sufficient for this Windows client.
+
+After configuring Node.js and secrets in hPanel/server environment, run `npm run check:hosting` on the server when shell access permits. The checker never prints secrets. Once the staging domain is live, run `node scripts/hostinger-acceptance.mjs https://your-staging-domain.example`, which now validates the desktop handshake too. This is not a replacement for authenticated tenant/finance testing, Windows smoke testing or PostgreSQL recovery rehearsal.
+
+**Do not expose the DB port to employee desktops.** In hosted mode, desktop connects over outbound HTTPS 443 to Express; the private database is accessible only from backend infrastructure. If your provider lacks a persistent Node process or external PostgreSQL connectivity, use an appropriate VPS/managed Node host instead of pretending a static hosting account is a full backend.
+
+See [deploy-later topology and security checklist](docs/PHASE_M_HOSTED_DESKTOP_CONNECTION.md).
+
+---
+
 ## 📁 Repository Structure Jo Hostinger ke Liye Configure Ki Gayi Hai
 
 1. **`public/.htaccess`** ➔ Build time par automatic `dist/.htaccess` ban jata hai. Yeh Apache/LiteSpeed web server ko batata hai ki page refresh hone par `404 Not Found` na aaye aur SPA routes `index.html` par redirect hon.

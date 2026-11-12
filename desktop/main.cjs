@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, safeStorage, Menu, session, net: electronNet } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -7,6 +7,7 @@ const os = require('node:os');
 const { pathToFileURL } = require('node:url');
 const { spawn } = require('node:child_process');
 const { validateDesktopSettings, environmentForDesktop } = require('./config.cjs');
+const { probeHostedServer, isPermittedNavigation } = require('./hosted.cjs');
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -15,7 +16,9 @@ let setupWindow = null;
 let backend = null;
 let backendPort = null;
 let currentSettings = null;
-let settingsToken = null;
+let connectionError = null;
+let connectionChangeInProgress = false;
+let windowKind = null;
 let closing = false;
 
 function encryptedFile() { return path.join(app.getPath('userData'), 'settings.dpapi'); }
@@ -51,6 +54,43 @@ async function selectPort() {
   await new Promise(resolve => server.close(resolve));
   return port;
 }
+function hostedPartition(origin) {
+  return 'persist:apex-hosted-' + crypto.createHash('sha256').update(origin).digest('hex').slice(0, 24);
+}
+
+function createNativeMenu() {
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    { label: 'Server', submenu: [
+      { label: 'Configure / Change Server...', click: () => setupDialog() },
+      { label: 'Retry Connection', click: () => {
+        if (currentSettings?.storageMode === 'hosted' && currentSettings.serverUrl) {
+          void connectHosted(currentSettings).catch(error => {
+            connectionError = error.message;
+            setupDialog();
+          });
+        }
+      }},
+      { label: 'Forget Hosted Login on This PC', click: () => {
+        if (currentSettings?.storageMode === 'hosted' && currentSettings.serverUrl) {
+          void session.fromPartition(hostedPartition(currentSettings.serverUrl))
+            .clearStorageData().then(() => {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                void mainWindow.loadURL(currentSettings.serverUrl + '/');
+              }
+            });
+        }
+      }},
+      { type: 'separator' },
+      { role: 'quit' },
+    ] },
+    { label: 'Edit', submenu: [
+      { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+      { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' },
+    ] },
+    { label: 'View', submenu: [{ role: 'reload' }, { role: 'togglefullscreen' }] },
+  ]));
+}
+
 function restrictNavigation(window, allowed) {
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', (event, nextUrl) => {
@@ -79,18 +119,23 @@ function setupDialog() {
       preload: path.join(__dirname, 'preload.cjs'),
     },
   });
-  setupWindow.loadFile(setupFile());
+  void setupWindow.loadFile(setupFile());
   setupWindow.on('closed', () => {
     setupWindow = null;
-    if (!backend && !closing) app.quit();
+    if (!backend && !mainWindow && !closing) app.quit();
   });
   restrictNavigation(setupWindow, () => pathToFileURL(setupFile()).href);
 }
 function mainAppWindow() {
+  if (currentSettings?.storageMode === 'hosted') return hostedAppWindow(currentSettings.serverUrl);
   if (mainWindow && !mainWindow.isDestroyed()) {
-    void mainWindow.loadURL(`http://127.0.0.1:${backendPort}/`);
-    mainWindow.show();
-    return;
+    if (windowKind === 'local') {
+      void mainWindow.loadURL(`http://127.0.0.1:${backendPort}/`);
+      mainWindow.show();
+      return;
+    }
+    mainWindow.close();
+    mainWindow = null;
   }
   mainWindow = new BrowserWindow({
     width: 1440, height: 920, minWidth: 980, minHeight: 700,
@@ -101,11 +146,87 @@ function mainAppWindow() {
       webSecurity: true, preload: path.join(__dirname, 'preload.cjs'),
     },
   });
+  windowKind = 'local';
   const appUrl = `http://127.0.0.1:${backendPort}/`;
   void mainWindow.loadURL(appUrl);
   restrictNavigation(mainWindow, () => `http://127.0.0.1:${backendPort}/`);
-  mainWindow.on('closed', () => mainWindow = null);
+  const localWindow = mainWindow;
+  localWindow.on('closed', () => {
+    if (mainWindow === localWindow) mainWindow = null;
+  });
 }
+/**
+ * Hosted mode does not launch the bundled Node server or access DATABASE_URL.
+ * The remote web app is opened in an unprivileged Chromium sandbox WITHOUT
+ * a preload bridge, with a distinct cookie/storage partition for each origin.
+ * Connection settings are managed by the native menu and local setup window.
+ */
+function hostedAppWindow(origin) {
+  if (!origin) { setupDialog(); return; }
+  const old = mainWindow;
+  const partition = hostedPartition(origin);
+  const remoteSession = session.fromPartition(partition);
+  remoteSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  remoteSession.setPermissionCheckHandler(() => false);
+  const window = new BrowserWindow({
+    width: 1440, height: 920, minWidth: 980, minHeight: 700,
+    title: 'Apex IT OS — ' + origin,
+    backgroundColor: '#020617', autoHideMenuBar: false,
+    webPreferences: {
+      partition, nodeIntegration: false, contextIsolation: true,
+      sandbox: true, webSecurity: true, allowRunningInsecureContent: false,
+      // IMPORTANT: no preload. A hosted webpage must never see
+      // desktop settings, DPAPI, filesystem, IPC or the local setup token.
+    },
+  });
+  const wc = window.webContents;
+  wc.setWindowOpenHandler(() => ({ action: 'deny' }));
+  wc.on('will-navigate', (event, target) => {
+    if (!isPermittedNavigation(target, origin)) event.preventDefault();
+  });
+  wc.on('will-redirect', (event, target) => {
+    if (!isPermittedNavigation(target, origin)) event.preventDefault();
+  });
+  wc.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+    if (isMainFrame && code !== -3) {
+      connectionError = 'Hosted app could not load (' + code + '). Verify server/HTTPS and retry.';
+      console.error('Hosted page load failed:', description, url);
+      setupDialog();
+    }
+  });
+  mainWindow = window;
+  windowKind = 'hosted';
+  void window.loadURL(origin + '/').catch(error => {
+    connectionError = error.message;
+    setupDialog();
+  });
+  window.on('closed', () => { if (mainWindow === window) mainWindow = null; });
+  if (old && !old.isDestroyed()) old.close();
+  window.show();
+}
+
+// Chromium's network stack shares Windows certificate trust and system proxy
+// behavior with the hosted BrowserWindow. Preflight always omits cookies.
+async function checkHostedConnection(origin) {
+  return probeHostedServer(origin, {
+    fetcher: (url, init) => electronNet.fetch(url, {
+      ...init, credentials: 'omit', redirect: 'manual', bypassCustomProtocolHandlers: true,
+    }),
+  });
+}
+
+async function connectHosted(settings) {
+  if (!settings.serverUrl) {
+    connectionError = 'Server not deployed yet. Enter its HTTPS address after deployment.';
+    setupDialog();
+    return null;
+  }
+  const verified = await checkHostedConnection(settings.serverUrl);
+  connectionError = null;
+  hostedAppWindow(verified.origin);
+  return verified;
+}
+
 // Only a dead LOCAL PID's own recorded lock may be reclaimed. Another
 // running service, symlink or unknown host always fails closed.
 function cleanupDeadDesktopLock(directory, expectedPid = null) {
@@ -125,7 +246,7 @@ function cleanupDeadDesktopLock(directory, expectedPid = null) {
     // Unknown lock owner: preserve lock; backend must fail startup.
   }
 }
-async function stopBackend() {
+async function stopBackend(oldSettings = currentSettings) {
   const old = backend;
   backend = null;
   if (!old) return;
@@ -137,8 +258,8 @@ async function stopBackend() {
     ]);
     if (old.exitCode === null && old.signalCode === null) old.kill();
   }
-  if (currentSettings?.storageMode === 'single') {
-    cleanupDeadDesktopLock(currentSettings.dataDirectory, old.pid);
+  if (oldSettings?.storageMode === 'single') {
+    cleanupDeadDesktopLock(oldSettings.dataDirectory, old.pid);
   }
 }
 async function startBackend(settings) {
@@ -157,7 +278,7 @@ async function startBackend(settings) {
   child.stderr.on('data', chunk => console.error('[Apex backend]', String(chunk).slice(0, 2000)));
   backend = child;
   for (let i = 0; i < 100; i++) {
-    if (child.exitCode !== null) break;
+    if (child.exitCode !== null || child.signalCode !== null) break;
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
         signal: AbortSignal.timeout(800),
@@ -180,6 +301,7 @@ app.on('second-instance', () => {
 });
 
 app.whenReady().then(async () => {
+  createNativeMenu();
   if (process.platform !== 'win32' || !safeStorage.isEncryptionAvailable()) {
     console.error('Apex desktop requires Windows with secure credential encryption');
     app.quit(); return;
@@ -187,9 +309,12 @@ app.whenReady().then(async () => {
   ipcMain.handle('desktop:setup-config', (event) => {
     if (!trustedSetup(event)) throw new Error('Unauthorized configuration access');
     const config = currentSettings || readSettings();
-    if (!config) return { storageMode: 'single', tenantMode: 'fixed', dataDirectory: defaultDataDirectory() };
+    if (!config) return {
+      storageMode: 'hosted', serverUrl: '', tenantMode: 'fixed',
+      dataDirectory: defaultDataDirectory(), connectionError,
+    };
     const { setupToken, ...visibleConfig } = config;
-    return visibleConfig;
+    return { ...visibleConfig, connectionError };
   });
   ipcMain.handle('desktop:choose-directory', async event => {
     if (!trustedSetup(event)) throw new Error('Unauthorized directory selection');
@@ -201,30 +326,87 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle('desktop:save-config', async (event, submitted) => {
     if (!trustedSetup(event)) throw new Error('Unauthorized configuration change');
+    if (connectionChangeInProgress) return { ok: false, error: 'A connection change is already running.' };
+    connectionChangeInProgress = true;
+    let prior = currentSettings;
     try {
       const next = validateDesktopSettings(submitted, defaultDataDirectory());
-      const prior = currentSettings || readSettings();
-      if (prior?.storageMode === 'single' && prior.dataDirectory !== next.dataDirectory) {
-        throw new Error('Data directory cannot be changed in-place. Back up and migrate data first.');
+      prior = prior || readSettings();
+      if (prior?.storageMode === 'single' && next.storageMode === 'single' &&
+          prior.dataDirectory !== next.dataDirectory) {
+        throw new Error('Local data folder cannot be changed in place. Back up and migrate first.');
+      }
+      const previousRemote = prior?.storageMode === 'hosted' ? prior.serverUrl : null;
+      const changedServer = previousRemote && previousRemote !== next.serverUrl;
+      const changedMode = prior && prior.storageMode !== next.storageMode;
+      if ((changedServer || changedMode) && submitted.confirmServerChange !== 'on') {
+        throw new Error('Confirm that switching servers/modes does NOT migrate data or active sessions.');
       }
       const token = prior?.setupToken || crypto.randomBytes(32).toString('hex');
       const config = { ...next, setupToken: token };
-      const oldPort = backendPort;
-      if (backend) await stopBackend();
+
+      if (config.storageMode === 'hosted') {
+        const pending = !config.serverUrl || submitted.deferConnection === 'on';
+        if (!pending) {
+          // HTTPS check is performed BEFORE saving or shutting down an existing
+          // working server. A typo, stale TLS cert, redirect, or wrong product
+          // does not overwrite a previously working connection.
+          await checkHostedConnection(config.serverUrl);
+        }
+        writeSettings(config);
+        currentSettings = config;
+        if (backend) await stopBackend(prior);
+        if (previousRemote && previousRemote !== config.serverUrl) {
+          // Close the OLD renderer BEFORE clearing storage: an open old page
+          // could otherwise recreate session cookies after the purge.
+          if (windowKind === 'hosted' && mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.close();
+          }
+          await session.fromPartition(hostedPartition(previousRemote)).clearStorageData();
+        }
+        if (pending) {
+          if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+          connectionError = config.serverUrl
+            ? 'Server URL saved but NOT verified. Uncheck Save for later to test after deployment.'
+            : 'Installer is configured. Enter your server HTTPS URL when the server has been deployed.';
+          return { ok: true, pending: true, message: connectionError };
+        }
+        connectionError = null;
+        hostedAppWindow(config.serverUrl);
+        if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close();
+        return { ok: true, mode: 'hosted', origin: config.serverUrl };
+      }
+
+      // Local modes are independent of hosted mode. Only the private local
+      // backend receives DATABASE_URL, integration keys and bootstrap token.
+      if (backend) await stopBackend(prior);
       try {
         await startBackend(config);
         writeSettings(config);
         currentSettings = config;
-      } catch (err) {
-        if (prior) {
-          try { await startBackend(prior); backendPort = backendPort || oldPort; } catch {}
+      } catch (error) {
+        await stopBackend(config);
+        if (prior && prior.storageMode !== 'hosted') {
+          try { await startBackend(prior); currentSettings = prior; } catch {}
         }
-        throw err;
+        throw error;
       }
-      if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close();
+      if (previousRemote) {
+        if (windowKind === 'hosted' && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.close();
+        }
+        await session.fromPartition(hostedPartition(previousRemote)).clearStorageData();
+      }
+      connectionError = null;
       mainAppWindow();
-      return { ok: true };
-    } catch (error) { return { ok: false, error: error.message }; }
+      if (setupWindow && !setupWindow.isDestroyed()) setupWindow.close();
+      return { ok: true, mode: 'local' };
+    } catch (error) {
+      connectionError = error.message;
+      return { ok: false, error: error.message };
+    } finally {
+      connectionChangeInProgress = false;
+    }
   });
   ipcMain.handle('desktop:get-setup-token', async (event, workspaceId) => {
     if (!trustedApp(event) || !currentSettings) return null;
@@ -252,10 +434,21 @@ app.whenReady().then(async () => {
 
   try {
     currentSettings = readSettings();
-    if (currentSettings) { await startBackend(currentSettings); mainAppWindow(); }
-    else setupDialog();
+    if (!currentSettings) {
+      setupDialog();
+    } else if (currentSettings.storageMode === 'hosted') {
+      if (currentSettings.serverUrl) await connectHosted(currentSettings);
+      else {
+        connectionError = 'Server is not configured yet. Enter its HTTPS URL after deployment.';
+        setupDialog();
+      }
+    } else {
+      await startBackend(currentSettings);
+      mainAppWindow();
+    }
   } catch (error) {
-    console.error('Desktop backend startup failed:', error.message);
+    connectionError = error.message;
+    console.error('Desktop startup failed:', error.message);
     setupDialog();
   }
 });

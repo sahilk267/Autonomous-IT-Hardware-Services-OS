@@ -34,6 +34,20 @@ Apex is a Node.js/React IT hardware and services platform intended for enterpris
 
 ---
 
+## 🖥 Windows installer: configure server AFTER deployment
+
+The **same Windows .exe** can be installed before your Hostinger, VPS, domain or database provider is selected. The default first-run option is now **Connect to hosted server**; leave its URL empty and choose **Save server details for later**. When the backend is deployed, open **Server → Configure / Change Server**, enter its **public HTTPS origin** (e.g. `https://app.yourcompany.com`) and choose **Verify HTTPS & connect**. The desktop validates the new `/api/desktop/handshake`, database health and authentication status, then loads the remote UI in an unprivileged Electron window. No server credential, database URL or private API key is built into the installer.
+
+**Hosted employee PCs do not require direct PostgreSQL or integration secrets.** Those stay on the deployed backend, while the desktop uses same-origin HTTPS with the server's secure login/session cookies. Switching domains requires explicit acknowledgement and does not migrate records. The earlier Local JSON and Local PostgreSQL options remain for advanced offline/operator deployments only.
+
+- [Hosted desktop connectivity and release runbook](docs/PHASE_M_HOSTED_DESKTOP_CONNECTION.md)
+- [Deployment-time environment check](scripts/validate-hosted-deployment.mjs) — run `npm run check:hosting` on the server after setting private env vars
+- [Hostinger HTTPS acceptance probe](scripts/hostinger-acceptance.mjs) — run only after a real staging domain is live
+
+**Disclaimer:** A successful Windows installer build proves packaging, not a live Hostinger connection or interactive install test. Production approval is pending real deployment, TLS, code signing, and recovery tests.
+
+---
+
 ## 🚀 Quick Start
 
 ### 1. Installation

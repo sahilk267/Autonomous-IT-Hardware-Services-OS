@@ -135,6 +135,18 @@ test('real production Express API uses PostgreSQL with isolated tenants, session
     a = await startTenantServer(tenantA.id, 31541, 'tenant-a.example.test');
     b = await startTenantServer(tenantB.id, 31542, 'tenant-b.example.test');
 
+    // Future Windows installers must be able to discover and negotiate with
+    // the deployed Express server without any user/session/API credentials.
+    const handshake = await request(a, '/api/desktop/handshake');
+    assert.equal(handshake.status, 200, JSON.stringify(handshake.data));
+    assert.equal(handshake.data.product, 'apex-it-os');
+    assert.equal(handshake.data.deploymentMode, 'hosted');
+    assert.deepEqual(handshake.data.desktopProtocol, { min: 1, max: 1 });
+    assert.equal(handshake.data.storageMode, 'postgres');
+    assert.equal(handshake.data.tenantMode, 'fixed');
+    assert.equal(JSON.stringify(handshake.data).includes(runtimePassword), false);
+    assert.equal(JSON.stringify(handshake.data).includes(setupToken), false);
+
     const crossSite = await request(a, '/api/auth/setup', 'POST', {
       username: 'admin', password: 'secret-password-A-2026', setupToken,
     }, undefined, 'https://attacker.example.test');

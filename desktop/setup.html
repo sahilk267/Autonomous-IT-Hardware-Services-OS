@@ -13,17 +13,29 @@
     <header>
       <div class="eyebrow">APEX IT HARDWARE &amp; SERVICES OS</div>
       <h1>Desktop configuration</h1>
-      <p>Complete the required settings once. Your encrypted configuration can be edited later from <strong>Desktop server settings</strong>.</p>
+      <p>Install once, connect whenever your server is deployed. No server URL, database credential or API key is baked into the installer. Change the connection later using <strong>Server → Configure / Change Server</strong>.</p>
     </header>
     <form id="settings" autocomplete="off">
       <fieldset>
-        <legend>1 · Choose storage</legend>
-        <label for="storageMode">Database mode</label>
+        <legend>1 · Where should Apex run?</legend>
+        <label for="storageMode">Connection type</label>
         <select name="storageMode" id="storageMode">
-          <option value="single">Local private JSON file (encrypt disk with BitLocker)</option>
-          <option value="postgres">Existing PostgreSQL database (RLS tenant isolation)</option>
+          <option value="hosted">Connect to hosted server (recommended for staff computers)</option>
+          <option value="single">Run private local server with JSON storage</option>
+          <option value="postgres">Run private local server connected to PostgreSQL (advanced admin)</option>
         </select>
-        <div id="localOptions">
+        <div id="hostedOptions">
+          <label for="serverUrl">Deployed server HTTPS address (can be entered later)</label>
+          <input name="serverUrl" id="serverUrl" type="url" spellcheck="false"
+            placeholder="https://app.your-company.com" autocomplete="off"/>
+          <small>Only enter your organization's verified HTTPS domain — no database URL, credentials, API keys, or /api path. Your login and business data go straight to that server over HTTPS.</small>
+          <label class="checkline">
+            <input name="deferConnection" id="deferConnection" type="checkbox"/>
+            Server is not live yet — save these details and connect after deployment
+          </label>
+          <p class="hint">A blank address is allowed before deployment. The installer and app can remain unconfigured safely. Once live, enter the URL and select Verify &amp; Connect. Your old server credentials are not copied to another domain.</p>
+        </div>
+        <div id="localOptions" hidden>
           <label for="dataDirectory">Private data folder</label>
           <div class="folder"><input id="dataDirectory" name="dataDirectory" readonly/><button id="browse" type="button">Browse</button></div>
           <small>The Windows account must have private read/write access. Changing the folder later requires a backup and manual migration.</small>
@@ -46,8 +58,9 @@
           <p class="hint">For dynamic mode, users enter the workspace UUID and their own credentials at login. The database administrator must provision each organization separately.</p>
         </div>
       </fieldset>
-      <fieldset>
-        <legend>2 · Optional integrations (can be edited later)</legend>
+      <fieldset id="integrationOptions" hidden>
+        <legend>2 · Optional LOCAL server integrations</legend>
+        <p class="hint">Hosted mode configures these credentials on your deployment server, never on the employee's desktop.</p>
         <div class="columns">
           <div><label for="geminiApiKey">Google Gemini API key</label><input id="geminiApiKey" name="geminiApiKey" type="password"/></div>
           <div><label for="telegramBotToken">Telegram bot token</label><input id="telegramBotToken" name="telegramBotToken" type="password"/></div>
@@ -62,13 +75,21 @@
           <div><label for="m365ClientSecret">Microsoft 365 client secret</label><input id="m365ClientSecret" name="m365ClientSecret" type="password"/></div>
         </div>
       </fieldset>
-      <section class="notice">
-        <strong>3 · First administrator</strong>
-        <p>After you save, Apex opens the local app and asks for the Business Owner's username and 12+ character password. The desktop generates a random bootstrap token automatically; it is kept in Windows-protected encrypted storage.</p>
-        <p>Windows SmartScreen may warn about an unsigned preview installer. Only install a signed, verified production release.</p>
+      <section class="notice" id="firstAdminNotice" hidden>
+        <strong>3 · Local server administrator</strong>
+        <p>For a new local database, Apex starts the embedded backend, then asks for a Business Owner username and 12+ character password. A random bootstrap token stays in Windows DPAPI-protected storage. For an existing remote deployment, your server administrator controls accounts and setup — this client does not know the server's setup secret.</p>
+      </section>
+      <section class="notice" id="serverSecurityNotice">
+        <strong>Security and switching</strong>
+        <p>Hosted connections require a valid HTTPS certificate and a compatible Apex API handshake. Switching modes or remote domains never migrates records; your previous server/data stay separate. Always verify the domain with your deployment administrator.</p>
+        <label class="checkline">
+          <input id="confirmServerChange" name="confirmServerChange" type="checkbox"/>
+          I understand changing the server or mode does not migrate data, sessions or integrations.
+        </label>
+        <p>Unsigned preview installers can trigger SmartScreen warnings. Distribute a signed build after Windows acceptance tests.</p>
       </section>
       <div id="error" role="alert" hidden></div>
-      <footer><button id="save" type="submit">Save securely and launch Apex</button><span id="status" role="status"></span></footer>
+      <footer><button id="save" type="submit">Verify HTTPS &amp; connect</button><span id="status" role="status"></span></footer>
     </form>
   </main>
 </body>

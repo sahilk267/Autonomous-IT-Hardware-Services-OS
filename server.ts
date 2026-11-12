@@ -51,6 +51,21 @@ app.use(writeOriginGuard(allowedOrigins(
 )));
 app.use(express.json({ limit: '1mb' }));
 
+// Public, read-only desktop protocol negotiation. It intentionally does NOT
+// return database credentials, administrator setup tokens, or integration keys.
+// Register before PostgreSQL tenant middleware so pre-login clients can verify
+// a newly deployed server without guessing tenant scope.
+app.get('/api/desktop/handshake', (_req, res) => {
+  res.json({
+    product: 'apex-it-os',
+    desktopProtocol: { min: 1, max: 1 },
+    deploymentMode: process.env.APEX_DESKTOP_MODE === '1' ? 'desktop-local' : 'hosted',
+    storageMode: process.env.APEX_STORAGE_MODE === 'postgres' ? 'postgres' : 'single',
+    tenantMode: process.env.APEX_STORAGE_MODE === 'postgres' && process.env.APEX_TENANT_MODE === 'dynamic'
+      ? 'dynamic' : 'fixed',
+  });
+});
+
 // Stage 2: PostgreSQL is the authoritative store when explicitly enabled.
 // Its auth router owns sessions and the transactional context wraps all
 // remaining business routes without allowing a JSON-file fallback.

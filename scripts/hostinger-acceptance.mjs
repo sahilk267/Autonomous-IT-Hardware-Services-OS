@@ -65,6 +65,14 @@ export async function runHostingerAcceptance(input, probe = fetchPublic, checkTl
   const tlsCertificate = await checkTls(base);
   validate('TLS certificate valid for at least 14 more days',
     tlsCertificate.daysRemaining >= 14, `${tlsCertificate.daysRemaining} days, expires ${tlsCertificate.validUntil}`);
+  const handshake = await probe(base, '/api/desktop/handshake');
+  validate('Desktop-compatible Apex server handshake',
+    handshake.status === 200 && handshake.json?.product === 'apex-it-os' &&
+      handshake.json?.deploymentMode === 'hosted' &&
+      Number.isInteger(handshake.json?.desktopProtocol?.min) &&
+      Number.isInteger(handshake.json?.desktopProtocol?.max) &&
+      handshake.json.desktopProtocol.min <= 1 && handshake.json.desktopProtocol.max >= 1,
+    `HTTP ${handshake.status}, product ${handshake.json?.product || 'unknown'}`);
   const health = await probe(base, '/api/health');
   validate('Health and authoritative DB ready', health.status === 200 &&
     health.json?.status === 'ok' && health.json?.database?.status === 'ready',

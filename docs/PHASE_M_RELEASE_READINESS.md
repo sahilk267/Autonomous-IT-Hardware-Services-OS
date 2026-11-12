@@ -1,3 +1,5 @@
+> **Later server selection:** Phase M follow-up introduces a secure Hosted Server mode, remote HTTPS URL setup **after** deployment, desktop/server compatibility endpoint, no client-side DB credentials, and a read-only hosted environment checker. See [Hosted Desktop Connection](PHASE_M_HOSTED_DESKTOP_CONNECTION.md). This document also covers earlier local-server usage.
+
 # Phase M — Windows Desktop & Hosted Deployment Acceptance
 
 **Status (2026-11-12):** Stage M automated PostgreSQL migration/restore and Windows x64 installer packaging have both **PASSED GitHub Actions**. This is a candidate implementation on a draft PR, **not production approval**. Still requires interactive Windows install/upgrade/uninstall, real-user data restore, code signing and live Hostinger staging acceptance.
