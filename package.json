@@ -10,12 +10,13 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/zero_mock_data.test.ts && tsx --test tests/phase_k_security.test.ts && tsx --test tests/phase_l_security.test.ts && node --test tests/phase_l_backup.test.mjs && tsx --test tests/phase_l_postgres_contract.test.ts && node --test tests/phase_l_stage3_validation.test.mjs && node --test tests/phase_m_desktop_config.test.mjs && node --test tests/phase_m_hostinger_probe.test.mjs",
+    "test": "tsx tests/zero_mock_data.test.ts && tsx --test tests/phase_k_security.test.ts && tsx --test tests/phase_l_security.test.ts && node --test tests/phase_l_backup.test.mjs && tsx --test tests/phase_l_postgres_contract.test.ts && node --test tests/phase_l_stage3_validation.test.mjs && node --test tests/phase_m_desktop_config.test.mjs && node --test tests/phase_m_hostinger_probe.test.mjs && node --test tests/phase_m_hosted_desktop.test.mjs",
     "test:postgres": "node --test tests/phase_l_rls.integration.mjs",
     "test:stage2": "node --test tests/stage2_postgres_http.integration.mjs",
     "test:stage3": "node --test tests/stage3_schema_rls.integration.mjs",
     "package:windows": "npm run build && electron-builder --win nsis --x64",
-    "test:phase-m": "tsx --test tests/phase_m_dynamic_workspaces.integration.ts"
+    "test:phase-m": "tsx --test tests/phase_m_dynamic_workspaces.integration.ts",
+    "test:desktop-hosted": "node --test tests/phase_m_desktop_config.test.mjs tests/phase_m_hosted_desktop.test.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
