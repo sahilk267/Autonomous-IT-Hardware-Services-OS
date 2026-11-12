@@ -41,8 +41,7 @@ Write-Output 'Installed EXE and embedded React assets exist.'
 
 # GitHub-hosted Windows runners often execute as a service without an
 # interactive desktop. Never misrepresent that scenario as a GUI PASS.
-$interactive = [Environment]::UserInteractive -and
-  $env:SESSIONNAME -match '^(Console|RDP-)'
+$interactive = ([Environment]::UserInteractive -and ($env:SESSIONNAME -match '^(Console|RDP-)'))
 $requireGui = $env:APEX_REQUIRE_INTERACTIVE_SMOKE -eq '1'
 if ($requireGui -and -not $interactive) {
   throw 'Interactive GUI acceptance requested but the runner has no interactive Windows desktop session.'
