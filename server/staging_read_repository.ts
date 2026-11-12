@@ -88,3 +88,34 @@ export async function compareStagingRepository(
     databasesWritten:false,automaticReconciliation:false,productionCutover:false
   };
 }
+
+// Phase 10.5E: guarded read-through for exactly one pre-existing business GET.
+// Compare the *actor-visible* JSON contract, not the owner's whole JSON table.
+// PostgreSQL is eligible to answer only on full canonical row + membership parity.
+export async function readVerifiedCrmThrough(
+  client:PoolClient,tenantId:string,jsonRows:Projection[]
+):Promise<{matched:boolean;rows:Projection[]}>{
+  const mode=await client.query('SHOW transaction_read_only');
+  if(mode.rows[0]?.transaction_read_only!=='on')
+    throw Error('CRM read-through requires a read-only SQL transaction');
+  const result=await client.query(
+    'SELECT tenant_id,customer_id,source_id,payload FROM apex.customer_records '+
+    'WHERE tenant_id=$1 AND kind=$2 ORDER BY source_id',
+    [tenantId,'crmOpportunities']
+  );
+  const sqlRows:Projection[]=result.rows.map(row=>{
+    const payload=row.payload as Projection | null;
+    if(row.tenant_id!==tenantId || !payload || Array.isArray(payload) ||
+      typeof payload!=='object' || typeof payload.id!=='string' ||
+      row.source_id!==payload.id || typeof payload.customerId!=='string' ||
+      row.customer_id!==payload.customerId)
+      throw Error('CRM SQL row identity or customer custody mismatch');
+    return payload;
+  });
+  // This also rejects duplicate/missing IDs; hashes never leave the server.
+  if(fingerprint(jsonRows)!==fingerprint(sqlRows))
+    return {matched:false,rows:[]};
+  const matched=new Map(sqlRows.map(row=>[row.id,row]));
+  // Preserve the existing JSON business response order and envelope.
+  return {matched:true,rows:jsonRows.map(row=>matched.get(row.id)!)};
+}

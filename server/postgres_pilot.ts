@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import { Pool, type PoolClient } from 'pg';
 import type { Express, Request, RequestHandler } from 'express';
 import type { PersistentStore } from './db.ts';
-import { compareStagingRepository } from './staging_read_repository.ts';
+import { compareStagingRepository, readVerifiedCrmThrough } from './staging_read_repository.ts';
 import type { UserRole } from '../src/types.ts';
 
 type Actor = { userId: string; role: UserRole; tenantId: string };
@@ -34,12 +34,13 @@ export function registerPostgresPilotRoutes(
   // Reject an isolated shadow toggle without the existing signed SQL pilot.
   // A production environment is always forbidden even when both flags are set.
   const repositoryShadowEnabled=process.env.APEX_PG_REPOSITORY_SHADOW_READS==='true';
-  if(repositoryShadowEnabled &&
+  const crmReadThroughEnabled=process.env.APEX_PG_CRM_READ_THROUGH==='true';
+  if((repositoryShadowEnabled || crmReadThroughEnabled) &&
     (process.env.NODE_ENV!=='staging' ||
       process.env.APEX_PG_PILOT_ENABLED!=='true')) {
     throw new Error('REPOSITORY SHADOW SAFETY: staging signed SQL pilot required.');
   }
-  if(process.env.APEX_PG_PILOT_ENABLED!=='true') return;
+  if(process.env.APEX_PG_PILOT_ENABLED!=='true') return null;
 
   const options={
     host:process.env.APEX_PG_PILOT_HOST||'',
@@ -182,6 +183,59 @@ export function registerPostgresPilotRoutes(
         'Staging PostgreSQL operation unavailable.'});
     }
   };
+
+  // A specific allowlist is mandatory even when the staging flag is enabled.
+  // No wildcard/implicit global rollout. All callers still pass the JSON
+  // route's requireAuth + BUSINESS_OWNER/SALES_MANAGER gate first.
+  const ids=(process.env.APEX_PG_CRM_CANARY_STAFF_IDS||'').split(',').map(s=>s.trim());
+  const canaryIds=crmReadThroughEnabled ? new Set(ids) : new Set<string>();
+  if(crmReadThroughEnabled && (ids.length>20 || !ids.length ||
+    ids.some(id=>!/^[A-Za-z0-9._-]{1,160}$/.test(id)) ||
+    canaryIds.size!==ids.length))
+    throw new Error('CRM READ-THROUGH SAFETY: explicit unique canary staff ID allowlist required.');
+  const crmReadThrough:RequestHandler|null=crmReadThroughEnabled
+    ?async(req,res,next)=>{
+      const session=(req as any).user as {userId?:string;role?:UserRole};
+      if(!session || !session.userId || !canaryIds.has(session.userId))
+        return next(); // Normal JSON route, still authenticated and role-gated.
+      res.setHeader('Cache-Control','no-store');
+      try {
+        const before=store.getState();
+        const visible=new Set(before.customers.filter(c=>
+          c.tenantId===before.tenant.id &&
+          (session.role==='BUSINESS_OWNER'||c.staffUserIds.includes(session.userId!))
+        ).map(c=>c.id));
+        const jsonRows=before.crmOpportunities.filter(c=>visible.has(c.customerId));
+        const sql=await transact(req,async(client,actor)=>{
+          if(actor.tenantId!==before.tenant.id || actor.userId!==session.userId ||
+            actor.role!==session.role)
+            reject(403,'CRM read-through tenant/actor mismatch.');
+          const comparison=await readVerifiedCrmThrough(client,actor.tenantId,jsonRows);
+          if(!comparison.matched)
+            reject(409,'Staging CRM read-through parity conflict; no records returned.');
+          return {status:200,data:comparison.rows};
+        },true);
+        // Deny on concurrent local JSON grant/CRM mutation across the SQL
+        // transaction rather than emit an out-of-date authorization snapshot.
+        const after=store.getState();
+        const afterVisible=new Set(after.customers.filter(c=>
+          c.tenantId===after.tenant.id &&
+          (session.role==='BUSINESS_OWNER'||c.staffUserIds.includes(session.userId!))
+        ).map(c=>c.id));
+        const afterRows=after.crmOpportunities.filter(c=>afterVisible.has(c.customerId));
+        if(after.tenant.id!==before.tenant.id ||
+          JSON.stringify(afterRows)!==JSON.stringify(jsonRows))
+          reject(409,'Staging CRM read-through JSON snapshot changed; no records returned.');
+        res.setHeader('X-Apex-CRM-Read','postgres-parity-verified');
+        return res.json({success:true,data:sql.data});
+      } catch(error:any){
+        if(error instanceof PilotError)
+          return res.status(error.status).json({success:false,error:error.message});
+        return res.status(503).json({
+          success:false,error:'Staging CRM read-through is unavailable; no records returned.'
+        });
+      }
+    }:null;
 
   app.get('/api/pg-pilot/status',requireAuth,handler(async()=>({
     status:200,data:{stageOnly:true,storage:'postgres',applicationStorage:'json',
@@ -907,4 +961,5 @@ export function registerPostgresPilotRoutes(
         'FROM apex.pilot_audit_events ORDER BY occurred_at,event_id');
       return {status:200,data:rows.rows};
     }));
+  return crmReadThrough;
 }

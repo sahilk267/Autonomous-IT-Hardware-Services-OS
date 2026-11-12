@@ -93,6 +93,28 @@ try {
     assert.notEqual(detachedShadow.status,0);
     assert.match(detachedShadow.stderr,/REPOSITORY SHADOW SAFETY/);
   });
+  const detachedCanary=spawnSync(process.execPath,['dist/server.cjs'],{
+    env:{...process.env,NODE_ENV:'staging',PORT:String(port),
+      APEX_DATA_FILE:dataFile,APEX_PG_PILOT_ENABLED:'false',
+      APEX_PG_CRM_READ_THROUGH:'true',
+      APEX_PG_CRM_CANARY_STAFF_IDS:'owner-a'},
+    encoding:'utf8',timeout:6000
+  });
+  test('CRM canary flag refuses a detached or unsigned SQL runtime',()=>{
+    assert.notEqual(detachedCanary.status,0);
+    assert.match(detachedCanary.stderr,/REPOSITORY SHADOW SAFETY/);
+  });
+  const missingAllowlist=spawnSync(process.execPath,['dist/server.cjs'],{
+    env:{...process.env,NODE_ENV:'staging',PORT:String(port),
+      APEX_DATA_FILE:dataFile,APEX_PG_PILOT_ENABLED:'true',
+      APEX_PG_PILOT_ACK:'LOCAL_STAGING_ONLY_NO_CUTOVER',
+      APEX_PG_CRM_READ_THROUGH:'true',APEX_PG_CRM_CANARY_STAFF_IDS:''},
+    encoding:'utf8',timeout:6000
+  });
+  test('CRM canary cannot activate without a named staff allowlist',()=>{
+    assert.notEqual(missingAllowlist.status,0);
+    assert.match(missingAllowlist.stderr,/CRM READ-THROUGH SAFETY/);
+  });
   child=spawn(process.execPath,['dist/server.cjs'],{
     env:{...process.env,NODE_ENV:'staging',PORT:String(port),
       APEX_DATA_FILE:dataFile,APEX_PG_PILOT_ENABLED:'true',
@@ -125,6 +147,11 @@ try {
     assert.equal(r.status,200);
     assert.equal(r.data.data.applicationStorage,'json');
     assert.equal(r.data.productionCutover,false);
+  });
+  r=await api('/api/crm',{cookie:owner});
+  test('Default CRM business GET remains pure JSON without canary flag',()=>{
+    assert.equal(r.status,200);
+    assert.equal(r.headers.get('x-apex-crm-read'),null);
   });
   const originalJsonCustomerView=await api('/api/customers',{cookie:owner});
   r=await api('/api/pg-pilot/repository-shadow',{cookie:owner});

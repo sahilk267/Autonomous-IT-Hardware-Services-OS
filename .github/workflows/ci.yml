@@ -151,6 +151,14 @@ jobs:
           APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
           APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
         run: npm run smoke:pg:multi-instance
+      - name: Independent two-tenant CRM read-through RLS and drift acceptance
+        env:
+          APEX_PG_PILOT_HOST: 127.0.0.1
+          APEX_PG_PILOT_DB: apex_stage_ci
+          APEX_PG_PILOT_USER: apex_pilot_login
+          APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
+          APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
+        run: npm run smoke:pg:crm-tenants
       - name: Auditable read-only outbox delivery-denial design preflight
         run: npm run smoke:pg:outbox-plan
       - name: Fail-closed PostgreSQL production cutover readiness assessment

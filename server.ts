@@ -456,7 +456,7 @@ app.post('/api/tenant', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) =
 });
 
 // An explicitly enabled staging SQL pilot does not replace the JSON business APIs.
-registerPostgresPilotRoutes(app, requireAuth, requireRole, dbStore);
+const crmReadThrough = registerPostgresPilotRoutes(app, requireAuth, requireRole, dbStore);
 
 // Customer ownership is local-only. Client-facing identity and portal login are NOT implemented.
 app.get('/api/customers', requireAuth, (req, res) => {
@@ -1823,7 +1823,8 @@ app.post('/api/knowledge/:id/solve', requireAuth, requireRole('BUSINESS_OWNER', 
   } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
 
-app.get('/api/crm', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
+app.get('/api/crm', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'),
+  ...(crmReadThrough ? [crmReadThrough] : []), (req, res) => {
   const actor = (req as any).user as LocalActor;
   res.json({ success: true, data: dbStore.getState().crmOpportunities.filter(c => canAccessCustomer(c.customerId, actor)) });
 });
