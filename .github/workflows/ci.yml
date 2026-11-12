@@ -151,6 +151,8 @@ jobs:
           APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
           APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
         run: npm run smoke:pg:multi-instance
+      - name: Auditable read-only outbox delivery-denial design preflight
+        run: npm run smoke:pg:outbox-plan
       - name: Fail-closed PostgreSQL production cutover readiness assessment
         run: npm run smoke:pg:cutover
       - name: Isolated PostgreSQL snapshot and restore rehearsal
