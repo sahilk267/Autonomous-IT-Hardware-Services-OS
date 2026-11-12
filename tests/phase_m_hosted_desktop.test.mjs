@@ -131,3 +131,29 @@ test('preflight fails closed when missing, oversized or malformed JSON is return
     await assert.rejects(probeHostedServer(URL, { fetcher }), /payload|invalid JSON/);
   }
 });
+
+test('deferred remote choice persists across restart and needs explicit verification to activate', () => {
+  const directory = process.platform === 'win32' ? 'C:\\Apex\\Data' : '/tmp/apex-data';
+  const deferred = validateDesktopSettings({
+    storageMode: 'hosted',
+    serverUrl: 'https://staging.example.com',
+    connectionPending: true,
+  }, directory);
+  assert.equal(deferred.connectionPending, true);
+  const afterRestart = validateDesktopSettings(JSON.parse(JSON.stringify(deferred)), directory);
+  assert.equal(afterRestart.connectionPending, true);
+  assert.equal(afterRestart.serverUrl, 'https://staging.example.com');
+  const preExistingWithoutFlag = validateDesktopSettings({
+    storageMode: 'hosted', serverUrl: 'https://staging.example.com',
+  }, directory);
+  assert.equal(preExistingWithoutFlag.connectionPending, true);
+  const verified = validateDesktopSettings({
+    storageMode: 'hosted', serverUrl: 'https://staging.example.com',
+    connectionPending: false,
+  }, directory);
+  assert.equal(verified.connectionPending, false);
+  const empty = validateDesktopSettings({
+    storageMode: 'hosted', connectionPending: false,
+  }, directory);
+  assert.equal(empty.connectionPending, true);
+});
