@@ -66,3 +66,23 @@ jobs:
           docker exec "$PG_CONTAINER" pg_restore -U postgres --no-owner --exit-on-error -d apex_phase_m_restored_ci /tmp/phase-m.backup
       - name: Reconcile real restored DB and verify role-level tenant isolation
         run: node scripts/phase-m-restore-rehearsal.mjs verify
+      - name: Install PostgreSQL operator CLI tools
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client
+      - name: Exercise guarded production-style restore command on disposable CI databases
+        shell: bash
+        env:
+          PG_CONTAINER: ${{ job.services.postgres.id }}
+          APEX_RESTORE_SOURCE_URL: postgres://postgres:phase-m-disposable-only@127.0.0.1:5432/apex_phase_m_source_ci
+          APEX_RESTORE_TARGET_URL: postgres://postgres:phase-m-disposable-only@127.0.0.1:5432/apex_restore_phase_m_ci
+          APEX_RESTORE_DRILL_ACK: I_HAVE_VERIFIED_THE_TARGET_IS_EMPTY_AND_DISPOSABLE
+          APEX_RESTORE_ENCRYPTED_DIR: ${{ runner.temp }}/apex-private-restore
+        run: |
+          set -euo pipefail
+          mkdir -p "$APEX_RESTORE_ENCRYPTED_DIR"
+          chmod 700 "$APEX_RESTORE_ENCRYPTED_DIR"
+          docker exec "$PG_CONTAINER" createdb -U postgres apex_restore_phase_m_ci
+          npm run rehearse:restore
+
