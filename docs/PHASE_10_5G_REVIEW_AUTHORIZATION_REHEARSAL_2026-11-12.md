@@ -2,6 +2,15 @@
 
 **Date:** 12 November 2026 (Asia/Kolkata). **Branch:** `fix/phase1-security-integrity-20261106`. **Release:** BLOCKED. Draft PR #1 remains unmerged; `main`, the JSON system of record and all deployed customer data are unchanged.
 
+
+## Verified CI evidence (code SHA `3b7d56c`)
+
+- [Push workflow #43253492203](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43253492203): **completed SUCCESS** — backend `verify`, browser and `postgres-staging` all passed.
+- [Draft PR workflow #43253506158](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43253506158): **completed SUCCESS** — all three jobs passed.
+- TypeScript route inventory: **95** normal routes and **39** PostgreSQL pilot route declarations; **90** anonymous-denial HTTP probes, **84** denied-role HTTP probes, **4** authenticated unrole-gated GET probes. Every pilot route is verified to require authentication and has an anonymous-denial probe in the SQL HTTP suite.
+- Offline Ed25519 four-signature reviewer chain: **21/21 PASS** including signature tampering, out-of-band trust-pin mismatch, duplicate roles/keys, unregistered customer, source hash replay, incomplete review, RTO/RPO/write-freeze failures, and production refusal. A synthetically signed record returns **exit code 3 (BLOCKED)**.
+- Full previous staging, genuine two-tenant SQL / independent CRM, authenticated SQL HTTP, and isolated restore/corrupt/rollback CI checks remained successful. **No real customer-data approval, signed corporate identity, or live migration was performed.**
+
 ## 1. Review sign-off — what is actually implemented
 
 The **offline-only verifier** `scripts/postgres/review_signoff_gate.mjs` verifies a four-step ordered, SHA256-linked **Ed25519** attestation chain from distinct keys with externally pinned public-key registry. It never signs documents, accepts vendor credentials, migrates data, changes a database or authorizes deployment.
