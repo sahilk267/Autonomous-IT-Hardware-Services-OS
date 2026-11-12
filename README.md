@@ -250,3 +250,38 @@ Full details: [Phase 10.5G audited reviewer preflight and operator objectives](d
 No new business endpoint is switched to SQL. Production remains BLOCKED.
 
 **Phase 10.5G implementation CI:** Both [Push #43253492203](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43253492203) and [Draft PR #43253506158](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43253506158) passed on code SHA `3b7d56c`. The new suite tests 95 main/39 pilot route declarations, 90 anonymous and 84 wrong-role HTTP denials, plus 21/21 offline review-signoff cases. Full object-level, production identity and operational recovery acceptance remain BLOCKED.
+
+
+## Phase 10.5H — independent identity-issuer claims, object authorization and measured recovery
+
+The offline identity-custody verifier requires **two independent Ed25519 issuer
+keys** (personnel + security) whose public-key registry SHA256 is pinned
+out-of-band, a recent dual-signed key-revocation snapshot, four signed
+reviewer-role/subject/key-binding claims, and eight dual-signed, SHA256-linked
+restricted custody receipts for source, ownership review, reviewer registry,
+sign-offs, rehearsal plan, PostgreSQL restore evidence, identity claims, and
+revocation status. Run `npm run assess:identity-custody` only against separately
+supplied private absolute-path files with
+`APEX_REVIEW_IDENTITY_ACK=OFFLINE_CUSTODY_ONLY_NO_CUTOVER`,
+`APEX_REVIEW_IDENTITY_ROOT_SHA256` and `APEX_REVIEW_TRUST_SHA256`.
+Even valid claims return **exit 3 / production BLOCKED**: the tool cannot
+validate the truth of external HR identity records or corporate authorization.
+It has no identity-issuance, migration, KMS or deployment action.
+
+`npm run smoke:object-isolation` tests real JSON business HTTP objects
+across **11 customer-scoped collections**, unauthorized creates and edits,
+owner assignment to an inaccessible customer, forged tenancy headers and
+immediate grant revocation. All dynamic object APIs must be classified as
+tested or explicitly excluded as owner-only/legacy/global. This extends
+object-level testing but does **not** prove all owner-only legacy operations
+or production multi-tenant JSON security.
+
+`npm run assess:pg:measured-recovery` compares CI-captured actual
+archive/restore/corruption-detection/rollback timestamps with a bounded,
+operator-supplied recovery budget and immutable digest of the original
+PostgreSQL archive plus verified restore evidence. RPO here is a **frozen
+synthetic snapshot-age surrogate**, not measured customer transaction loss.
+No externally authorized operator approval or real-world RPO/RTO is certified.
+The verifier refuses non-disposable DB settings, cannot restore anything
+and returns **exit 3 (BLOCKED)** even on valid timings. For exact gates and
+remaining manual approvals, read [Phase 10.5H report](docs/PHASE_10_5H_IDENTITY_CUSTODY_OBJECT_AUTH_RECOVERY_2026-11-12.md).

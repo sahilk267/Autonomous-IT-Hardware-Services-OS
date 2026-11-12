@@ -42,6 +42,12 @@ jobs:
         run: npm run smoke:api-matrix
       - name: Independently pinned Ed25519 reviewer chain and RPO/RTO no-go smoke
         run: npm run smoke:review-signoff
+      - name: Exhaustive customer-scoped object denial and grant-revocation acceptance
+        run: npm run smoke:object-isolation
+      - name: Two-independent-issuer signed reviewer identity and custody negative controls
+        run: npm run smoke:identity-custody
+      - name: Recovery operator timing budget, archive integrity and no-go negative controls
+        run: npm run smoke:recovery-measurement
       - name: Production data-path and offline backup smoke test
         run: npm run smoke:data
       - name: Customer migration preflight (read-only, isolated fixtures)
@@ -175,40 +181,108 @@ jobs:
         run: npm run smoke:pg:outbox-plan
       - name: Fail-closed PostgreSQL production cutover readiness assessment
         run: npm run smoke:pg:cutover
-      - name: Isolated PostgreSQL snapshot and restore rehearsal
+      - name: Measured disposable PostgreSQL clone restoration, corruption detection and budget acceptance
         run: |
           set -euo pipefail
+          # Restrict the original archive, signed-like plan and evidence to the CI runner.
+          umask 077
           export PGRESTORE_DATABASE=apex_stage_restored
           psql -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE apex_stage_restored'
           dump="$RUNNER_TEMP/apex-phase10-throwaway.dump"
           trap 'rm -f "$dump"' EXIT
-          # Host runner may ship PostgreSQL 18 clients; match the PostgreSQL 16 service's tools.
+          export PHASE_H_ARCHIVE_FILE="$dump"
+          export PHASE_H_PLAN="$RUNNER_TEMP/phase10h-operator-plan.json"
+          export PHASE_H_EVIDENCE="$RUNNER_TEMP/phase10h-original-evidence.json"
+          export PHASE_H_EVIDENCE_AFTER="$RUNNER_TEMP/phase10h-recovered-evidence.json"
+          export PHASE_H_OBSERVATIONS="$RUNNER_TEMP/phase10h-timestamps.json"
+          # There are no live customer processes writing to this disposable stage.
+          # This timestamp is only a synthetic no-write boundary, NOT real RPO.
+          export PHASE_H_FREEZE_MS="$(date +%s%3N)"
+          export PHASE_H_SESSION="synthetic_ci_operator_$(date +%s%3N)"
           postgres_container="$(docker ps --filter 'ancestor=postgres:16-alpine' -q | head -n 1)"
           test -n "$postgres_container"
+          export PHASE_H_ARCHIVE_BEGAN_MS="$(date +%s%3N)"
           docker exec "$postgres_container" pg_dump -U postgres -Fc --no-owner -d apex_stage_ci > "$dump"
+          export PHASE_H_ARCHIVE_FINISHED_MS="$(date +%s%3N)"
+          export PHASE_H_FIRST_RESTORE_BEGAN_MS="$(date +%s%3N)"
           docker exec -i "$postgres_container" pg_restore -U postgres --no-owner --exit-on-error \
             -d "$PGRESTORE_DATABASE" < "$dump"
           npm run smoke:pg:restore
-          # Phase 10.5F: independently compare complete restored data and
-          # FORCE RLS/policies/constraints/indexes before any destructive probe.
           export APEX_PG_REHEARSAL_ACK=DISPOSABLE_RESTORED_COPY_ONLY
-          npm run assess:pg:rehearsal
-          archive_sha="$(sha256sum "$dump" | cut -d' ' -f1)"
-          # Deliberately corrupt ONLY the disposable restored clone. Never the
-          # imported source or any customer/hosted database.
+          node scripts/postgres/rehearsal_evidence.mjs > "$PHASE_H_EVIDENCE"
+          export PHASE_H_FIRST_RESTORE_VERIFIED_MS="$(date +%s%3N)"
+          export PHASE_H_SOURCE_SHA="$(psql -At -v ON_ERROR_STOP=1 -c 'SELECT sha256 FROM apex.staging_imports')"
+          export PHASE_H_ARCHIVE_SHA="$(sha256sum "$dump" | cut -d' ' -f1)"
+          export PHASE_H_EVIDENCE_SHA="$(sha256sum "$PHASE_H_EVIDENCE" | cut -d' ' -f1)"
+          # Stage a declared synthetic operator plan BEFORE the damage/rollback.
+          # These CI targets are not human-approved production RPO/RTO figures.
+          node <<'NODE'
+          const fs=require('fs'),e=process.env,start=Number(e.PHASE_H_FREEZE_MS);
+          fs.writeFileSync(e.PHASE_H_PLAN,JSON.stringify({
+            scope:'DISPOSABLE_PG16_RECOVERY_REHEARSAL',
+            operatorSession:e.PHASE_H_SESSION,
+            sourceSha256:e.PHASE_H_SOURCE_SHA,
+            archiveSha256:e.PHASE_H_ARCHIVE_SHA,
+            evidenceSha256:e.PHASE_H_EVIDENCE_SHA,
+            rpoMinutes:10,rtoMinutes:5,maximumDowntimeMinutes:10,
+            windowStart:new Date(start).toISOString(),
+            windowEnd:new Date(start+600000).toISOString(),
+            writeFreezeRequired:true,
+            approvalClassification:'SYNTHETIC_CI_OPERATOR_NO_EXTERNAL_APPROVAL'
+          }),{mode:0o600});
+          NODE
+          # Damage ONLY the restored, throwaway clone. Integrity drift must fail.
           psql -d "$PGRESTORE_DATABASE" -v ON_ERROR_STOP=1 -c \
-            "INSERT INTO apex.tenants(tenant_id,display_name) VALUES ('phase105f_recovery_probe','Disposable rollback drill')"
+            "INSERT INTO apex.tenants(tenant_id,display_name) VALUES ('phase105h_recovery_probe','Disposable rollback drill')"
           set +e
           npm run assess:pg:rehearsal
           tamper_status=$?
           set -e
-          test "$tamper_status" -eq 1 || { echo 'Rehearsal verifier failed to detect restore clone corruption'; exit 1; }
-          # Recreate the isolated clone from the SAME immutable dump; verify
-          # archive integrity and rerun independent RLS/restore acceptance.
+          export PHASE_H_DAMAGE_DETECTED_MS="$(date +%s%3N)"
+          test "$tamper_status" -eq 1 || { echo 'Clone corruption went undetected'; exit 1; }
+          # The original stage and immutable archive are never damaged or changed.
+          export PHASE_H_ROLLBACK_BEGAN_MS="$(date +%s%3N)"
           psql -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE $PGRESTORE_DATABASE WITH (FORCE)"
           psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE $PGRESTORE_DATABASE"
-          test "$(sha256sum "$dump" | cut -d' ' -f1)" = "$archive_sha"
+          test "$(sha256sum "$dump" | cut -d' ' -f1)" = "$PHASE_H_ARCHIVE_SHA"
           docker exec -i "$postgres_container" pg_restore -U postgres --no-owner --exit-on-error \
             -d "$PGRESTORE_DATABASE" < "$dump"
+          export PHASE_H_ROLLBACK_RESTORED_MS="$(date +%s%3N)"
           npm run assess:pg:rehearsal
           npm run smoke:pg:restore
+          node scripts/postgres/rehearsal_evidence.mjs > "$PHASE_H_EVIDENCE_AFTER"
+          cmp "$PHASE_H_EVIDENCE" "$PHASE_H_EVIDENCE_AFTER"
+          export PHASE_H_ROLLBACK_VERIFIED_MS="$(date +%s%3N)"
+          export PHASE_H_WRITES_ALLOWED_MS="$(date +%s%3N)"
+          # Record observed wall-clock milestones and compare with BEFORE-damage plan.
+          node <<'NODE'
+          const fs=require('fs'),e=process.env,ms=s=>Number(e['PHASE_H_'+s]);
+          fs.writeFileSync(e.PHASE_H_OBSERVATIONS,JSON.stringify({
+            operatorSession:e.PHASE_H_SESSION,sourceSha256:e.PHASE_H_SOURCE_SHA,
+            archiveSha256:e.PHASE_H_ARCHIVE_SHA,
+            evidenceSha256:e.PHASE_H_EVIDENCE_SHA,
+            archiveSizeBytes:fs.statSync(e.PHASE_H_ARCHIVE_FILE).size,
+            clock:'CI_RUNNER_WALL_CLOCK_MILLISECONDS',writeFrozen:true,
+            archiveBeganMs:ms('ARCHIVE_BEGAN_MS'),
+            archiveFinishedMs:ms('ARCHIVE_FINISHED_MS'),
+            initialRestoreBeganMs:ms('FIRST_RESTORE_BEGAN_MS'),
+            initialRestoreVerifiedMs:ms('FIRST_RESTORE_VERIFIED_MS'),
+            damageDetectedMs:ms('DAMAGE_DETECTED_MS'),
+            rollbackBeganMs:ms('ROLLBACK_BEGAN_MS'),
+            rollbackRestoredMs:ms('ROLLBACK_RESTORED_MS'),
+            rollbackVerifiedMs:ms('ROLLBACK_VERIFIED_MS'),
+            writesAllowedMs:ms('WRITES_ALLOWED_MS')
+          }),{mode:0o600});
+          NODE
+          export APEX_PG_MEASURED_REHEARSAL_ACK=DISPOSABLE_CI_CLONE_ONLY
+          set +e
+          npm run assess:pg:measured-recovery -- \
+            --plan "$PHASE_H_PLAN" \
+            --observations "$PHASE_H_OBSERVATIONS" \
+            --evidence "$PHASE_H_EVIDENCE" \
+            --archive "$dump"
+          measured_status=$?
+          set -e
+          # Successful synthetic budget acceptance is STILL explicitly BLOCKED (3).
+          test "$measured_status" -eq 3 || { echo "Measured recovery gate failed: $measured_status"; exit 1; }
+          rm -f "$PHASE_H_PLAN" "$PHASE_H_EVIDENCE" "$PHASE_H_EVIDENCE_AFTER" "$PHASE_H_OBSERVATIONS"

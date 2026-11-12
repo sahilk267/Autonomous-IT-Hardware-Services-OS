@@ -321,3 +321,19 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 - Existing 10.5F isolated source→restored schema/row digest and clone corrupt-detect-recover rehearsal remains. Real operator RPO/RTO measured at an approved window, encrypted offsite recovery, independently certified real reviewer identities, business freeze/resume and cross-instance customer access are not done.
 - **CI verified at code SHA `3b7d56c`:** [Push #43253492203](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43253492203) and [PR #43253506158](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43253506158) **both SUCCESS** (verify, Chromium, PostgreSQL staging+restore). Route inventory: **95** main + **39** PG pilot; **90** normal anonymous denials, **84** disallowed-role HTTP denials, **4** authenticated broad GETs; synthetic 4-role Ed25519 review **21/21 PASS**. Documentation-only final SHA has separate CI. [Technical report](PHASE_10_5G_REVIEW_AUTHORIZATION_REHEARSAL_2026-11-12.md).
 - **Hard release gate:** production cutover, owner-only customer remapping, provider outbox delivery and Hostinger deploy remain **BLOCKED**. Keep main unchanged and Draft PR #1 unmerged.
+
+
+---
+
+## Phase 10.5H — dual-issuer identity/evidence custody, object-level API matrix, measured recovery (12 November 2026)
+
+**Development:** `fix/phase1-security-integrity-20261106`, Draft PR #1; main and production unchanged.
+
+- New `scripts/postgres/identity_custody_gate.mjs`: strict private/offline evidence review; validates original 10.5G four-reviewer Ed25519 hash chain, independently SHA256-pinned **two issuer** keys, current jointly signed revocation list, four distinct organizational-subject/key/role claims with validity windows, and **8 chained dual-signed custody receipts**. Always BLOCKED exit 3 on valid evidence, 1 on tamper, 2 on unsafe execution; no actual HR-system verification or human approval.
+- New `tests/identity_custody_smoke.mjs`: ephemeral issuer and review keys plus forged root, self-certification, suspended/duplicated identity, stale/tampered revocation, altered custody, signature and environment negative controls.
+- New `tests/business_object_isolation_matrix.mjs`: independent two-customer JSON fixture with real owner/Sales/IT/Field/Procurement authenticated HTTP tests; all **11 scoped business collections**, customer-denied creates, existing B record ID tampering, no denied writes, grant revocation, forged tenant headers. Every main dynamic object route is either exercised on foreign private object or specifically classified as owner-only, global, or legacy. Full production multi-tenant authorization is NOT established.
+- New `scripts/postgres/recovery_measurement_gate.mjs` and `tests/recovery_measurement_smoke.mjs`: measured disposable PG archive/restore/detection/rollback wall-clock observations, immutable archive and evidence SHA, explicit CI operator session, frozen source snapshot, RPO-age surrogate, RTO and maximum downtime budgets. Successful checks still return BLOCKED 3, and cannot restore or approve production.
+- CI extends `verify` with all three suites and the existing PostgreSQL restore/corrupt/recover workflow with actual observed timing thresholds. Real-world reviewer employment/role authority, external evidence key custody, operator-approved real migration, encrypted backups, production data-loss assessment and full JSON tenant isolation remain P0 blockers.
+- **CI evidence:** pending first implementation verification. See [Phase 10.5H review and acceptance](PHASE_10_5H_IDENTITY_CUSTODY_OBJECT_AUTH_RECOVERY_2026-11-12.md).
+
+**No customer migration, SQL business endpoint rollout, Hostinger production deployment, or outbox provider dispatch.**
