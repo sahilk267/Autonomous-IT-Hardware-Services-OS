@@ -71,6 +71,22 @@ function runPgTool(name, args, env, timeoutMs = 20 * 60 * 1000) {
   });
 }
 
+async function installedPgClientMajor(command) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, ['--version'], {
+      shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    let output = '';
+    child.stdout.on('data', chunk => { output += String(chunk).slice(0, 160); });
+    child.once('error', () => reject(new Error('PostgreSQL backup or restore executable is unavailable')));
+    child.once('exit', code => {
+      const match = /PostgreSQL\)\s*(\d+)(?:\.|\s|$)/i.exec(output);
+      if (code !== 0 || !match) reject(new Error('Cannot determine PostgreSQL backup/restore client version'));
+      else resolve(Number(match[1]));
+    });
+  });
+}
+
 async function adminClient(connectionString) {
   const client = new pg.Client({ connectionString });
   await client.connect();
@@ -119,6 +135,19 @@ export async function productionRestoreDrill(environment = process.env) {
     origin = await adminClient(conf.source.href);
     phase = 'TARGET_CONNECTION';
     destination = await adminClient(conf.target.href);
+    phase = 'CLIENT_VERSION_CHECK';
+    const [sourceVersion, targetVersion] = await Promise.all([
+      origin.query("SELECT current_setting('server_version_num')::int AS v"),
+      destination.query("SELECT current_setting('server_version_num')::int AS v"),
+    ]);
+    const sourceMajor = Math.floor(sourceVersion.rows[0].v / 10000);
+    const targetMajor = Math.floor(targetVersion.rows[0].v / 10000);
+    const [dumpMajor, restoreMajor] = await Promise.all([
+      installedPgClientMajor('pg_dump'), installedPgClientMajor('pg_restore'),
+    ]);
+    if (sourceMajor !== targetMajor || sourceMajor !== dumpMajor || sourceMajor !== restoreMajor) {
+      throw new Error('PostgreSQL client version mismatch: use pg_dump and pg_restore from the SAME major version as both source and target servers');
+    }
     phase = 'TARGET_EMPTY_CHECK';
     const tables = await destination.query(`
       SELECT tablename FROM pg_catalog.pg_tables
@@ -180,7 +209,7 @@ export async function productionRestoreDrill(environment = process.env) {
       note: 'Source not modified; target was empty and disposable. Temporary sensitive dump deleted. Real RTO/RPO and encrypted backups require operational signoff.',
     };
   } catch (error) {
-    if (/^(Restore target|Full-tenant|Rehearsal verifier|Restore verification FAILED|Backup archive)/.test(error.message)) {
+    if (/^(PostgreSQL client version mismatch|Restore target|Full-tenant|Rehearsal verifier|Restore verification FAILED|Backup archive)/.test(error.message)) {
       throw error;
     }
     const code = typeof error?.code === 'string' && /^[A-Za-z0-9_]{1,40}$/.test(error.code)
@@ -199,7 +228,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     .catch(error => {
       // Error messages from our validation are secret-free; driver/library
       // exceptions are not printed verbatim because they might contain URLs.
-      if (/^Recovery preflight failed|^RECOVERY_STAGE_|^Restore target|^Full-tenant|^Rehearsal verifier|^Restore verification FAILED|^Backup archive/.test(error.message)) {
+      if (/^Recovery preflight failed|^RECOVERY_STAGE_|^PostgreSQL client version mismatch|^Restore target|^Full-tenant|^Rehearsal verifier|^Restore verification FAILED|^Backup archive/.test(error.message)) {
         console.error(error.message);
       } else {
         console.error('Recovery drill FAILED; inspect the protected operator environment for details (connection secrets withheld).');
