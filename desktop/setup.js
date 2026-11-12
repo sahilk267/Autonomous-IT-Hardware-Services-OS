@@ -38,6 +38,10 @@ document.querySelector('#browse').addEventListener('click', async () => {
       const control = form.elements.namedItem(name);
       if (control && typeof value === 'string') control.value = value;
     }
+    if (data.storageMode === 'hosted' && data.serverUrl && data.connectionPending) {
+      // Preserve a user's "save for later" choice, including across restart.
+      deferConnection.checked = true;
+    }
     if (data.connectionError) {
       status.textContent = data.connectionError;
       status.classList.add('warning');
