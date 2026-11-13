@@ -351,3 +351,5 @@ residency, encryption, key custody or a live authorized rehearsal.** The
 source-specific customer ownership crosswalk is verified for complete proposed
 decisions, not applied. The operator workflow and complete requirements are
 in [Phase 10.5J technical runbook](docs/PHASE_10_5J_EXTERNALLY_GOVERNED_RELEASE_ACCEPTANCE_2026-11-13.md).
+
+**Phase 10.5J CI verified:** [Push #43404580231](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43404580231) and [PR #43404587089](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43404587089) both passed on SHA `075769eb`; release dossier **35/35**, PostgreSQL stage **41/41**, SQL tenant **79/79**, restore **30/30** twice. The throwaway PG16 damage detection→verified rollback took **970ms**. External personnel/IdP, DPA/legal and real custody signatures/approvals and real recovery RPO/RTO are **NOT** established; production stays BLOCKED.

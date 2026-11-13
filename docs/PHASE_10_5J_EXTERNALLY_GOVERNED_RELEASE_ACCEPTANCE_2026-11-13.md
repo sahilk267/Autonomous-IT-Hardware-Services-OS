@@ -2,6 +2,19 @@
 
 **As of 13 November 2026, Asia/Kolkata.** Branch `fix/phase1-security-integrity-20261106` under Draft PR #1. JSON remains the business system of record. No production cutover, new SQL-backed business rollout, real migration, outbox delivery, finance approval, external purchase-order dispatch, or Hostinger deployment is permitted.
 
+
+## Verified implementation and CI evidence — 13 November 2026
+
+**Verified hardening SHA:** [`075769eb`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/075769ebcd7712ceb78be79951345f0c6082f035).
+
+- [Push CI #43404580231](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43404580231) **SUCCESS** and [Draft PR CI #43404587089](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43404587089) **SUCCESS**, all backend verify, Chromium browser and PostgreSQL staging/rehearsal jobs.
+- Phase 10.5J composite release dossier **35/35 PASS**: rechecks cryptographic Phase H and I evidence from actual private artifact bytes, authenticates source/evidence linkage, 4 independently pinned offline release authority roles, 2 signed/revocable operator credentials, signed data processing terms and complete historical ownership dispositions. Added independent-personnel anti-overlap across the prior four data reviewers, and explicit revocation checks for oversight authority keys.
+- Previous signed reviewer identity/custody **18/18**, operator/witness handoff **18/18**, monotonic recovery smoke **19/19**, API smoke **96/96**, role authorization **133/133**, independent SQL domain-tenancy **79/79**, PostgreSQL RLS/import **41/41**, cutover BLOCKED gate **8/8**, and PostgreSQL restore **30/30** before and after deliberate clone-only corruption.
+- Disposable PG16 CI observed initial clone restore **520 ms**, rollback restore **960 ms**, detected corruption → independently verified rollback **970 ms**, synthetic no-write window **1,960 ms**, frozen snapshot age surrogate **180 ms**, and maximum monotonic↔UTC drift **726 ms**. Declared synthetic benchmarks (RPO-age 10 min, RTO 5 min, no-write window 10 min) were met. These are **runner-only timings**, not measured customer transaction loss or approved corporate RPO/RTO.
+- An exclusively synthetic 1-row historical source was exercised both `RETAIN_OWNER_ONLY` and, after rebuilding and re-signing the full reviewer/custody chain, `PROPOSE_CUSTOMER`; neither caused a customerId write. No real customer snapshot, verified corporate human credential, lawful-process authorization, external ticket verification, independently observed live run, or production deployment occurred.
+
+**Decision remains `EXTERNAL_GOVERNANCE_INTAKE_CRYPTO_VALID_PRODUCTION_BLOCKED`** even when every private signature and cross-evidence hash matches. Actual authority validation requires an independent corporate IdP, HR, data controller and privacy office, real artifact custody, live authorized recovery and an explicit human-controlled release process separate from this code.
+
 ## Scope and authority boundary
 
 This phase delivers an **offline, cryptographically verified evidence intake** so qualified real personnel and data controllers can later assemble an independently audited nonproduction rehearsal. It does **not** issue corporate credentials, verify actual HR or IdP membership, contact an identity provider, certify a legal processing basis, obtain operator permission, read a genuine customer dataset, invoke `pg_restore`, or produce a production go-live token.
