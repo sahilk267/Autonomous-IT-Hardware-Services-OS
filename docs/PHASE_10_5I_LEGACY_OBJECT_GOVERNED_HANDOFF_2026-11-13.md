@@ -3,6 +3,21 @@
 **Date:** 13 November 2026 (Asia/Kolkata). **Branch:** `fix/phase1-security-integrity-20261106` on Draft PR #1. **Cutover:** BLOCKED; existing JSON primary source and one opt-in staging-only CRM canary unchanged. This phase includes no live migration, SQL delivery, procurement dispatch or Hostinger deployment.
 
 
+
+## Final monotonic-clock recovery acceptance — 13 November 2026
+
+CI exposed an important clock-source flaw during a documentation-only PR run: the runner's wall clock sampled the archive **627 ms before** the previously recorded freeze boundary, and another run saw wall-clock event inversion. Both failures correctly blocked CI; earlier push workflows and all data/schema restore validations passed. This was *not* treated as proof of customer recovery success.
+
+The recovery measurement verifier and GitHub Actions workflow now take **paired UTC and Linux `/proc/uptime` monotonic samples** for every archive/restore/corruption/rollback milestone. Event causal order, archive-age surrogate, RTO and downtime are checked strictly against the monotonic clock and predeclared budgets. UTC wall-clock samples are independently checked against the monotonic window with at most **2 seconds** allowed drift; any larger drift still fails. This does **not** extend the operator recovery time budget or declare a real production freeze.
+
+**Final verified code SHA:** [`8d484cc4`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/8d484cc4d4af2fd0dc2e9e6532ab16f1bc13dd23).
+
+- [Push #43342468573](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43342468573): **completed SUCCESS** (backend, Chromium, PostgreSQL staging/recovery).
+- [PR #43342474822](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43342474822): **completed SUCCESS** (all jobs).
+- New legacy route/commerce integrity **71 PASS**; governed handoff **18/18 PASS**; monotonic recovery negative controls **19/19 PASS**; standard API **96/96**, role API **133/133**, 6-domain tenant SQL **79/79**, PostgreSQL restore **30/30** before and after deliberate clone corruption.
+- Measured disposable PG16 CI rollback from damage detection to verified recovery: **1,150ms**; rollback duration **1,150ms**; initial restore **570ms**; synthetic no-write window **2,190ms**; frozen snapshot-age surrogate **170ms**; maximum absolute UTC↔monotonic drift **832ms**. RPO-age 10min, rollback RTO 5min and synthetic downtime 10min targets met only for this throwaway fixture.
+- Real corporate HR/signer authority, independent ticket issuance, customer data RPO/RTO and Hostinger recovery remain **PENDING**. No customer data migrated, no SQL service enabled, no provider dispatch and no operational approval generated.
+
 ## Verified CI evidence and implementation status
 
 **Green code SHA:** [`58448faa`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/58448faadf669b30d5be6dfd8d79f783049aaca2). The first code SHA [`cd9a563`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/cd9a5631d8dde711fd00fc16b38aa30a9ad27f02) passed TypeScript/backend and Chromium, but its PostgreSQL job failed because one synthetic archive timestamp fell outside the declared rehearsal window. The follow-up code commit introduced non-sensitive timing-offset diagnostics and the full workflows were rerun. **Both reruns succeeded; no production timing results are inferred.**
