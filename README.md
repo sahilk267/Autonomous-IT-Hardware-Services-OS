@@ -317,3 +317,5 @@ evidence returns **exit 3 / BLOCKED**; no real operator identity, ticket
 issuer, governance authority, live customer RTO/RPO or production approval
 is conferred. The tool cannot restore or deploy anything. See
 [Phase 10.5I technical report](docs/PHASE_10_5I_LEGACY_OBJECT_GOVERNED_HANDOFF_2026-11-13.md).
+
+**Phase 10.5I CI:** [Push #43341197271](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43341197271) and [PR #43341203992](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43341203992) both green on code SHA `58448faa`. Legacy matrix **71 PASS**, operator-witness handoff **18/18 PASS**, PG restore **30/30 PASS**; measured synthetic corruption→verified rollback **1,108ms**. The earlier code run had a timestamp-window failure; rerun with diagnostic offsets passed. The actual inventory UI submits only mutable catalog/RFQ data. **Production remains BLOCKED.**
