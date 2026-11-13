@@ -44,7 +44,7 @@ function signerRegistry(roots,rootPin,other){
   exact(o,['scope','keys']);
   assert.equal(o.scope,'OFFLINE_EXTERNALLY_GOVERNED_RELEASE_AUTHORITIES');
   assert.ok(Array.isArray(o.keys)&&o.keys.length===4,'four distinct authority keys required');
-  const ids=new Set(),principals=new Set(),fingerprints=new Set(other);
+  const ids=new Set(),principals=new Set(),fingerprints=new Set(other.fingerprints);
   const keys=o.keys.map((item,i)=>{
     exact(item,['role','keyId','principal','publicKeyPem']);
     assert.equal(item.role,authorityRoles[i],'wrong external authority role order');
@@ -53,7 +53,9 @@ function signerRegistry(roots,rootPin,other){
     assert.equal(key.asymmetricKeyType,'ed25519','authority credentials must be Ed25519');
     const fp=sha(key.export({format:'der',type:'spki'}));
     assert.ok(!ids.has(item.keyId)&&!principals.has(item.principal)&&
-      !fingerprints.has(fp),'external authority role/key separation violated');
+      !fingerprints.has(fp)&&!other.keyIds.has(item.keyId)&&
+      !other.principals.has(item.principal),
+      'external authority role/key separation violated');
     ids.add(item.keyId);principals.add(item.principal);fingerprints.add(fp);
     return {...item,key,fp};
   });
@@ -81,13 +83,16 @@ function allKeyFingerprints({reviewTrust,reviewRoots,operatorTrust}){
     ...JSON.parse(reviewRoots).issuers,
     ...JSON.parse(operatorTrust).keys
   ];
-  const fingerprints=new Set();
+  const fingerprints=new Set(),principals=new Set(),keyIds=new Set();
   for(const k of combined){
+    assert.ok(!principals.has(k.principal)&&!keyIds.has(k.keyId),
+      'prior reviewers/issuers/operators may not share principal or key identity');
+    principals.add(k.principal);keyIds.add(k.keyId);
     const fp=sha(crypto.createPublicKey(k.publicKeyPem).export({format:'der',type:'spki'}));
     assert.ok(!fingerprints.has(fp),'review/identity/operator key reused across trust domains');
     fingerprints.add(fp);
   }
-  return fingerprints;
+  return {fingerprints,principals,keyIds};
 }
 export function assessReleaseDossier({
   reviewPacket,operatorPacket,authorityRoots,authorityRootPin,
@@ -142,10 +147,14 @@ export function assessReleaseDossier({
     asOf:status.asOf,revokedKeySha256:status.revokedKeySha256
   }),[personnel,security]);
   const revoked=new Set(status.revokedKeySha256);
+  for(const k of authorityKeys)
+    assert.ok(!revoked.has(k.fp),'external oversight authority signing key has been revoked');
   const revocationSha256=sha(Buffer.from(canonical(status)));
   assert.ok(Array.isArray(credentialObj.certificates)&&
     credentialObj.certificates.length===2,'two independently credentialed operators required');
   const subjects=new Set(),idpSubjects=new Set();
+  const reviewerSubjects=new Set(JSON.parse(identities).certificates
+    .map(x=>x.claim.organizationIdSha256));
   for(let i=0;i<2;i++){
     const c=credentialObj.certificates[i],key=operatorRegistry.keys[i];
     exact(c,['claim','signatures']);
@@ -163,7 +172,9 @@ export function assessReleaseDossier({
     for(const hash of ['corporateSubjectSha256','idpAccountSha256','mfaAssertionSha256'])
       assertHash(v[hash]);
     assert.ok(!subjects.has(v.corporateSubjectSha256)&&
-      !idpSubjects.has(v.idpAccountSha256),'operator and witness share identity provider subject');
+      !idpSubjects.has(v.idpAccountSha256)&&
+      !reviewerSubjects.has(v.corporateSubjectSha256),
+      'operator and witness must be independent of each other and all four customer-data reviewers');
     subjects.add(v.corporateSubjectSha256);idpSubjects.add(v.idpAccountSha256);
     assert.equal(v.identityState,'ACTIVE_HARDWARE_MFA_CLAIM');
     assert.equal(v.operatorPlanSha256,sha(operatorPlan));

@@ -173,6 +173,22 @@ try{
   failure('Duplicated IdP account even under different HR subjects is refused',
     changeCredentials(c=>{c.certificates[1].claim.idpAccountSha256=
       c.certificates[0].claim.idpAccountSha256;}));
+  failure('The operator cannot also be a human ownership reviewer under the same HR subject',
+    changeCredentials(c=>{
+      c.certificates[0].claim.corporateSubjectSha256=
+        JSON.parse(reviewed.identities).certificates[0].claim.organizationIdSha256;
+    }));
+  failure('Revoked data-controller authority cannot sign release even with valid operator certificates',
+    changeCredentials(c=>{
+      const fp=hash(crypto.createPublicKey(keys[2].publicKeyPem)
+        .export({format:'der',type:'spki'}));
+      c.revocations.revokedKeySha256=[fp];
+      c.revocations.signatures=sign({
+        asOf:c.revocations.asOf,revokedKeySha256:c.revocations.revokedKeySha256
+      },[0,1],releaseRevocationBytes);
+      const updatedRevocationHash=hash(Buffer.from(canonical(c.revocations)));
+      c.certificates.forEach(x=>x.claim.revocationsSha256=updatedRevocationHash);
+    }));
   failure('Account with revoked operator key is refused even with correct issuer signatures',
     changeCredentials(c=>{
       const revoked=c.certificates[1].claim.publicKeySha256;
