@@ -321,3 +321,33 @@ is conferred. The tool cannot restore or deploy anything. See
 **Phase 10.5I CI:** [Push #43341197271](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43341197271) and [PR #43341203992](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43341203992) both green on code SHA `58448faa`. Legacy matrix **71 PASS**, operator-witness handoff **18/18 PASS**, PG restore **30/30 PASS**; measured synthetic corruption→verified rollback **1,108ms**. The earlier code run had a timestamp-window failure; rerun with diagnostic offsets passed. The actual inventory UI submits only mutable catalog/RFQ data. **Production remains BLOCKED.**
 
 **Phase 10.5I final verified CI SHA `8d484cc4`:** [Push #43342468573](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43342468573) and [Draft PR #43342474822](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43342474822) **both green**. Because runner UTC clock changes caused strict wall-clock ordering failures, observed restoration timing now uses Linux monotonic `/proc/uptime` plus bounded UTC drift validation. Recovery tests **19/19**, object legacy **71**, operator review **18/18**; synthetic rollback verified in **1,150ms**. Real RPO/RTO, external custodian approvals and production cutover remain **BLOCKED**.
+
+
+## Phase 10.5J — externally governed release-acceptance dossier (read-only)
+
+This implementation **prepares** a single audit-ready dossier of the original
+reviewer and historical ownership review (Phases 10.5F–H), **two additional**
+offline personnel/security attestations of a DBA rehearsal operator and
+independent security witness, data-controller/privacy-custodian authorization
+terms, and the Phase 10.5I independently witnessed restore archive and measured
+synthetic recovery evidence. Cryptographic identity claims are checked against
+a four-key oversight registry **pinned externally by SHA256**; credentials,
+revocations and legally scoped custody declarations have distinct Ed25519
+signature domains and must reference exactly the same immutable source, review,
+tenant, archive, recovered SQL digest, operator session and ticket.
+
+The synthetic CI suite `npm run smoke:release-dossier` deliberately attempts
+source/tenant swaps, incomplete owner-only history, forged HR/MFA assertions,
+revoked identities, unencrypted customer-data claims, unsigned or retroactive
+authorizations, changed recovery archives and excessive retention. The private
+CLI `npm run assess:release-dossier` requires 18 separate mode-0600 files
+outside checkout and independent public-key fingerprints; it has **no**
+production activation, customer remapping, IdP query, backup copying or restore
+command. Valid *cryptographic evidence* returns exit **3 (BLOCKED)**; invalid
+packets exit 1 and unsafe execution exits 2.
+
+**This does not establish actual employee employment, legal approval, data
+residency, encryption, key custody or a live authorized rehearsal.** The
+source-specific customer ownership crosswalk is verified for complete proposed
+decisions, not applied. The operator workflow and complete requirements are
+in [Phase 10.5J technical runbook](docs/PHASE_10_5J_EXTERNALLY_GOVERNED_RELEASE_ACCEPTANCE_2026-11-13.md).

@@ -19,6 +19,8 @@
     "smoke:object-isolation": "node tests/business_object_isolation_matrix.mjs",
     "smoke:legacy-object": "node tests/legacy_object_integrity_matrix.mjs",
     "smoke:governed-handoff": "node tests/governed_handoff_smoke.mjs",
+    "smoke:release-dossier": "node tests/release_dossier_smoke.mjs",
+    "assess:release-dossier": "node scripts/postgres/release_dossier_gate.mjs",
     "assess:governed-handoff": "node scripts/postgres/governed_handoff_gate.mjs",
     "smoke:recovery-measurement": "node tests/recovery_measurement_smoke.mjs",
     "assess:identity-custody": "node scripts/postgres/identity_custody_gate.mjs",

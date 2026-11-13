@@ -353,3 +353,16 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 - **Still blockers:** genuine operator identity verified by actual organization, externally archived dual-signed approvals, real customer historical ownership decisions, confirmed live encrypted offsite backups and RTO/RPO, independently proved all runtime multi-tenant endpoints, legal invoice/payment reconciliation and Hostinger deployment sign-off. Production cutover NO-GO.
 
 [10.5I technical and safety report](PHASE_10_5I_LEGACY_OBJECT_GOVERNED_HANDOFF_2026-11-13.md).
+
+
+---
+
+## Phase 10.5J — governed release evidence intake and offline nonproduction operator handoff (13 November 2026)
+
+**Status:** implemented on `fix/phase1-security-integrity-20261106` (Draft PR #1), production release **NO-GO**. Latest CI evidence follows after verified workflows. `main` must remain unchanged.
+
+- `scripts/postgres/release_dossier_gate.mjs` adds read-only **composite evidence verification**: reruns both the Phase 10.5H identity/custody gate and 10.5I signed recovery handoff against the exact original private files; enforces same historical tenant source SHA256, review, immutable clone schema/data digest and witnessed recovery archive.
+- **Operator credentials:** requires 4 independently pinned new external-governance public keys (personnel IdP, security IdP, data controller, privacy officer), excludes reused reviewer/witness/issuer keys, enforces jointly signed recent revocation list and 2 distinct operator/witness credential claims bound to their actual operator Ed25519 public keys, distinct hashed personnel/IdP account identifiers, MFA-assertion digest and operator plan. All verifications remain cryptographic statements, not a live connection to an external IdP/HR.
+- **Authorized nonproduction custody proposal:** data controller and privacy officer must sign identical scope-limited source/review/custody/operator/recovery/evidence SHA256 digests, identity credential chain, immutable ticket, tenant, exact historical owner-only decision counts, explicit owner-only retention vs customer proposals, privacy/legal basis and retention/deletion evidence digests. Only synthetic or declared pseudonymized encrypted nonproduction data is eligible; no raw production dataset. All claims are unverified against actual outside systems.
+- `tests/release_dossier_smoke.mjs` exercises complete independently signed synthetic reviewer, operator and release governance identities plus negative cases (revocation, self-certification, source drift, missing rows, illicit data class, forged ticket, expired approval, retroactive data permission, unencrypted data claims and attempted production activation). CI integrates via `smoke:release-dossier`.
+- **Critical limits:** NO actual corporate human credential check, government/legal custody validation, corporate IdP login or independent approval ticket API query; no real encrypted authorized source, real operator witnessed database rehearsal, production RPO/RTO, customer ownership reassignment or PostgreSQL cutover. This phase cannot be certified production ready from synthetic evidence. [Phase 10.5J report/runbook](PHASE_10_5J_EXTERNALLY_GOVERNED_RELEASE_ACCEPTANCE_2026-11-13.md).

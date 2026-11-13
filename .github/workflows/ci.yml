@@ -50,6 +50,8 @@ jobs:
         run: npm run smoke:identity-custody
       - name: Independent operator/witness signed offline recovery handoff negative controls
         run: npm run smoke:governed-handoff
+      - name: Independently pinned externally governed release dossier and source-to-recovery evidence binding
+        run: npm run smoke:release-dossier
       - name: Recovery operator timing budget, archive integrity and no-go negative controls
         run: npm run smoke:recovery-measurement
       - name: Production data-path and offline backup smoke test
