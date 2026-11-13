@@ -66,7 +66,9 @@ export function assessRecovery({plan,observations,evidence,archive}){
     const value=o[events[i]];
     bounded(value,1,9_999_999_999_999,'timestamp '+events[i]);
     assert.ok(value>=windowStart&&value<=windowEnd,
-      'measurement outside bounded rehearsal window: '+events[i]);
+      'measurement outside bounded rehearsal window: '+events[i] +
+      ' startOffsetMs='+(value-windowStart)+' endOffsetMs='+(value-windowEnd) +
+      ' currentWindowMs='+(windowEnd-windowStart));
     if(i)assert.ok(value>=o[events[i-1]],
       'impossible time ordering in operator rehearsal');
   }
