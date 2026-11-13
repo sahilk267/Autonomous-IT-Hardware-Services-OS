@@ -1,0 +1,318 @@
+name: Apex OS verification
+on:
+  push:
+    branches: [main, 'fix/**']
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies (including native optional packages)
+        run: |
+          npm install --include=optional --no-audit --no-fund
+          if ! node -e "require('@rollup/rollup-linux-x64-gnu')" >/dev/null 2>&1; then
+            echo "Installing the missing Rollup binary matching the installed Rollup version"
+            npm install --no-save --include=optional --no-audit --no-fund "@rollup/rollup-linux-x64-gnu@$(node -p "require('./node_modules/rollup/package.json').version")"
+          fi
+      - name: Type check
+        run: npm run lint
+      - name: Production build
+        run: npm run build
+      - name: Isolated regression tests
+        run: npm test
+      - name: Deterministic sign-in rate limit unit tests
+        run: npm run test:auth
+      - name: Production-mode HTTP smoke test (throwaway DB)
+        run: npm run smoke
+      - name: Multi-role API access smoke test (throwaway DB)
+        run: npm run smoke:roles
+      - name: Every business API authentication and wrong-role matrix
+        run: npm run smoke:api-matrix
+      - name: Independently pinned Ed25519 reviewer chain and RPO/RTO no-go smoke
+        run: npm run smoke:review-signoff
+      - name: Exhaustive customer-scoped object denial and grant-revocation acceptance
+        run: npm run smoke:object-isolation
+      - name: All 18 previously excluded legacy/owner-only dynamic object routes and catalog integrity
+        run: npm run smoke:legacy-object
+      - name: Two-independent-issuer signed reviewer identity and custody negative controls
+        run: npm run smoke:identity-custody
+      - name: Independent operator/witness signed offline recovery handoff negative controls
+        run: npm run smoke:governed-handoff
+      - name: Independently pinned externally governed release dossier and source-to-recovery evidence binding
+        run: npm run smoke:release-dossier
+      - name: Recovery operator timing budget, archive integrity and no-go negative controls
+        run: npm run smoke:recovery-measurement
+      - name: Production data-path and offline backup smoke test
+        run: npm run smoke:data
+      - name: Customer migration preflight (read-only, isolated fixtures)
+        run: npm run smoke:preflight
+  browser:
+    # Ubuntu 26.04 apt DNS instability blocked --with-deps; keep browser OS stable.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Node.js 22 for current Chromium
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies
+        run: |
+          npm install --include=optional --no-audit --no-fund
+          if ! node -e "require('@rollup/rollup-linux-x64-gnu')" >/dev/null 2>&1; then
+            npm install --no-save --include=optional --no-audit --no-fund "@rollup/rollup-linux-x64-gnu@$(node -p "require('./node_modules/rollup/package.json').version")"
+          fi
+      - name: Build production application
+        run: npm run build
+      - name: Install Chromium browser without system apt mirror dependency
+        run: npx playwright install chromium
+      - name: Real browser login and cross-customer isolation (throwaway DB)
+        run: npm run smoke:browser
+
+  postgres-staging:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: phase10_local_ci_only
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGUSER: postgres
+      PGPASSWORD: phase10_local_ci_only
+      PGDATABASE: apex_stage_ci
+      APEX_PG_STAGING_ACK: STAGING_ONLY_NO_PRODUCTION
+    steps:
+      - uses: actions/checkout@v4
+      - name: Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install Node and PostgreSQL client dependencies
+        run: |
+          npm install --include=optional --no-audit --no-fund
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql-client
+          fi
+      - name: Create empty throwaway staging database
+        run: psql -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE apex_stage_ci'
+      - name: Install forced RLS + tenant/customer FK schema
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/001_staging_rls.sql
+      - name: Build compiled JSON HTTP routes for isolated shadow comparison
+        run: npm run build
+      - name: Real PostgreSQL isolation and transactional import tests
+        run: npm run smoke:postgres
+      - name: Install authenticated staged-write RLS, trigger audit, and local pilot login
+        run: |
+          psql -v ON_ERROR_STOP=1 -f migrations/postgres/002_staging_authenticated_pilot.sql
+          psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE ROLE apex_pilot_login LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD 'pilot_only_local_ci_password'"
+          psql -d postgres -v ON_ERROR_STOP=1 -c "GRANT apex_pilot_writer TO apex_pilot_login"
+      - name: Install signed per-transaction actor context and project/ticket SQL policies
+        run: |
+          set -euo pipefail
+          psql -v ON_ERROR_STOP=1 -f migrations/postgres/003_staging_signed_context_domains.sql
+          key="$(openssl rand -hex 32)"
+          echo "::add-mask::$key"
+          echo "APEX_PG_PILOT_CONTEXT_KEY=$key" >> "$GITHUB_ENV"
+          psql -v ON_ERROR_STOP=1 -c "INSERT INTO apex.pilot_context_secrets(key_id,secret) VALUES('active',decode('$key','hex'))"
+      - name: Install asset and field-job custody authorization policies
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/004_staging_assets_field_jobs.sql
+      - name: Install unissued procurement, finance, proposal and RMA staging policies
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/005_staging_commerce_finance_drafts.sql
+      - name: Install immutable request deduplication ledger and forced RLS
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/006_staging_idempotent_drafts.sql
+      - name: Install normalized work-order and append-only transition schema
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/007_staging_normalized_service_orders.sql
+      - name: Install immutable internal service outbox with zero delivery capability
+        run: psql -v ON_ERROR_STOP=1 -f migrations/postgres/008_staging_shadow_outbox.sql
+      - name: Authenticated SQL-backed staging CRUD and audit HTTP checks
+        env:
+          APEX_PG_PILOT_HOST: 127.0.0.1
+          APEX_PG_PILOT_DB: apex_stage_ci
+          APEX_PG_PILOT_USER: apex_pilot_login
+          APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
+          APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
+        run: |
+          npm run build
+          npm run smoke:pg:pilot
+      - name: Real two-process optimistic concurrency and SQL audit checks
+        env:
+          APEX_PG_PILOT_HOST: 127.0.0.1
+          APEX_PG_PILOT_DB: apex_stage_ci
+          APEX_PG_PILOT_USER: apex_pilot_login
+          APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
+          APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
+        run: npm run smoke:pg:multi-instance
+      - name: Independent two-tenant CRM read-through RLS and drift acceptance
+        env:
+          APEX_PG_PILOT_HOST: 127.0.0.1
+          APEX_PG_PILOT_DB: apex_stage_ci
+          APEX_PG_PILOT_USER: apex_pilot_login
+          APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
+          APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
+        run: npm run smoke:pg:crm-tenants
+      - name: Independent signed two-tenant six-domain authorization matrix
+        env:
+          APEX_PG_PILOT_HOST: 127.0.0.1
+          APEX_PG_PILOT_DB: apex_stage_ci
+          APEX_PG_PILOT_USER: apex_pilot_login
+          APEX_PG_PILOT_PASSWORD: pilot_only_local_ci_password
+          APEX_PG_PILOT_ACK: LOCAL_STAGING_ONLY_NO_CUTOVER
+        run: npm run smoke:pg:tenant-matrix
+      - name: Auditable read-only outbox delivery-denial design preflight
+        run: npm run smoke:pg:outbox-plan
+      - name: Fail-closed PostgreSQL production cutover readiness assessment
+        run: npm run smoke:pg:cutover
+      - name: Measured disposable PostgreSQL clone restoration, corruption detection and budget acceptance
+        run: |
+          set -euo pipefail
+          # Restrict the original archive, signed-like plan and evidence to the CI runner.
+          umask 077
+          export PGRESTORE_DATABASE=apex_stage_restored
+          psql -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE apex_stage_restored'
+          dump="$RUNNER_TEMP/apex-phase10-throwaway.dump"
+          trap 'rm -f "$dump"' EXIT
+          export PHASE_H_ARCHIVE_FILE="$dump"
+          export PHASE_H_PLAN="$RUNNER_TEMP/phase10h-operator-plan.json"
+          export PHASE_H_EVIDENCE="$RUNNER_TEMP/phase10h-original-evidence.json"
+          export PHASE_H_EVIDENCE_AFTER="$RUNNER_TEMP/phase10h-recovered-evidence.json"
+          export PHASE_H_OBSERVATIONS="$RUNNER_TEMP/phase10h-timestamps.json"
+          # There are no live customer processes writing to this disposable stage.
+          # This timestamp is only a synthetic no-write boundary, NOT real RPO.
+          phase_mono_ms() { awk '{printf "%.0f", $1 * 1000}' /proc/uptime; }
+          export PHASE_H_FREEZE_MS="$(date +%s%3N)"
+          export PHASE_H_FREEZE_MONO_MS="$(phase_mono_ms)"
+          export PHASE_H_SESSION="synthetic_ci_operator_$(date +%s%3N)"
+          postgres_container="$(docker ps --filter 'ancestor=postgres:16-alpine' -q | head -n 1)"
+          test -n "$postgres_container"
+          export PHASE_H_ARCHIVE_BEGAN_MS="$(date +%s%3N)"
+          export PHASE_H_MONO_ARCHIVE_BEGAN_MS="$(phase_mono_ms)"
+          docker exec "$postgres_container" pg_dump -U postgres -Fc --no-owner -d apex_stage_ci > "$dump"
+          export PHASE_H_ARCHIVE_FINISHED_MS="$(date +%s%3N)"
+          export PHASE_H_MONO_ARCHIVE_FINISHED_MS="$(phase_mono_ms)"
+          export PHASE_H_FIRST_RESTORE_BEGAN_MS="$(date +%s%3N)"
+          export PHASE_H_MONO_FIRST_RESTORE_BEGAN_MS="$(phase_mono_ms)"
+          docker exec -i "$postgres_container" pg_restore -U postgres --no-owner --exit-on-error \
+            -d "$PGRESTORE_DATABASE" < "$dump"
+          npm run smoke:pg:restore
+          export APEX_PG_REHEARSAL_ACK=DISPOSABLE_RESTORED_COPY_ONLY
+          node scripts/postgres/rehearsal_evidence.mjs > "$PHASE_H_EVIDENCE"
+          export PHASE_H_FIRST_RESTORE_VERIFIED_MS="$(date +%s%3N)"
+          export PHASE_H_MONO_FIRST_RESTORE_VERIFIED_MS="$(phase_mono_ms)"
+          export PHASE_H_SOURCE_SHA="$(psql -At -v ON_ERROR_STOP=1 -c 'SELECT sha256 FROM apex.staging_imports')"
+          export PHASE_H_ARCHIVE_SHA="$(sha256sum "$dump" | cut -d' ' -f1)"
+          export PHASE_H_EVIDENCE_SHA="$(sha256sum "$PHASE_H_EVIDENCE" | cut -d' ' -f1)"
+          # Stage a declared synthetic operator plan BEFORE the damage/rollback.
+          # These CI targets are not human-approved production RPO/RTO figures.
+          node <<'NODE'
+          const fs=require('fs'),e=process.env,start=Number(e.PHASE_H_FREEZE_MS);
+          fs.writeFileSync(e.PHASE_H_PLAN,JSON.stringify({
+            scope:'DISPOSABLE_PG16_RECOVERY_REHEARSAL',
+            operatorSession:e.PHASE_H_SESSION,
+            sourceSha256:e.PHASE_H_SOURCE_SHA,
+            archiveSha256:e.PHASE_H_ARCHIVE_SHA,
+            evidenceSha256:e.PHASE_H_EVIDENCE_SHA,
+            rpoMinutes:10,rtoMinutes:5,maximumDowntimeMinutes:10,
+            windowStart:new Date(start).toISOString(),
+            windowEnd:new Date(start+600000).toISOString(),
+            writeFreezeRequired:true,freezeMonotonicMs:Number(e.PHASE_H_FREEZE_MONO_MS),
+            approvalClassification:'SYNTHETIC_CI_OPERATOR_NO_EXTERNAL_APPROVAL'
+          }),{mode:0o600});
+          NODE
+          # Damage ONLY the restored, throwaway clone. Integrity drift must fail.
+          psql -d "$PGRESTORE_DATABASE" -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO apex.tenants(tenant_id,display_name) VALUES ('phase105h_recovery_probe','Disposable rollback drill')"
+          set +e
+          npm run assess:pg:rehearsal
+          tamper_status=$?
+          set -e
+          export PHASE_H_DAMAGE_DETECTED_MS="$(date +%s%3N)"
+          export PHASE_H_MONO_DAMAGE_DETECTED_MS="$(phase_mono_ms)"
+          test "$tamper_status" -eq 1 || { echo 'Clone corruption went undetected'; exit 1; }
+          # The original stage and immutable archive are never damaged or changed.
+          export PHASE_H_ROLLBACK_BEGAN_MS="$(date +%s%3N)"
+          export PHASE_H_MONO_ROLLBACK_BEGAN_MS="$(phase_mono_ms)"
+          psql -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE $PGRESTORE_DATABASE WITH (FORCE)"
+          psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE $PGRESTORE_DATABASE"
+          test "$(sha256sum "$dump" | cut -d' ' -f1)" = "$PHASE_H_ARCHIVE_SHA"
+          docker exec -i "$postgres_container" pg_restore -U postgres --no-owner --exit-on-error \
+            -d "$PGRESTORE_DATABASE" < "$dump"
+          export PHASE_H_ROLLBACK_RESTORED_MS="$(date +%s%3N)"
+          export PHASE_H_MONO_ROLLBACK_RESTORED_MS="$(phase_mono_ms)"
+          npm run assess:pg:rehearsal
+          npm run smoke:pg:restore
+          node scripts/postgres/rehearsal_evidence.mjs > "$PHASE_H_EVIDENCE_AFTER"
+          cmp "$PHASE_H_EVIDENCE" "$PHASE_H_EVIDENCE_AFTER"
+          export PHASE_H_ROLLBACK_VERIFIED_MS="$(date +%s%3N)"
+          export PHASE_H_MONO_ROLLBACK_VERIFIED_MS="$(phase_mono_ms)"
+          export PHASE_H_WRITES_ALLOWED_MS="$(date +%s%3N)"
+          export PHASE_H_MONO_WRITES_ALLOWED_MS="$(phase_mono_ms)"
+          # Observe both wall-clock UTC and Linux monotonic /proc/uptime
+          # milestones; judge elapsed recovery budgets using monotonic time.
+          node <<'NODE'
+          const fs=require('fs'),e=process.env,ms=s=>Number(e['PHASE_H_'+s]),
+                mono=s=>Number(e['PHASE_H_MONO_'+s]);
+          fs.writeFileSync(e.PHASE_H_OBSERVATIONS,JSON.stringify({
+            operatorSession:e.PHASE_H_SESSION,sourceSha256:e.PHASE_H_SOURCE_SHA,
+            archiveSha256:e.PHASE_H_ARCHIVE_SHA,
+            evidenceSha256:e.PHASE_H_EVIDENCE_SHA,
+            archiveSizeBytes:fs.statSync(e.PHASE_H_ARCHIVE_FILE).size,
+            clock:'CI_RUNNER_WALL_AND_MONOTONIC_MILLISECONDS',writeFrozen:true,
+            archiveBeganMs:ms('ARCHIVE_BEGAN_MS'),
+            archiveFinishedMs:ms('ARCHIVE_FINISHED_MS'),
+            initialRestoreBeganMs:ms('FIRST_RESTORE_BEGAN_MS'),
+            initialRestoreVerifiedMs:ms('FIRST_RESTORE_VERIFIED_MS'),
+            damageDetectedMs:ms('DAMAGE_DETECTED_MS'),
+            rollbackBeganMs:ms('ROLLBACK_BEGAN_MS'),
+            rollbackRestoredMs:ms('ROLLBACK_RESTORED_MS'),
+            rollbackVerifiedMs:ms('ROLLBACK_VERIFIED_MS'),
+            writesAllowedMs:ms('WRITES_ALLOWED_MS'),
+            monotonicEventMs:{
+              archiveBeganMs:mono('ARCHIVE_BEGAN_MS'),
+              archiveFinishedMs:mono('ARCHIVE_FINISHED_MS'),
+              initialRestoreBeganMs:mono('FIRST_RESTORE_BEGAN_MS'),
+              initialRestoreVerifiedMs:mono('FIRST_RESTORE_VERIFIED_MS'),
+              damageDetectedMs:mono('DAMAGE_DETECTED_MS'),
+              rollbackBeganMs:mono('ROLLBACK_BEGAN_MS'),
+              rollbackRestoredMs:mono('ROLLBACK_RESTORED_MS'),
+              rollbackVerifiedMs:mono('ROLLBACK_VERIFIED_MS'),
+              writesAllowedMs:mono('WRITES_ALLOWED_MS')
+            }
+          }),{mode:0o600});
+          NODE
+          export APEX_PG_MEASURED_REHEARSAL_ACK=DISPOSABLE_CI_CLONE_ONLY
+          set +e
+          npm run assess:pg:measured-recovery -- \
+            --plan "$PHASE_H_PLAN" \
+            --observations "$PHASE_H_OBSERVATIONS" \
+            --evidence "$PHASE_H_EVIDENCE" \
+            --archive "$dump"
+          measured_status=$?
+          set -e
+          # Successful synthetic budget acceptance is STILL explicitly BLOCKED (3).
+          test "$measured_status" -eq 3 || { echo "Measured recovery gate failed: $measured_status"; exit 1; }
+          rm -f "$PHASE_H_PLAN" "$PHASE_H_EVIDENCE" "$PHASE_H_EVIDENCE_AFTER" "$PHASE_H_OBSERVATIONS"

@@ -29,27 +29,45 @@ import {
   FolderGit2,
   X
 } from 'lucide-react';
-import { Project, Proposal, ProviderProfile, ProjectMilestone, CRMOpportunity, MarketplaceDispute } from '../types';
+import { Project, Proposal, ProviderProfile, ProjectMilestone, CRMOpportunity, MarketplaceDispute, CustomerAccount } from '../types';
 
 interface ProjectMarketplaceProps {
+  customers: CustomerAccount[];
   projects: Project[];
   proposals: Proposal[];
   providers: ProviderProfile[];
+  crmOpportunities: CRMOpportunity[];
+  marketplaceDisputes: MarketplaceDispute[];
+  onCreateCRM: (opp: Partial<CRMOpportunity>) => Promise<CRMOpportunity | null>;
+  onAdvanceCRM: (id: string, stage: CRMOpportunity['stage']) => Promise<CRMOpportunity | null>;
+  onCreateDispute: (claim: { projectId: string; reason: string; customerClaim: string; disputedAmount: number }) => Promise<MarketplaceDispute | null>;
+  onRecordDisputeDecision: (id: string, decision: NonNullable<MarketplaceDispute['resolutionDecision']>) => Promise<MarketplaceDispute | null>;
   onReleaseMilestone: (projectId: string, milestoneId: string) => void;
   onAcceptProposal: (projectId: string, proposalId: string) => void;
   onCreateProject: (newProject: Partial<Project>) => void;
+  canManageProjectAccess: boolean;
+  onSetProjectAccess: (projectId: string, userId: string, grant: boolean) => Promise<boolean>;
   onRequestDiagnosticBooking: (diagnosisSummary: string, estimatedCost: number) => void;
-  onAddProposal?: (proposal: Proposal) => void;
+  onAddProposal?: (proposal: Partial<Proposal>) => void;
   isCleanSlate?: boolean;
 }
 
 export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
+  customers,
   projects,
   proposals,
   providers,
+  crmOpportunities,
+  marketplaceDisputes,
+  onCreateCRM,
+  onAdvanceCRM,
+  onCreateDispute,
+  onRecordDisputeDecision,
   onReleaseMilestone,
   onAcceptProposal,
   onCreateProject,
+  canManageProjectAccess,
+  onSetProjectAccess,
   onRequestDiagnosticBooking,
   onAddProposal
 }) => {
@@ -57,17 +75,43 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
 
+  const [staffOptions, setStaffOptions] = useState<{ id: string; name: string; username: string; role: string; disabledAt?: string }[]>([]);
+  const [chosenStaffId, setChosenStaffId] = useState('');
+  const [accessBusy, setAccessBusy] = useState(false);
+  useEffect(() => {
+    if (!canManageProjectAccess) { setStaffOptions([]); return; }
+    let alive = true;
+    fetch('/api/admin/staff').then(r => r.ok ? r.json() : null).then(payload => {
+      if (alive) setStaffOptions(Array.isArray(payload?.data)
+        ? payload.data.filter((user: any) => ['SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'PROCUREMENT_LEAD'].includes(user.role))
+        : []);
+    }).catch(() => { if (alive) setStaffOptions([]); });
+    return () => { alive = false; };
+  }, [canManageProjectAccess]);
+
+  const editProjectAccess = async (projectId: string, userId: string, grant: boolean) => {
+    setAccessBusy(true);
+    try {
+      if (await onSetProjectAccess(projectId, userId, grant)) setChosenStaffId('');
+    } finally { setAccessBusy(false); }
+  };
+
+
+
   // CRM Pipeline State - starts empty
-  const [crmOpportunities, setCrmOpportunities] = useState<CRMOpportunity[]>([]);
   const [showNewOppModal, setShowNewOppModal] = useState(false);
-  const [newOppClient, setNewOppClient] = useState('');
+  const [newOppCustomerId, setNewOppCustomerId] = useState('');
   const [newOppTitle, setNewOppTitle] = useState('');
   const [newOppValue, setNewOppValue] = useState(0);
   const [newOppProvider, setNewOppProvider] = useState('');
 
   // Dispute State - starts empty
-  const [marketplaceDisputes, setMarketplaceDisputes] = useState<MarketplaceDispute[]>([]);
   const [selectedDisputeId, setSelectedDisputeId] = useState<string>('');
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [disputeProjectId, setDisputeProjectId] = useState('');
+  const [disputeReason, setDisputeReason] = useState('');
+  const [disputeClaim, setDisputeClaim] = useState('');
+  const [disputeAmount, setDisputeAmount] = useState('');
   const [arbitrationResolutionNote, setArbitrationResolutionNote] = useState('');
   const [mpNotice, setMpNotice] = useState<string | null>(null);
 
@@ -156,10 +200,13 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
   // New Project Modal State
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
-  const [newClient, setNewClient] = useState('');
-  const [newBudget, setNewBudget] = useState('500000');
+  const [newCustomerId, setNewCustomerId] = useState('');
+  const [newBudget, setNewBudget] = useState('');
   const [newCategory, setNewCategory] = useState<Project['category']>('Cloud Migration');
   const [newScope, setNewScope] = useState('');
+  const [newMilestoneTitle, setNewMilestoneTitle] = useState('');
+  const [newMilestoneAmount, setNewMilestoneAmount] = useState('');
+  const [newMilestoneDueDate, setNewMilestoneDueDate] = useState('');
 
   // Submit Proposal Modal State
   const [showAddProposalModal, setShowAddProposalModal] = useState(false);
@@ -220,63 +267,66 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
   const handleCreateProjectSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTitle.trim() || !newClient.trim()) {
-      setMpNotice('Project title and client organization name are required.');
+    const customer = customers.find(c => c.id === newCustomerId);
+    if (!newTitle.trim() || !customer) {
+      setMpNotice('Project title and registered customer are required.');
       return;
     }
 
-    const budgetNum = parseInt(newBudget, 10) || 0;
+    const budgetNum = newBudget.trim() ? Number(newBudget) : 0;
+    if (!Number.isFinite(budgetNum) || budgetNum < 0) {
+      setMpNotice('Enter a valid non-negative project budget.');
+      return;
+    }
+    const hasMilestoneInput = Boolean(newMilestoneTitle.trim() || newMilestoneAmount || newMilestoneDueDate);
+    const milestoneAmount = Number(newMilestoneAmount);
+    if (hasMilestoneInput && (!newMilestoneTitle.trim() || !newMilestoneDueDate ||
+        !Number.isFinite(milestoneAmount) || milestoneAmount <= 0 || milestoneAmount > budgetNum)) {
+      setMpNotice('Optional milestone requires a title, actual due date and positive amount within budget.');
+      return;
+    }
     const newProj: Partial<Project> = {
-      projectCode: `PRJ-2026-${Math.floor(100 + Math.random() * 900)}`,
+      customerId: customer.id,
       title: newTitle.trim(),
-      clientName: newClient.trim(),
-      clientLocation: 'On-site / Multi-facility',
+      clientName: customer.name,
+      clientLocation: '',
       budget: budgetNum,
       category: newCategory,
-      scopeDescription: newScope.trim() || 'Enterprise IT deployment and acceptance verification.',
-      deliverables: ['Design Document', 'Implementation', 'Final UAT Sign-off'],
-      skillsRequired: ['Enterprise Architecture', 'SLA Adherence'],
-      status: 'PROPOSALS_OPEN',
-      proposalsCount: 0,
-      milestones: [
-        { id: `m-${Date.now()}-1`, title: 'Milestone 1: Kickoff & Staging', amount: Math.round(budgetNum * 0.3), status: 'PENDING_FUNDING', dueDate: '2026-09-20' },
-        { id: `m-${Date.now()}-2`, title: 'Milestone 2: Execution & Handover', amount: Math.round(budgetNum * 0.7), status: 'PENDING_FUNDING', dueDate: '2026-10-10' }
-      ]
+      scopeDescription: newScope.trim(),
+      deliverables: [],
+      skillsRequired: [],
+      // No fabricated dates, payment holds, statuses or author-supplied identifiers.
+      milestones: hasMilestoneInput ? [{
+        title: newMilestoneTitle.trim(), amount: milestoneAmount, dueDate: newMilestoneDueDate
+      } as ProjectMilestone] : []
     };
 
     onCreateProject(newProj);
     setShowNewProjectModal(false);
     setNewTitle('');
+    setNewCustomerId('');
     setNewScope('');
+    setNewMilestoneTitle('');
+    setNewMilestoneAmount('');
+    setNewMilestoneDueDate('');
   };
 
   const handleAddProposalSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedProjectId || !propBidProvider.trim()) return;
-
-    const bidAmt = parseInt(propBidAmount, 10) || 150000;
-    const newProp: Proposal = {
-      id: `prop-${Date.now()}`,
-      projectId: selectedProjectId,
-      providerName: propBidProvider.trim(),
-      providerRating: 4.9,
-      providerVerified: true,
-      commercialBid: bidAmt,
-      timelineDays: parseInt(propBidDays, 10) || 14,
-      matchScore: 95,
-      matchExplanation: 'Vendor is ISO/IEC 27001 certified with verified enterprise deployment track record.',
-      technicalApproach: propBidApproach.trim() || 'Structured phased deployment with strict rollback procedures.',
-      oemCertifications: ['Cisco CCNA/CCNP', 'Microsoft Gold Partner', 'Fortinet NSE 4'],
-      status: 'SUBMITTED'
-    };
-
-    if (onAddProposal) {
-      onAddProposal(newProp);
+    const amount = Number(propBidAmount), days = Number(propBidDays);
+    if (!selectedProjectId || !propBidProvider.trim() || !propBidAmount.trim() || !propBidDays.trim() ||
+        !Number.isFinite(amount) || amount <= 0 || !Number.isSafeInteger(days) || days < 1) {
+      setMpNotice('Enter a real provider name, positive commercial bid and explicit turnaround days.');
+      return;
     }
+    // No fabricated ratings, identities, credentials, certification or matching scores.
+    const proposal: Partial<Proposal> = {
+      projectId: selectedProjectId, providerName: propBidProvider.trim(),
+      commercialBid: amount, timelineDays: days, technicalApproach: propBidApproach.trim()
+    };
+    if (onAddProposal) onAddProposal(proposal);
     setShowAddProposalModal(false);
-    setPropBidProvider('');
-    setPropBidAmount('');
-    setPropBidApproach('');
+    setPropBidProvider(''); setPropBidAmount(''); setPropBidDays(''); setPropBidApproach('');
   };
 
   return (
@@ -290,7 +340,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
             Enterprise IT Project Marketplace & AI Matching
           </h1>
           <p className="text-sm text-slate-400">
-            Upwork-grade project bidding, milestone escrow holds, multi-dimensional AI provider scoring, and AI diagnostic wizard.
+            Project proposals, internal milestone progress, provider information and AI diagnostic assistance. No escrow, payout or provider certification is automated.
           </p>
         </div>
 
@@ -501,6 +551,38 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                     </div>
                   </div>
 
+                  
+                  {canManageProjectAccess && (
+                    <div className="border border-slate-700 rounded-lg bg-slate-950 p-3 space-y-2 text-xs">
+                      <h3 className="text-white font-bold">Internal Staff Project Access</h3>
+                      <p className="text-slate-400">Only local staff IDs are granted. No customer or external provider accounts are created.</p>
+                      <div className="flex gap-2">
+                        <select aria-label="Choose internal project collaborator" value={chosenStaffId}
+                          onChange={e => setChosenStaffId(e.target.value)}
+                          className="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-white">
+                          <option value="">Select staff</option>
+                          {staffOptions.filter(user => !user.disabledAt && user.id !== selectedProject.createdByUserId &&
+                            !(selectedProject.collaboratorUserIds || []).includes(user.id)).map(user => (
+                              <option key={user.id} value={user.id}>{user.name} ({user.role})</option>
+                          ))}
+                        </select>
+                        <button type="button" disabled={!chosenStaffId || accessBusy}
+                          onClick={() => void editProjectAccess(selectedProject.id, chosenStaffId, true)}
+                          className="bg-indigo-700 rounded text-white px-3 disabled:opacity-50">Grant</button>
+                      </div>
+                      {(selectedProject.collaboratorUserIds || []).map(userId => (
+                        <div key={userId} className="flex justify-between gap-3 border-t border-slate-800 pt-2">
+                          <span className="text-slate-300">
+                            {staffOptions.find(u => u.id === userId)?.name || userId}
+                          </span>
+                          <button type="button" disabled={accessBusy}
+                            onClick={() => void editProjectAccess(selectedProject.id, userId, false)}
+                            className="text-rose-300 underline disabled:opacity-50">Revoke</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Scope & Deliverables */}
                   <div className="space-y-3">
                     <h3 className="text-xs font-mono uppercase text-slate-400 font-bold">Scope of Work</h3>
@@ -534,14 +616,14 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                     </div>
                   </div>
 
-                  {/* Milestone Escrow Payment Schedule */}
+                  {/* Internal milestones: no escrow or payment-provider control */}
                   <div className="space-y-3 pt-2">
                     <div className="flex justify-between items-center">
                       <h3 className="text-xs font-mono uppercase text-slate-400 font-bold">
-                        Milestone Escrow Payment Schedule (Compliant Regulated Flow)
+                        Internal Work Milestones (No Escrow or Payment Processing)
                       </h3>
                       <span className="text-xs font-mono text-slate-400">
-                        {selectedProject.milestones.filter(m => m.status === 'RELEASED').length}/{selectedProject.milestones.length} Completed
+                        {selectedProject.milestones.filter(m => m.status === 'COMPLETED').length}/{selectedProject.milestones.length} Completed
                       </span>
                     </div>
 
@@ -574,14 +656,17 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                               ₹{m.amount.toLocaleString('en-IN')}
                             </span>
 
-                            {m.status === 'ESCROW_HELD' && (
+                            {(m.status === 'PENDING_FUNDING' || m.status === 'IN_PROGRESS') && (
                               <button
                                 onClick={() => onReleaseMilestone(selectedProject.id, m.id)}
                                 className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs cursor-pointer transition flex items-center gap-1 shadow"
                               >
-                                <Unlock className="w-3.5 h-3.5" />
-                                Release Payout
+                                <Check className="w-3.5 h-3.5" />
+                                {m.status === 'PENDING_FUNDING' ? 'Start Work' : 'Mark Work Complete'}
                               </button>
+                            )}
+                            {(m.status === 'ESCROW_HELD' || m.status === 'RELEASED') && (
+                              <span className="text-amber-300 text-[10px]">Legacy payment state: unverified</span>
                             )}
                           </div>
                         </div>
@@ -623,9 +708,8 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                                   {prop.providerVerified && (
                                     <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
                                   )}
-                                  <span className="flex items-center gap-1 text-amber-400 text-xs font-mono">
-                                    <Star className="w-3.5 h-3.5 fill-amber-400" />
-                                    {prop.providerRating}
+                                  <span className="text-[11px] text-amber-300">
+                                    {prop.providerVerified && prop.providerRating > 0 ? `Rating: ${prop.providerRating}` : 'Provider not independently verified'}
                                   </span>
                                 </div>
                                 <div className="text-[11px] text-slate-400 mt-0.5">
@@ -638,7 +722,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                                   ₹{prop.commercialBid.toLocaleString('en-IN')}
                                 </span>
                                 <span className="px-2 py-0.5 rounded-full bg-indigo-950 border border-indigo-700 text-indigo-300 font-mono text-[10px] font-bold">
-                                  {prop.matchScore}% Match Index
+                                  Match not independently verified
                                 </span>
                               </div>
                             </div>
@@ -647,25 +731,21 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                             <div className="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800/80 text-xs space-y-1">
                               <span className="text-[10px] font-mono text-amber-400 font-bold uppercase flex items-center gap-1">
                                 <Sparkles className="w-3 h-3" />
-                                AI Assessment:
+                                Provider Verification:
                               </span>
                               <p className="text-slate-300 text-[11px] leading-relaxed">
-                                {prop.matchExplanation}
+                                Provider ratings, OEM credentials and AI matching are not independently verified in this system.
                               </p>
                             </div>
 
                             {/* Technical Approach & Certifications */}
                             <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 pt-2 border-t border-slate-800 text-xs">
-                              <div className="flex flex-wrap gap-1">
-                                {prop.oemCertifications.map((c, i) => (
-                                  <span key={i} className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-slate-400 font-mono text-[10px]">
-                                    {c}
-                                  </span>
-                                ))}
+                              <div className="text-amber-300 text-[11px]">
+                                OEM certifications are not verified. Submitted technical approach is self-reported.
                               </div>
 
                               <div className="flex items-center gap-2">
-                                {prop.status !== 'ACCEPTED' && (
+                                {prop.status === 'SUBMITTED' && selectedProject.status === 'PROPOSALS_OPEN' && (
                                   <button
                                     onClick={() => onAcceptProposal(selectedProject.id, prop.id)}
                                     className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer transition shadow"
@@ -681,7 +761,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                       </div>
                     ) : (
                       <div className="p-6 bg-slate-950 rounded-xl border border-slate-800 text-center text-xs text-slate-500 space-y-3">
-                        <p>No proposals received for this project yet. External providers are being notified automatically.</p>
+                        <p>No proposals recorded. No external supplier or service provider has been notified automatically.</p>
                         <button
                           onClick={() => setShowAddProposalModal(true)}
                           className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer inline-flex items-center gap-1.5 shadow transition"
@@ -702,7 +782,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                   <div>
                     <h3 className="text-base font-bold text-white">No Enterprise Project Selected</h3>
                     <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-                      Post an enterprise deployment project or select an active contract to review RFP proposals, milestone deliverables, and escrow releases.
+                      Create a real project or review recorded proposals and work milestones. Payments and escrow are not integrated.
                     </p>
                   </div>
                   <button
@@ -1140,7 +1220,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
                         {opp.stage !== 'WON' && (
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               const nextStageMap: Record<CRMOpportunity['stage'], CRMOpportunity['stage']> = {
                                 LEAD: 'QUALIFIED',
                                 QUALIFIED: 'TECHNICAL_SCOPING',
@@ -1149,7 +1229,13 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                                 NEGOTIATION: 'WON',
                                 WON: 'WON'
                               };
-                              setCrmOpportunities(prev => prev.map(o => o.id === opp.id ? { ...o, stage: nextStageMap[o.stage] } : o));
+                              const nextStage = nextStageMap[opp.stage];
+                              if (!nextStage) {
+                                setMpNotice('This legacy CRM stage cannot be advanced automatically.');
+                                return;
+                              }
+                              const saved = await onAdvanceCRM(opp.id, nextStage);
+                              if (saved) setMpNotice(`CRM ${saved.title} moved to ${saved.stage} and persisted.`);
                             }}
                             className="w-full py-1 rounded bg-slate-900 hover:bg-slate-800 text-[10px] text-indigo-300 font-semibold border border-slate-800 transition cursor-pointer"
                           >
@@ -1192,14 +1278,13 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Client Company</label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Reliance Retail Logistics"
-                      value={newOppClient}
-                      onChange={e => setNewOppClient(e.target.value)}
-                      className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white"
-                    />
+                    <label className="block text-slate-300 font-semibold mb-1">Registered Customer</label>
+                    <select aria-label="CRM customer" required value={newOppCustomerId}
+                      onChange={e => setNewOppCustomerId(e.target.value)}
+                      className="w-full p-2 bg-slate-950 border border-slate-800 rounded-lg text-white">
+                      <option value="">Select customer</option>
+                      {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    </select>
                   </div>
 
                   <div>
@@ -1221,29 +1306,23 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
-                      if (!newOppTitle || !newOppClient) {
-                        setMpNotice("Please fill in the deal title and client name.");
+                    onClick={async () => {
+                      if (!newOppTitle.trim() || !newOppCustomerId || !Number.isFinite(newOppValue) || newOppValue < 0) {
+                        setMpNotice('Enter the real client, deal title and valid amount.');
                         return;
                       }
-                      const newOpp: CRMOpportunity = {
-                        id: `crm-${Date.now()}`,
-                        clientName: newOppClient,
-                        contactPerson: 'Lead Coordinator',
-                        title: newOppTitle,
-                        stage: 'LEAD',
-                        value: newOppValue,
-                        winProbability: 30,
-                        expectedCloseDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                        assignedEngineer: 'Pre-Sales Solutions Specialist',
-                        category: 'Enterprise Infrastructure'
-                      };
-                      setCrmOpportunities([newOpp, ...crmOpportunities]);
+                      const saved = await onCreateCRM({
+                        customerId: newOppCustomerId, clientName: customers.find(c => c.id === newOppCustomerId)?.name || '', title: newOppTitle.trim(), value: newOppValue
+                      });
+                      if (!saved) {
+                        setMpNotice('CRM opportunity not saved. Please review server validation.');
+                        return;
+                      }
                       setShowNewOppModal(false);
                       setNewOppTitle('');
-                      setNewOppClient('');
+                      setNewOppCustomerId('');
                       setNewOppValue(0);
-                      setMpNotice(`CRM Opportunity "${newOpp.title}" created.`);
+                      setMpNotice(`CRM Opportunity "${saved.title}" saved to the server.`);
                     }}
                     className="px-4 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold cursor-pointer shadow"
                   >
@@ -1266,7 +1345,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                 Marketplace Escrow Dispute & Arbitration Center
               </h3>
               <p className="text-xs text-slate-400">
-                Impartial tripartite dispute adjudication. Holds milestone escrow in cryptographic custody while reviewing telemetry, benchmark reports, and client test logs.
+                Record project disputes and internal recommendations. This app does not hold escrow or process refunds.
               </p>
             </div>
 
@@ -1277,6 +1356,62 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
             </div>
           </div>
 
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              disabled={projects.length === 0}
+              onClick={() => { setDisputeProjectId(projects[0]?.id || ''); setShowDisputeModal(true); }}
+              className="px-3 py-2 rounded-lg bg-amber-700 text-white text-xs disabled:opacity-40"
+            >Record Project Dispute</button>
+            {projects.length === 0 && <span className="text-xs text-slate-500">Create a real project first</span>}
+          </div>
+          {showDisputeModal && (
+            <div className="fixed inset-0 z-50 bg-slate-950/90 flex items-center justify-center p-4">
+              <form
+                onSubmit={async e => {
+                  e.preventDefault();
+                  const amount = Number(disputeAmount);
+                  if (!disputeProjectId || !disputeReason.trim() || !disputeClaim.trim() ||
+                      !Number.isFinite(amount) || amount <= 0) {
+                    setMpNotice('Project, actual reason, customer statement and positive disputed amount required.');
+                    return;
+                  }
+                  const saved = await onCreateDispute({
+                    projectId: disputeProjectId, reason: disputeReason.trim(),
+                    customerClaim: disputeClaim.trim(), disputedAmount: amount
+                  });
+                  if (!saved) { setMpNotice('Dispute not recorded.'); return; }
+                  setSelectedDisputeId(saved.id);
+                  setShowDisputeModal(false);
+                  setDisputeReason(''); setDisputeClaim(''); setDisputeAmount('');
+                  setMpNotice(`Dispute ${saved.disputeNumber} recorded. No escrow funds held or moved.`);
+                }}
+                className="w-full max-w-lg bg-slate-900 border border-amber-900 rounded-xl p-6 space-y-4"
+              >
+                <h3 className="text-white font-bold">New Internal Dispute Record</h3>
+                <label className="block text-xs text-slate-300">Existing project</label>
+                <select required value={disputeProjectId} onChange={e => setDisputeProjectId(e.target.value)}
+                  className="w-full bg-slate-950 text-white p-2 border border-slate-700 rounded">
+                  {projects.map(project => <option key={project.id} value={project.id}>{project.projectCode} — {project.title}</option>)}
+                </select>
+                <label className="block text-xs text-slate-300">Reason</label>
+                <input required value={disputeReason} onChange={e => setDisputeReason(e.target.value)}
+                  className="w-full bg-slate-950 text-white p-2 border border-slate-700 rounded" />
+                <label className="block text-xs text-slate-300">Customer statement</label>
+                <textarea required value={disputeClaim} onChange={e => setDisputeClaim(e.target.value)}
+                  className="w-full bg-slate-950 text-white p-2 border border-slate-700 rounded" rows={3} />
+                <label className="block text-xs text-slate-300">Amount in dispute (₹), not escrow held</label>
+                <input type="number" min={0.01} step="0.01" required value={disputeAmount}
+                  onChange={e => setDisputeAmount(e.target.value)}
+                  className="w-full bg-slate-950 text-white p-2 border border-slate-700 rounded" />
+                <div className="flex gap-3 justify-end">
+                  <button type="button" onClick={() => setShowDisputeModal(false)} className="px-3 py-2 text-slate-300">Cancel</button>
+                  <button type="submit" className="px-3 py-2 bg-amber-700 text-white rounded">Save Dispute</button>
+                </div>
+              </form>
+            </div>
+          )}
+
           {/* Master-Detail Disputes */}
           {marketplaceDisputes.length === 0 ? (
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 space-y-4">
@@ -1286,7 +1421,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
               <div>
                 <h3 className="text-base font-bold text-white">No Active Escrow Disputes</h3>
                 <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-                  All enterprise project milestones and escrow releases are executing smoothly. No cases currently pending arbitration or mediation.
+                  No dispute records have been filed in this workspace. No escrow status is inferred.
                 </p>
               </div>
             </div>
@@ -1321,7 +1456,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
                     <h4 className="font-semibold text-xs text-white my-1">{dispute.projectTitle}</h4>
                     <p className="text-[11px] text-slate-400 font-mono">
-                      Escrow Held: <strong className="text-emerald-400">₹{dispute.escrowHeld.toLocaleString()}</strong>
+                      Disputed amount: <strong className="text-amber-400">₹{dispute.disputedAmount.toLocaleString()}</strong>
                     </p>
                     <div className="text-[10px] text-slate-500 mt-2 flex justify-between">
                       <span>Customer: {dispute.customerName}</span>
@@ -1357,9 +1492,9 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                       </div>
 
                       <div className="text-right">
-                        <span className="text-[10px] text-slate-500 uppercase font-mono block">Disputed Escrow Fund</span>
+                        <span className="text-[10px] text-slate-500 uppercase font-mono block">Disputed Amount (not held in escrow)</span>
                         <div className="text-2xl font-bold font-mono text-emerald-400">
-                          ₹{activeDispute.escrowHeld.toLocaleString()}
+                          ₹{activeDispute.disputedAmount.toLocaleString()}
                         </div>
                       </div>
                     </div>
@@ -1397,7 +1532,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                     <div className="p-4 rounded-xl bg-slate-950 border border-indigo-900/60 space-y-2">
                       <span className="text-xs font-bold text-indigo-300 uppercase font-mono flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                        AI Telemetry Forensic Mediation Verdict
+                        Mediation Notes (only if recorded)
                       </span>
                       <p className="text-xs text-slate-300 leading-relaxed">
                         {activeDispute.aiMediationVerdict}
@@ -1409,7 +1544,7 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                       <div className="p-4 rounded-xl bg-emerald-950/80 border border-emerald-700 text-emerald-200 text-xs space-y-1">
                         <div className="font-bold flex items-center gap-1.5 text-emerald-300">
                           <CheckCircle2 className="w-4 h-4" />
-                          <span>Arbitration Decision Rendered & Escrow Executed</span>
+                          <span>Historical dispute status (verify external payment records)</span>
                         </div>
                         <p className="text-emerald-400/90 text-[11px]">
                           <strong>Ruling Status:</strong> {activeDispute.status}
@@ -1418,47 +1553,38 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                     ) : (
                       <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3">
                         <span className="text-xs font-bold text-white uppercase font-mono block">
-                          Executive Arbitration Decision & Escrow Disposition:
+                          Record Internal Recommendation (no money movement):
                         </span>
                         
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
                           <button
-                            onClick={() => {
-                              setMarketplaceDisputes(prev => prev.map(d => d.id === activeDispute.id ? {
-                                ...d,
-                                status: 'RESOLVED_RELEASED'
-                              } : d));
-                              setMpNotice(`Arbitration Ruling executed: Full escrow released to ${activeDispute.providerName}.`);
+                            onClick={async () => {
+                              const saved = await onRecordDisputeDecision(activeDispute.id, 'RELEASE_RECOMMENDED');
+                              if (saved) setMpNotice('Provider release recommendation recorded; no funds transferred.');
                             }}
                             className="p-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition cursor-pointer text-center"
                           >
-                            Release Escrow to Provider
+                            Recommend Release (no payment)
                           </button>
 
                           <button
-                            onClick={() => {
-                              setMarketplaceDisputes(prev => prev.map(d => d.id === activeDispute.id ? {
-                                ...d,
-                                status: 'RESOLVED_REFUND'
-                              } : d));
-                              setMpNotice(`Arbitration Ruling executed: Full refund returned to ${activeDispute.customerName}.`);
+                            onClick={async () => {
+                              const saved = await onRecordDisputeDecision(activeDispute.id, 'REFUND_RECOMMENDED');
+                              if (saved) setMpNotice('Refund recommendation recorded; no money returned.');
                             }}
                             className="p-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs transition cursor-pointer text-center"
                           >
-                            Full Refund to Client
+                            Recommend Refund (no payment)
                           </button>
 
                           <button
-                            onClick={() => {
-                              setMarketplaceDisputes(prev => prev.map(d => d.id === activeDispute.id ? {
-                                ...d,
-                                status: 'RESOLVED_REWORK'
-                              } : d));
-                              setMpNotice(`Mandatory rework order issued to provider with escrow extension.`);
+                            onClick={async () => {
+                              const saved = await onRecordDisputeDecision(activeDispute.id, 'REWORK_RECOMMENDED');
+                              if (saved) setMpNotice('Rework recommendation recorded; provider not contacted.');
                             }}
                             className="p-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs transition cursor-pointer text-center"
                           >
-                            Mandate Provider Rework
+                            Recommend Provider Rework
                           </button>
                         </div>
                       </div>
@@ -1503,14 +1629,13 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-400 block mb-1 font-semibold">Client Company</label>
-                  <input
-                    type="text"
-                    value={newClient}
-                    onChange={(e) => setNewClient(e.target.value)}
-                    placeholder="e.g. Nexus FinTech Tower"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
-                  />
+                  <label className="text-slate-400 block mb-1 font-semibold">Registered Customer</label>
+                  <select aria-label="Project customer" required value={newCustomerId}
+                    onChange={e => setNewCustomerId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+                    <option value="">Select customer</option>
+                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
                 </div>
 
                 <div>
@@ -1548,6 +1673,22 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                   placeholder="Describe technical requirements, number of nodes, and required SLA."
                   className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-white"
                 />
+              </div>
+
+              <div className="border-t border-slate-700 pt-3 space-y-2">
+                <p className="text-amber-300 text-xs">Optional actual work milestone — no automatic financing or escrow</p>
+                <input aria-label="Milestone title" value={newMilestoneTitle}
+                  onChange={e => setNewMilestoneTitle(e.target.value)}
+                  placeholder="Milestone title (optional)"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input aria-label="Milestone amount" type="number" min="0.01" step="0.01"
+                    value={newMilestoneAmount} onChange={e => setNewMilestoneAmount(e.target.value)}
+                    placeholder="Amount in ₹" className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                  <input aria-label="Milestone due date" type="date" value={newMilestoneDueDate}
+                    onChange={e => setNewMilestoneDueDate(e.target.value)}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
@@ -1613,9 +1754,12 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="text-slate-400 block mb-1 font-semibold">Estimated Turnaround (Days)</label>
+                  <label className="text-slate-400 block mb-1 font-semibold">Estimated Turnaround (Days) *</label>
                   <input
                     type="number"
+                    min="1"
+                    step="1"
+                    required
                     value={propBidDays}
                     onChange={(e) => setPropBidDays(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:border-indigo-500 focus:outline-none"
@@ -1635,9 +1779,9 @@ export const ProjectMarketplace: React.FC<ProjectMarketplaceProps> = ({
               </div>
 
               <div className="p-3 bg-indigo-950/20 border border-indigo-800/40 rounded-xl text-indigo-300 text-[11px] space-y-1">
-                <span className="font-bold block">Autonomous Matching Engine:</span>
-                <span>• AI evaluates OEM certifications against client RFP requirements</span>
-                <span className="block">• Escrow smart-contract holds milestones upon project award</span>
+                <span className="font-bold block">Internal Proposal Record:</span>
+                <span>• Submitted bid and technical approach are unverified; no AI matching or OEM checks were performed</span>
+                <span className="block">• Provider verification and escrow/payment settlement are not integrated</span>
               </div>
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">

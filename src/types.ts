@@ -20,6 +20,17 @@ export interface UserAccount {
   role: UserRole;
   tenantId: string;
   createdAt: string;
+  disabledAt?: string;
+  passwordChangedAt?: string;
+}
+
+// Each customer belongs to the single current tenant. Membership is an explicit staff authorization grant.
+export interface CustomerAccount {
+  id: string;
+  tenantId: string;
+  name: string;
+  createdAt: string;
+  staffUserIds: string[];
 }
 
 export interface TenantInfo {
@@ -38,6 +49,7 @@ export interface TenantInfo {
 
 export interface Lead {
   id: string;
+  customerId?: string; // unmapped legacy leads are owner-only
   companyName: string;
   contactPerson: string;
   email: string;
@@ -94,6 +106,8 @@ export interface ServiceIncluded {
   name: string;
   price: number;
   sla: string;
+  sac?: string;
+  gstPercent?: number;
 }
 
 export interface BOMSolution {
@@ -111,6 +125,7 @@ export interface BOMSolution {
 
 export interface Quotation {
   id: string;
+  customerId?: string; // server-validated local customer registry binding
   quoteNumber: string;
   customerName: string;
   customerGstin: string;
@@ -124,6 +139,8 @@ export interface Quotation {
   gstAmount: number;
   totalAmount: number;
   grandTotal?: number;
+  taxStatus?: 'PENDING_CLASSIFICATION' | 'ESTIMATED_UNVERIFIED';
+  taxBreakdown?: { lineId: string; taxableAmount: number; taxRatePercent: number; taxAmount: number }[];
   status: 'DRAFT' | 'PENDING_OWNER_APPROVAL' | 'APPROVED' | 'SENT_TO_CUSTOMER' | 'ACCEPTED' | 'REJECTED' | 'PENDING_APPROVAL';
   approvalReason?: string;
   approvedBy?: string;
@@ -147,6 +164,8 @@ export interface TelegramMessage {
     status: 'PENDING' | 'APPROVED' | 'REJECTED';
   };
   suggestedActions?: string[];
+  deliveryStatus?: 'LOCAL_ONLY' | 'ACCEPTED_BY_TELEGRAM_API';
+  telegramMessageId?: number;
 }
 
 export interface SupplierInfo {
@@ -174,11 +193,23 @@ export interface RFQItem {
     inStock: boolean;
     recommended?: boolean;
   }[];
-  status: 'OPEN' | 'COMPARED' | 'PO_DISPATCHED';
+  status: 'OPEN' | 'COMPARED' | 'PO_PREPARED' | 'PO_DISPATCHED';
+  preparedPO?: {
+    poReference: string;
+    supplierId: string;
+    supplierName: string;
+    qty: number;
+    unitCost: number;
+    amount: number;
+    preparedAt: string;
+    preparedBy: string;
+    deliveryStatus: 'NOT_SENT';
+  };
 }
 
 export interface ITSMTicket {
   id: string;
+  customerId?: string; // verified owner-managed customer reference
   ticketNumber: string;
   title: string;
   category: 'Hardware Fault' | 'Network Outage' | 'Access Request' | 'Asset Procurement' | 'Software License';
@@ -186,6 +217,8 @@ export interface ITSMTicket {
   requesterName: string;
   requesterDept: string;
   assignedAgent: string;
+  assignedUserId?: string; // stable local staff user id; legacy display name is not authorization
+  reportedByUserId?: string;
   status: 'OPEN' | 'IN_PROGRESS' | 'WAITING_ON_PARTS' | 'RESOLVED';
   slaExpiresAt: string;
   slaPercentUsed: number;
@@ -196,6 +229,8 @@ export interface ITSMTicket {
 
 export interface EndpointHealth {
   id: string;
+  customerId?: string; // set by server against owner-managed registry
+  assignedUserId?: string; // explicit local FIELD_ENGINEER assignment, never inferred from assignedUser display text
   deviceName: string;
   assignedUser: string;
   os: string;
@@ -212,11 +247,13 @@ export interface EndpointHealth {
 
 export interface FieldJob {
   id: string;
+  customerId?: string; // immutable service customer association
   jobCode: string;
   title: string;
   customerName: string;
   address: string;
   technicianName: string;
+  assignedUserId?: string; // required for field engineer visibility and mutations
   technicianPhone: string;
   status: 'SCHEDULED' | 'EN_ROUTE' | 'CHECKED_IN' | 'DIAGNOSING' | 'PARTS_REPLACED' | 'COMPLETED';
   scheduledTime: string;
@@ -256,6 +293,9 @@ export interface ProjectMilestone {
 
 export interface Project {
   id: string;
+  customerId?: string; // authoritative customer registry ID; missing means unmapped legacy
+  createdByUserId?: string; // server-assigned local owner; legacy records have no trusted creator
+  collaboratorUserIds?: string[]; // owner-managed authorized internal staff, not external customers
   projectCode: string;
   title: string;
   clientName: string;
@@ -273,6 +313,7 @@ export interface Project {
 
 export interface Proposal {
   id: string;
+  submittedByUserId?: string; // authenticated staff identity; providerName is unverified display text
   projectId: string;
   providerName: string;
   providerRating: number;
@@ -305,6 +346,8 @@ export interface ProviderProfile {
 
 export interface AssetItem {
   id: string;
+  customerId?: string; // immutable verified customer association
+  assignedUserId?: string; // explicit local service engineer ID, display label is NOT authorization
   assetTag: string;
   serialNumber: string;
   name: string;
@@ -336,6 +379,7 @@ export interface SoftwareLicense {
 
 export interface AMCContract {
   id: string;
+  customerId?: string; // linked managed service customer
   contractNumber: string;
   clientName: string;
   type: 'COMPREHENSIVE' | 'NON_COMPREHENSIVE' | 'PER_DEVICE_ONCALL';
@@ -395,6 +439,7 @@ export type OperatingMode =
 
 export interface RMAClaim {
   id: string;
+  customerId?: string; // inherited from registered asset, never chosen by RMA submitter
   rmaNumber: string;
   assetTag: string;
   assetId?: string;
@@ -403,7 +448,7 @@ export interface RMAClaim {
   oemBrand: string;
   oemCaseNumber: string;
   faultSymptom: string;
-  warrantyStatus: 'ACTIVE_WARRANTY' | 'OUT_OF_WARRANTY' | 'EXTENDED_CARE';
+  warrantyStatus: 'ACTIVE_WARRANTY' | 'OUT_OF_WARRANTY' | 'EXTENDED_CARE' | 'UNVERIFIED';
   courierTracking: string;
   courierPartner: string;
   stage: 'FAULT_LOGGED' | 'OEM_APPROVED' | 'IN_TRANSIT' | 'SERVICE_CENTER' | 'REPLACED_RETURN' | 'TESTED_CLOSED';
@@ -426,6 +471,7 @@ export interface KnowledgeArticle {
 
 export interface CRMOpportunity {
   id: string;
+  customerId?: string; // actual customer registry ID
   title: string;
   clientName: string;
   contactPerson: string;
@@ -451,6 +497,8 @@ export interface MarketplaceDispute {
   providerRebuttal: string;
   aiMediationVerdict: string;
   status: 'UNDER_REVIEW' | 'AWAITING_EVIDENCE' | 'RESOLVED_REFUND' | 'RESOLVED_RELEASED' | 'RESOLVED_REWORK' | 'UNDER_ARBITRATION' | string;
+  resolutionDecision?: 'RELEASE_RECOMMENDED' | 'REFUND_RECOMMENDED' | 'REWORK_RECOMMENDED';
+  decisionRecordedAt?: string;
   createdAt: string;
 }
 

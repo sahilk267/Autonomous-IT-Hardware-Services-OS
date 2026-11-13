@@ -1,0 +1,82 @@
+# Phase 10.5I — Legacy Object Authorization and Independently Governed Recovery Evidence
+
+**Date:** 13 November 2026 (Asia/Kolkata). **Branch:** `fix/phase1-security-integrity-20261106` on Draft PR #1. **Cutover:** BLOCKED; existing JSON primary source and one opt-in staging-only CRM canary unchanged. This phase includes no live migration, SQL delivery, procurement dispatch or Hostinger deployment.
+
+
+
+## Final monotonic-clock recovery acceptance — 13 November 2026
+
+CI exposed an important clock-source flaw during a documentation-only PR run: the runner's wall clock sampled the archive **627 ms before** the previously recorded freeze boundary, and another run saw wall-clock event inversion. Both failures correctly blocked CI; earlier push workflows and all data/schema restore validations passed. This was *not* treated as proof of customer recovery success.
+
+The recovery measurement verifier and GitHub Actions workflow now take **paired UTC and Linux `/proc/uptime` monotonic samples** for every archive/restore/corruption/rollback milestone. Event causal order, archive-age surrogate, RTO and downtime are checked strictly against the monotonic clock and predeclared budgets. UTC wall-clock samples are independently checked against the monotonic window with at most **2 seconds** allowed drift; any larger drift still fails. This does **not** extend the operator recovery time budget or declare a real production freeze.
+
+**Final verified code SHA:** [`8d484cc4`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/8d484cc4d4af2fd0dc2e9e6532ab16f1bc13dd23).
+
+- [Push #43342468573](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43342468573): **completed SUCCESS** (backend, Chromium, PostgreSQL staging/recovery).
+- [PR #43342474822](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43342474822): **completed SUCCESS** (all jobs).
+- New legacy route/commerce integrity **71 PASS**; governed handoff **18/18 PASS**; monotonic recovery negative controls **19/19 PASS**; standard API **96/96**, role API **133/133**, 6-domain tenant SQL **79/79**, PostgreSQL restore **30/30** before and after deliberate clone corruption.
+- Measured disposable PG16 CI rollback from damage detection to verified recovery: **1,150ms**; rollback duration **1,150ms**; initial restore **570ms**; synthetic no-write window **2,190ms**; frozen snapshot-age surrogate **170ms**; maximum absolute UTC↔monotonic drift **832ms**. RPO-age 10min, rollback RTO 5min and synthetic downtime 10min targets met only for this throwaway fixture.
+- Real corporate HR/signer authority, independent ticket issuance, customer data RPO/RTO and Hostinger recovery remain **PENDING**. No customer data migrated, no SQL service enabled, no provider dispatch and no operational approval generated.
+
+## Verified CI evidence and implementation status
+
+**Green code SHA:** [`58448faa`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/58448faadf669b30d5be6dfd8d79f783049aaca2). The first code SHA [`cd9a563`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/cd9a5631d8dde711fd00fc16b38aa30a9ad27f02) passed TypeScript/backend and Chromium, but its PostgreSQL job failed because one synthetic archive timestamp fell outside the declared rehearsal window. The follow-up code commit introduced non-sensitive timing-offset diagnostics and the full workflows were rerun. **Both reruns succeeded; no production timing results are inferred.**
+
+- [Push workflow #43341197271](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43341197271): **completed SUCCESS** on TypeScript/backend `verify`, real Chromium, and PostgreSQL staging/restore.
+- [Draft PR workflow #43341203992](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43341203992): **completed SUCCESS** on all three jobs.
+- New legacy object scope matrix: **71 PASS**. It covers all **18** formerly excluded parameterized routes with wrong-role 403, missing-resource 404/disabled-adapter 501, unchanged owner-visible private state, and valid/invalid product, supplier, RFQ and PO integrity operations. The original **12** separately tested customer BOLA write routes remain green. All **30** dynamic main API routes are classified and tested at their declared authorization boundary.
+- Signed independent DBA operator/security witness handoff: **18/18 PASS** including signature substitution, tampered archive, ticket digest mismatch, missing witness and synthetic-to-production classification denial.
+- Standard main API smoke **96/96**, multi-role API **133/133**, PostgreSQL initial staging **41/41**, six-domain dual-tenant SQL matrix **79/79**, PostgreSQL restore **30/30**, verified both before and after deliberate disposable clone-only corruption. Earlier browser, CRM and SQL multi-instance regression checks passed.
+- Successful synthetic PostgreSQL 16 CI recovery: **572 ms** initial restore; **1,105 ms** rollback restore/verification; **1,108 ms** detected-corruption-to-verified rollback; **2,178 ms** synthetic no-write window; **185 ms** frozen-snapshot-age surrogate. The CI-only RPO-age, rollback RTO, and downtime budgets were 10 minutes, 5 minutes, and 10 minutes respectively. **No real customer data loss, production recovery measurement or operator approval was verified.**
+- Inventory UI now sends only mutable product fields (omits client prototype product IDs) and RFQ `productName`, `requiredQty`, `urgency`; server returns authoritative created identities. This keeps the actual user workflow compatible with the stricter object-integrity rules.
+
+**Production NO-GO:** valid synthetic signatures and recovery timings cannot authorize customer remapping, PostgreSQL cutover, Hostinger deployment or external provider delivery.
+
+## 1. Close the legacy object authorization and integrity gap
+
+Prior Phase 10.5H covered 12 explicitly customer-bound mutation routes and 11 customer-bound read collections, but excluded 18 legacy/owner-only/global dynamic routes from object mutation tests. That meant a route's middleware role check was verified, but not its nonexistent-resource safety and state immutability. Phase 10.5I adds `tests/legacy_object_integrity_matrix.mjs`:
+
+- **18 previously excluded routes**: all tested with a real authenticated role that must be denied (HTTP 403), and separately with an allowed role pointing to a nonexistent object (HTTP 404; workflow adapter endpoints deliberately return 501). Unauthorized attempts must not return business data or change persistent catalog, RFQ, finance, licenses, knowledge, workflow, staff or project state.
+- Dynamic `/:id`, `/:invoiceNo`, and milestone route registration is enumerated from the TypeScript AST. **All 30 declared dynamic main routes must be accounted for** by either the existing 12 customer-scoped foreign-object tests or 18 newly tested owner-only, global or legacy object routes; an unclassified addition fails CI.
+- Customer scope remains distinct from tenant-global role authorization. Owner-only invoices, licensed seats, catalog, RFQ, knowledge and workflows have no proven individual customer ownership. These tests cannot convert their legacy structure into per-customer objects, cannot prove real multi-instance JSON tenancy and do not grant customers access to previously owner-only records.
+
+### Concrete catalog and RFQ attack-surface hardening
+
+Review identified a real mutation-integrity weakness: product POST/PATCH previously spread arbitrary `req.body` including caller IDs; supplier and RFQ creation permitted caller-supplied IDs and RFQ quote histories. Because these are tenant-global owner/procurement collections, such fields could corrupt source identity and internal procurement provenance.
+
+Updated `server.ts` and `server/db.ts`:
+
+- All `POST/PATCH /api/products` updates use a bounded allowlist of typed catalog fields; malicious `id`, `tenantId`, `customerId`, fake settlement, nested objects, negative prices and invalid stock values are denied. Server issues source ID; SKU uniqueness is case insensitive; reserved stock cannot exceed available. DB transaction logic independently prevents ID reassignment or duplicate SKU and verifies stock invariants.
+- `POST /api/suppliers` accepts only catalog details; ID is created by server, with bounded/safe field types.
+- `POST /api/rfqs` accepts a real product, integer quantity and urgency, preserves historic status-forgery compatibility only by ignoring client `status:PO_DISPATCHED`, never copies client supplier quote history, prepared PO or ID, and always starts with status OPEN.
+- `POST /api/rfqs/:id/quotes` validates an exact supplier quote shape and prevents client recommendation or PO status fraud. Transaction checks block repeated supplier IDs and any additional supplier quotation after a PO has been prepared.
+- `POST /api/rfqs/:id/dispatch-po` can only prepare an **internal** PO from the stored quote; no actual purchase order is transmitted. External vendor identity and payable acceptance are not verified.
+
+**Remaining caveat:** RFQ supplier self-reported IDs, vendor legal identity, catalog/stock provenance and downstream invoice/payment reconciliation are not independently verified. This phase improves technical integrity, not procurement authorization by an external provider.
+
+## 2. Independently witnessed synthetic operator evidence handoff
+
+New read-only `scripts/postgres/governed_handoff_gate.mjs` verifies:
+
+1. Phase 10.5H's independently measured **disposable** PostgreSQL restore/corrupt/recover budget and SHA256-verified archive.
+2. A separate, externally pinned `OFFLINE_OPERATOR_EVIDENCE_REVIEW_KEYS` Ed25519 public-key registry with exactly **two independent** roles: `DBA_REHEARSAL_OPERATOR` and `INDEPENDENT_SECURITY_WITNESS`; different principals, key IDs and key material.
+3. Two SHA256-linked, ordered, time-bound Ed25519 signatures binding byte-for-byte `planSha256,observationsSha256,evidenceSha256,archiveSha256`, exact `operatorSession`, an `reviewTicketSha256`, `decision:REVIEWED_SYNTHETIC_RECOVERY_EVIDENCE_ONLY`, `operationTarget:DISPOSABLE_POSTGRESQL_CI_COPY_ONLY`, `issuedAt` and `expiresAt`.
+4. Missing or changed signature, receipt predecessor, source archive, operation target, ticket, measured timing, or external registry pin fails closed; no signing keys live in the repo or runtime environment.
+
+**CLI:** `npm run assess:governed-handoff -- --trust /private/operator-trust.json --permit /private/handoff.json --plan /private/operator-plan.json --observations /private/recovery-times.json --evidence /private/recovery-evidence.json --archive /private/immutable-stage.dump`
+
+Required: absolute private files outside checkout, `APEX_OPERATOR_HANDOFF_ACK=OFFLINE_SYNTHETIC_REVIEW_ONLY`, `APEX_OPERATOR_TRUST_SHA256` pinned through a *separate* governance channel; `NODE_ENV` must not be production, and runtime SQL activation is rejected.
+
+**Operational/authority limitation:** these are signatures over a **synthetic CI evidence packet**. There is no actual corporate reviewer identity verification, no independent check that an off-repo ticket exists or was issued by a genuine authority, no production operator permission, no encryption/KMS evidence, and no live database rehearsal. A valid operator packet always exits 3 (**NO-GO**), never authorizes a migration or external action. This verifier is not a scheduler or a deployment tool.
+
+## 3. Acceptance gates and next real-world requirements
+
+| Gate | Synthetic evidence delivered in code | Remaining requirement |
+| --- | --- | --- |
+| Every parameterized main business route is audited | 12 customer BOLA + 18 legacy object denials; exact inventory fails on additions | Cross-tenant production JSON runtime and external client identities |
+| Catalog/procurement source integrity | Server ID/field controls + duplicate supplier/PO quote freeze | Verified OEM/vendor registry, real inventory reconciliation, procurement signoffs |
+| Independent operator review | Exact dual-signed Ed25519 nonproduction review packet with external trust hash | Authorized corporate HR/release approvals, independently signed ticket/custody receipt, key lifecycle |
+| Measured restore success | Phase H real synthetic PG16 clone timings; immutable archive/SQL digest | Approved **real** RPO/RTO, legal customer snapshot, production write-freeze and encrypted offsite disaster-recovery drill |
+| Production/Hostinger release | **BLOCKED** via existing cutover safety gate | DBA/privacy/data owner/release manager approvals, live integration audit, incident rollback playbook |
+
+Do not merge Draft PR #1 or change `main` merely because CI passes. No new PostgreSQL-backed endpoint, external PO delivery, payment settlement, or deployment is authorized. The next allowed phase should address real customer-data identity and deployment governance only after the human owners have provided an approved test context. All synthetic fixtures are disposable.

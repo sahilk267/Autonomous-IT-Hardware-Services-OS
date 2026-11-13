@@ -1,0 +1,368 @@
+# Apex OS Implementation Tracker
+
+**Baseline:** `3279107c03d757b5c0cf8d5ba18867ef2982a1d2` (2026-11-06)
+**Working branch:** `fix/phase1-security-integrity-20261106`
+**Scope:** incremental implementation, not a rebuild. Existing business/customer data must be preserved.
+
+> **Evidence rule:** An implementation checkbox means source changed in this branch. It does **not** mean live deployment, CI, browser acceptance or a third-party provider has been verified.
+
+## Status ledger
+
+| ID | Priority | Item | Source implementation | Runtime verification | Next gate |
+|---|---|---|---|---|---|
+| BOOT-01 | P0 | Legacy passwordless admin removed from checked-in **empty template** | Implemented | CI / fresh setup pending | Test first-time enrollment |
+| BOOT-02 | P0 | Production first-admin setup protected with server-provisioned one-time token | Implemented | Deploy test pending | Configure `APEX_INITIAL_SETUP_TOKEN` |
+| SEC-01 | P1 | Production secure session cookie, no token in login JSON | Implemented | HTTP integration test pending | Login/logout, CSRF scenarios |
+| SEC-02 | P1 | Basic browser Origin checks for writes | Implemented | Proxy/Hostinger test pending | Test forwarded host behavior |
+| SEC-03 | P1 | RBAC on 48 API routes + role-scoped state collection filtering | **CI verified** | [16/16 role HTTP tests pass](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Per-user/tenant row isolation, ownership & comprehensive threat modeling |
+| SEC-04 | P1 | Block browser-generated authoritative audit events | Implemented | End-to-end test pending | Replace all remaining client audit producers |
+| SEC-05 | P1 | Telegram webhook validates sender/chat, uses durable update-id replay ledger | Phase 3 coded; CI verified | Security fixture test | Live Telegram callback acceptance & retention review |
+| DATA-01 | P0 | Existing `commit()` clone-before-write semantics retained | Already present at baseline | Disk-failure test pending | Durable backups & concurrent writes |
+| INV-01 | P1 | Exact productId & safe quantity for stock consumption, server cost only | Implemented | UI/API test pending | Stock integration workflow |
+| FIN-01 | P1 | Invoice settlement requires verified reference; duplicate blocked | Implemented | Bank evidence authenticity pending | Reconciliation and authorized finance workflow |
+| FIN-02 | P1 | Receivable creation rejects forged SETTLED status, bank reference and invoice IDs | **CI verified** | [Run 42291102641: forged status test PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42291102641) | Real tax invoicing and reconciliation remain pending |
+| QUOTE-01 | P1 | Server recalculates discount-adjusted pricing and per-line GST estimates | Phase 3 coded; CI verified | Mixed rate + missing tax tests | Verify HSN/SAC; actual tax filings not implemented |
+| PROJ-01 | P3 | Project milestone completion persisted via API | Implemented | Reload test pending | Guard financial escrow claims |
+| FIELD-01 | P3 | Diagnosis no longer silently creates fake customer/site/parts | Implemented | UI test pending | Explicit booking form |
+| WORK-01 | P3 | Missing workflow execute route responds honestly with 501 | Implemented (fail closed) | API smoke pending | Actual audited action dispatcher |
+| CI-01 | P4 | GitHub Actions typecheck/build/15 isolated tests | **Verified** | [Run 42257640364: green](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42257640364) | Expand regression suite |
+| CI-02 | P4 | Production-mode Express HTTP smoke suite (38 checks, temp DB) | **Verified** | [Run 42283191813: 38/38 PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Browser, live provider tests |
+| CI-03 | P4 | Five-role HTTP access matrix (16 assertions, temporary seeded fixture) | **Verified** | [Run 42283191813: 16/16 PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Object-level authorization tests |
+| CI-04 | P4 | Phase 3 quote/GST, PO, Telegram and safe invoice/BOM checks | **CI verified** | [Run 42291102641: 16/16 regression, 49/49 API, 21/21 roles](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42291102641) | Browser / real provider acceptance |
+| CI-05 | P4 | Phase 4 identity, role and data-safety suites | **CI verified** | [Run 42499544462: 16/16 regression, 49/49 HTTP, 39/39 roles, 9/9 data](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Browser, migration and live provider acceptance |
+| CI-06 | P4 | Phase 5 login throttling, CSRF and object-authorization suites | **CI verified** | [Run 42609402631: auth 7/7, regression 16/16, API 62/62, roles 56/56, data 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Browser, multi-instance and real reverse-proxy testing |
+| DOC-01 | P4 | Implementation report + tracker | Added | Reviewed with code | Keep synchronized per commit |
+| PERSIST-01 | P3 | RMA, CRM, KB and disputes connected to typed server APIs and state | **API verified; browser pending** | [38/38 HTTP tests pass](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) | Browser UX, screen-based save/reload and OEM evidence |
+| INT-01 | P4 | Verified Razorpay/Cashfree transactions | **Pending / 501** | — | Real provider implementation |
+| GST-01 | P4 | Verified NIC IRP / GST filing adapter | **Pending / 501** | — | Real provider implementation |
+| RMM-01 | P4 | Authenticated real endpoint agent telemetry | **Pending** | — | Enrollment and ingestion |
+| MS-01 | P4 | Microsoft Graph provisioning/licensing | **Pending** | — | Credentialed adapter and tests |
+| TLG-01 | P4 | Real Bot API sendMessage adapter + durable callback replay; local vs external UI status | Phase 3 coded; CI verified | HTTP fail-closed & replay tests | Live provider acceptance / webhook registration unverified |
+| PO-01 | P3 | Exact-supplier priced internal PO preparation, status PO_PREPARED/NOT_SENT | Phase 3 coded; CI verified | API tests incl duplicates | **External supplier dispatch still pending** |
+| TAX-01 | P3 | Per-line declared rates and proportional discount allocation; missing rates = PENDING_CLASSIFICATION | Phase 3 coded; CI verified | Mixed rate / classification HTTP checks | Actual statutory validation and NIC/IRP filing pending |
+| AUDIT-01 | P1 | Tamper-evident immutable audit and event/data atomicity | **Pending** | — | Central auditable transaction boundary |
+| MULTI-01 | P4 | Actual tenant isolation and scalable durable DB | **Pending** | — | Dedicated persistent DB migration plan |
+| AUTH-05 | P1 | In-memory username + socket peer failed-login throttling | **CI verified** | [Run 42609402631: auth unit 7/7, API 62/62](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Shared persistent limiter, trusted proxy policy, independent security review |
+| CSRF-05 | P1 | Block cross-site Fetch Metadata and forged X-Forwarded-Host Origin bypass | **CI verified** | [Run 42609402631: HTTP checks PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Complete CSRF/session architecture and real reverse-proxy acceptance |
+| OBJ-05 | P1 | Field engineer ticket/job row scoping, manager assignment endpoints | **CI verified** | [Run 42609402631: role suite 56/56](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Further row controls for assets, endpoints, projects and all modules |
+| UI-05 | P2 | Manager assignment dropdowns from real staff registry and no fake sign-offs | **Built and typechecked** | [Run 42609402631: build PASS](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) | Browser E2E + accessibility testing |
+| AUTH-04 | P1 | Owner-only local staff creation/disable, atomic audit, session revocation and password rotation | **CI verified** | [Phase 4 role suite 39/39](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | MFA, invite expiry, initial password change enforcement, full external identity JML |
+| DATA-04 | P0 | Production rejects absent, relative or checkout-local JSON data path | **CI verified** | [Phase 4 data-safety suite 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Controlled Hostinger migration to private absolute APEX_DATA_FILE |
+| BACKUP-04 | P1 | Operator-only offline backup with exclusive create, SHA256 and 0600 | **CI verified** | [Phase 4 data-safety suite 9/9](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) | Encryption, offsite retention, verified restoration |
+| UI-04 | P2 | Staff Access / Change Password screen with real API callbacks | **Built and typechecked** | Browser acceptance pending | Accessibility and role-specific UX testing |
+
+## Phase 2 — 7 November 2026
+
+Phase 2 implementation was pushed as commit `c714f7f5a7bd2206af6a055a589e5fddd27a11b3`. Independent [GitHub Actions run 42283191813](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42283191813) verified **type-check PASS, build PASS, isolated regression 15/15, production HTTP 38/38, role permissions 16/16**. Browser/Hostinger testing remains pending.
+
+- Role-based collection-level reads and route-level permissions (still **single tenant**, not per-user ownership/tenant isolation).
+- RMA: real registered assets only; `FAULT_LOGGED` initial status; verified OEM case/AWB needed for stage progression.
+- Knowledge Base: validate title/summary/verified steps; persist creation and atomic self-resolution acknowledgments.
+- CRM: real client/opportunity values; server-side stage transitions; no fabricated win probabilities or staff names.
+- Disputes: create from genuine projects; save internal recommendations only, not pretend escrow transfers.
+- CI: expanded HTTP persistence checks and separate multi-role access smoke suite. See [Phase 2 report](PHASE_2_IMPLEMENTATION_2026-11-07.md).
+
+## Phase 5 — 9 November 2026
+
+Phase 5 was pushed to draft PR #1; **no production deployment was performed**. Independent [GitHub Actions run 42609402631](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42609402631) verified TypeScript/build PASS, regression **16/16**, login limiter **7/7**, production-mode HTTP **62/62**, role/ownership **56/56**, and data-safety **9/9**.
+
+- Login throttling: conservative **8 failed attempts/account** and **80 failed attempts/socket peer** in 15 minutes; sends HTTP 429/Retry-After. In-memory **single process only** and not a substitute for MFA / shared distributed limits.
+- Browser cross-site mutation protection using Fetch Metadata + Origin comparison. An attacker-controlled `X-Forwarded-Host` no longer overrides the expected origin; optional `APEX_PUBLIC_ORIGIN` is recommended for a known reverse-proxy origin. CSRF review is not complete.
+- Field engineer ticket/job results are filtered to stable `assignedUserId` (tickets also visible to original reporter); unassigned legacy records do not automatically grant technician access. Managers can assign explicitly to a real enabled local field-engineer user ID.
+- Assigned engineers can update ticket status/root-cause or progress their own field job one stage at a time. Customer digital signature is **not** auto-certified by status changes. Cross-record stock consumption is blocked.
+- Existing generic endpoint/asset/project row isolation and full multi-tenancy remain pending. See [Phase 5 report](PHASE_5_IMPLEMENTATION_2026-11-09.md).
+
+## Phase 4 — 8 November 2026
+
+Implementation pushed to draft PR #1. **No production Hostinger environment modified.** [GitHub Actions run 42499544462](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42499544462) confirmed **TypeScript/build PASS, isolated 16/16, HTTP 49/49, role/identity 39/39 and production data-safety 9/9** against temporary stores.
+
+- Owner-only **local** staff identity creation and disable, four non-owner roles; passwords are scrypt-hashed and never returned to the browser in API responses.
+- Disabled staff lose all sessions in one DB transaction; `GET /api/state` remains collection-filtered. Every user can change their own password; old sessions are revoked and reauthentication required.
+- Account create, disable and password rotation append server audit events in the same JSON commit as the identity mutation. The underlying JSON store is still **not tamper-evident**.
+- New Account Security & Staff UI. This is **not Microsoft 365/Entra provisioning**, invite email delivery, SSO, MFA or per-object tenant access control.
+- Production `APEX_DATA_FILE` must be explicit and outside application checkout. Existing deployments running from the tracked default path **will refuse startup**, not silently reset business data.
+- Offline backup CLI generates a non-overwriting `0600` snapshot and SHA256 digest only when writes are stopped. It is not an encrypted/offsite automated backup or a verified restore.
+- Deployment migration checklist: [Deployment Data Safety](DEPLOYMENT_DATA_SAFETY.md); [Phase 4 report](PHASE_4_IMPLEMENTATION_2026-11-08.md).
+
+## Phase 3 follow-up — draft safety checks
+
+- Printable BOM is a clearly marked draft without fabricated GSTIN, bank account, seller registration or fixed 18% calculation.
+- Internal receivable creation never trusts client-forged `SETTLED` status or payment references.
+- Independent [CI #42291102641](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42291102641) green; browser and deployment acceptance remain outstanding. See [Phase 3 report](PHASE_3_IMPLEMENTATION_2026-11-07.md).
+
+## Phase 3 — 7 November 2026
+
+Phase 3 code and follow-up safety fixes are on the same draft PR. [GitHub Actions run 42291102641](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42291102641) verified **typecheck/build PASS, isolated regression 16/16, HTTP API 49/49, role/webhook 21/21**. Not deployed.
+
+- `PO_PREPARED` records supplier quotation, quantity and cost as an internal ledger draft. Legacy `/dispatch-po` route is retained for backwards-compatible UI but **never actually sends the PO**.
+- Quote taxes are no longer blanket 18%. Tax is an **unverified estimate** using explicit per-line GST rate and HSN/SAC, with proportional discount allocation. Missing classification sets `PENDING_CLASSIFICATION` and quote total excludes unknown GST; it is **not a final payable invoice**.
+- Finance tax preview requires manual rate entry; NIC/IRP adapter remains not implemented.
+- Live Telegram outbound endpoint calls official sendMessage and records acceptance only after a positive provider response. No credentials are present in CI, so **external delivery has not been verified**.
+- Telegram webhook now stores update IDs for duplicate protection. Retention is bounded; long-term anti-replay and provider integration testing remain pending.
+- See [Phase 3 report](PHASE_3_IMPLEMENTATION_2026-11-07.md).
+
+## Rules for subsequent work
+
+1. Preserve the existing UI and **never overwrite any deployed `data/app-store.json` with a starter file**.
+2. A real installed environment with existing passwordless legacy accounts requires **offline administrator recovery**, not a public setup bypass.
+3. Run tests against temporary files only; never point tests or resets at real workspace data.
+4. Do not report `CONFIGURED` as `CONNECTED`. Do not claim external money movement or signed IRN without provider confirmation.
+5. Security and deployment sign-off require actual build logs plus API tests, not agent narrative.
+6. Update this table with commit SHA and evidence after every verified phase.
+
+## First independent CI evidence
+
+- **Run:** [Apex OS verification #42256237304](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42256237304)
+- **Node 20:** npm install PASS; `npm run lint` PASS; `npm run build` PASS; `npm test` **15/15 PASS**.
+- **Subsequent verified run:** [CI #42257640364](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42257640364) — typecheck PASS, build PASS, isolated tests 15/15 PASS, production-mode HTTP smoke 21/21 PASS against a temporary database.
+- **Still unverified:** external provider integrations, multi-role access control matrix, browser UX and Hostinger deployment.
+
+## Suggested milestone order
+
+- **Gate A**: CI typecheck/build/test green; first-login and payment/stock smoke tests.
+- **Gate B**: Complete RBAC and per-role data access; CSRF, webhook replay controls and audit safety.
+- **Gate C**: RMA/CRM/KB/disputes persistence + correct quotations, tax, PO lifecycle.
+- **Gate D**: Provider adapters and audited automation; tenant/data architecture and production checks.
+
+## Phase 6 — 10 November 2026 (source implemented; initial CI verified)
+
+**Focus:** Project/milestone integrity, honest topology/automation UI and fail-closed workflow activation. Work is restricted to the existing draft branch, with `main` and production data untouched.
+
+- P0-PROJ-06: Server-generated project and milestone identifiers, safe editable project field allowlist, validated amounts, calendar dates and budget totals. No caller-provided lifecycle status, milestone financial evidence or client project codes. Owner-only milestone creation and sequential internal work progression; `ESCROW_HELD` and `RELEASED` cannot be forged or implied by work completion.
+- UI-06: New projects no longer create two fictional milestones or past-dated deadlines. Optional actual first milestone can be supplied explicitly. Legacy escrow states are shown as unverified, not a real payment.
+- CMDB-06: Removed fictional cascading incidents, customer impact and Telegram/failover claims. Topology explorer states what-if only.
+- AUTO-06: Workflow rules are persisted as inactive definitions, not live automation; activation and execution fail closed (`501`). UI inspection never reports trigger evaluation or external dispatch.
+- CI-06B: [GitHub Actions #42713764341](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713764341) and [PR run #42713771860](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42713771860) were green at commit `4681536`: TypeScript/build PASS, isolated 16/16, auth 7/7, HTTP 76/76, role 60/60, data 9/9. The expanded workflow draft/activation checks also passed in the subsequent green run #42714106305 (HTTP 78/78).
+- Remaining: project ownership across customers/tenants; genuine payment/GST/provider adapters; audit atomicity; browser E2E; production migration and backups.
+
+
+### Phase 6 final verification (10 November 2026)
+
+Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42714106305) and [PR verification #42714114832](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42714114832), both green: TypeScript/build PASS; regression **16/16**; auth **7/7**; HTTP **78/78**; roles **60/60**; data safety **9/9**. No browser, payment, tenant-isolation or live-provider acceptance was conducted. This evidence refers only to isolated GitHub Actions.
+
+
+## Phase 7 — 10 November 2026 (proposal integrity / single award; CI verified)
+
+- **PROPOSAL-07 (P1):** Server validates project-linked bid details; never accepts client-supplied proposal identity, vendor verification, rating, fabricated AI match or privileged award status. Existing project must still accept bids. **Source implemented, CI verified.**
+- **AWARD-07 (P1):** Proposal creation + project count + audit occur in one JSON commit. Exactly one project award; competing bids, project status and audit event persist together. Duplicate, competing and late awards fail closed. **Source implemented, CI verified.**
+- **UI-07 (P2):** Removed fabricated provider certifications/ratings/default bid costs and matching scores; show unverified disclosures and server-authoritative award results. **Typechecked/build verified; browser E2E pending.**
+- **CI-07:** [Push run #42715294577](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42715294577) and [PR run #42715304850](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42715304850) both green at [commit `a386046`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/a386046b654d72fbfed1bb6bb6893dd7d0423f66): typecheck/build PASS, regression **16/16**, auth **7/7**, HTTP **88/88**, roles **64/64**, data **9/9**.
+- **Still blocked:** real per-customer/project/proposal row-level ownership, multi-tenant database, verified provider interactions, tamper-evident audit, browser and Hostinger acceptance. **Do not merge PR #1 or deploy as production-ready.** See [Phase 7 report](PHASE_7_PROPOSAL_INTEGRITY_2026-11-10.md).
+
+## Phase 8 — 10 November 2026 (staff-object authorization; CI verified)
+
+- Field service assets and endpoints use explicit engineer identity; private/unassigned assets and linked RMA claims cannot be enumerated by field staff. Manager-only assignment APIs update audit and authorization together.
+- Projects: server-assigned creator IDs and owner-managed collaborator grants, consistent filtering across direct project/proposal endpoints and /api/state. Proposals save submitter identity, with visible-project checks for submission and award.
+- Owner project-sharing UI and manager engineer-assignment controls added. RMM terminal no longer asserts verified TLS session, IP address or user consent when no agent exists.
+- No production data rewritten. Legacy records lacking trusted ownership remain inaccessible to ordinary nonowner users unless explicitly granted. No customer-tenant isolation or real RMM adapter is implemented. CI/browser/Hostinger acceptance still pending.
+
+### Phase 8 verification and merge gate
+
+- Green [GitHub Actions push run #42719314182](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42719314182) and [PR run #42719323407](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42719323407) for `a23e8d4`: TypeScript/build PASS; isolated tests **16/16**, auth **7/7**, API **91/91**, role **95/95**, data-safety **9/9**.
+- CI acceptance is **not production sign-off**. Keep PR #1 draft and `main` unchanged; next gates are customer ownership, browser end-to-end access tests, database-level tenancy and recovery.
+
+## Phase 9 — 11 November 2026 (customer-bound access, read-only migration preflight and real browser checks)
+
+- **CUSTOMER-09 (P0):** Owner-registered `customers` with UUID identifiers, existing tenant ID, staff grants and server-authored audit. Member data returned only to owner/granted staff; no external customer accounts created.
+- **AUTH-09 (P0):** Customer membership AND object assignment/creator grants checked on projects, proposals, assets, endpoints, linked RMA, jobs, tickets, CRM, AMC and quotations across direct endpoints and `/api/state`. Lead state is hidden from nonowners if missing customer IDs; legacy rows remain owner-visible, never automatically relabeled. Staff grant revocation immediately removes visibility and project collaborator grants.
+- **UI-09 (P1):** Owner registry/grant/revoke controls; registered-customer dropdowns in project/CRM/BOM, asset/AMC, ticket/endpoint and dispatch forms. RMM still non-executing.
+- **TEST-09 (P1):** Two-customer negative access tests with disposable HTTP stores; real Chromium role-based UI tests using ephemeral production-mode server; read-only migration preflight detects orphan/missing customer IDs, RMA link inconsistency and dangling proposals with source SHA256 without mutation.
+- **MIGRATE-09 (P0):** PostgreSQL/RLS cutover is only a documented blueprint, **not implemented**. See [Phase 9 implementation report](PHASE_9_CUSTOMER_ISOLATION_2026-11-11.md) and [PostgreSQL architecture plan](POSTGRESQL_MIGRATION_BLUEPRINT.md). No Hostinger/live migration and no customer data rewritten.
+- **RELEASE GATES OPEN:** Customer-facing authentication, tenant-level DB isolation, remaining auxiliary customer references, rollback rehearsal and restore verification, in-browser end-user approval/denial scenarios, and external provider integration acceptance. CI run evidence is recorded separately after successful completion.
+
+
+### Phase 9 final isolated CI and browser evidence — 11 November 2026
+
+- [GitHub Actions push #42902830813](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42902830813) and [Draft PR #42902844014](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42902844014) both completed **success** on [code commit `bb01caf`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/bb01caf995e067cfd08be4833d4117660df1b47f).
+- Node20 TypeScript/build **PASS**, regression **16/16**, login limiter **7/7**, production-mode HTTP **96/96**, role/customer authorization **133/133**, data safety **9/9**, read-only customer mapping preflight **5/5**; separately, real Node22 Chromium Playwright **7/7**. Browser tests cover five roles plus anonymous denial and owner customer/project access grant → cross-session revocation against isolated fixtures.
+- Verified only on disposable CI stores. Deployment **not performed**; DB-level tenant enforcement/RLS, historical customer mapping, additional legacy customer-linked collections, backup restore validation and live providers remain release blockers. **Keep PR draft.**
+
+## Phase 10.1 — 11 November 2026 (PostgreSQL staging DB and forced RLS; not runtime cutover)
+
+- **P10-DB-STAGE:** PostgreSQL 16 staging schema in `migrations/postgres/001_staging_rls.sql`, full tenant/customer composite FK for proposal→project and RMA→asset, customer grants/share cascade, owner-only legacy records and staging SHA provenance. All nine tables protected with forced RLS; read role NOLOGIN/NOBYPASSRLS/NOINHERIT.
+- **P10-IMPORT:** Offline dry-run + acknowledged local staging-only `SERIALIZABLE` import, source SHA256, real customer checks, strict empty target, rollback on errors. Credentials/auth sessions not imported. Existing Express runtime remains **JSON-only**.
+- **P10-VERIFY:** GitHub Actions has a PostgreSQL 16 service and isolation suite. Tests cover five staff roles/two customers/two tenant identifiers, disabled identities, missing request context, revocation, cross-customer FK denial and owner-only records. Staged custom-format dump/restore to an independent disposable DB compares data, RLS and grants.
+- **Still blocked:** safe production connection and transaction-scoped auth context, SQL injection hardening, full authorization parity and remaining legacy collections, DB-backed API writes and append-only audit, production-size data validation, actual Hostinger migration and separate backup recovery drill. PR #1 remains Draft; main unchanged.
+- [Detailed Phase 10.1 implementation/runbook](PHASE_10_POSTGRESQL_STAGING_2026-11-11.md). Verified run evidence is appended after successful CI.
+
+
+### Phase 10.1 CI verification — 11 November 2026
+
+- Code commit [`38a570c`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/38a570c76907c0c8a64b3a6d9e22ed4d42aa52b0) passed [push Actions #42929292843](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42929292843) and [PR Actions #42929301929](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42929301929). Both include backend, Chromium and actual PostgreSQL 16 service jobs.
+- **PostgreSQL 16 staging 23/23:** source SHA256, no DB dry-run, denied unsafe targets and spoofed tenant/customer/credential fields, nonempty-target refusal, explicit atomic import, real SQL RLS under five roles, disabled actor denial, unauthorized cross-tenant/cross-customer joins, grant revocation and SQL-induced full transaction rollback.
+- **Separate dump/restore 16/16:** matching PG16 client binaries, backup taken from staging DB, restored into another disposable PG16 DB; nine table rowsets compared, `FORCE RLS` verified on nine tables, revoke/tenant scope tests replayed and staging import provenance checked.
+- **Original runtime CI:** TypeScript/build PASS; regression **16/16**, authentication **7/7**, HTTP API **96/96**, role/customer API **133/133**, data safety **9/9**, customer source preflight **5/5**, Node22 Chromium browser **7/7**.
+- No production PostgreSQL instance, customer records, Hostinger credentials, real payment provider or live deployment was used. These numbers are evidence of isolated source/CI acceptance only.
+
+## Phase 10.2 — 11 November 2026 (staging-only SQL authenticated CRUD and audit)
+
+- **P10.2-WRITE:** Migration `002_staging_authenticated_pilot.sql` restricts SQL writes to owner-created customers, owner grants/revokes and CRM insert/update(payload). The NOLOGIN/NOBYPASSRLS SQL role cannot insert/edit audit directly; SQL AFTER triggers create minimal audit in the same transaction. All ten tables use RLS.
+- **P10.2-HTTP:** `server/postgres_pilot.ts`: staging-only opt-in, cookie authentication, strict SQL role parity checks, trusted server-identity transaction context, parameterized SQL, customer registration and grant/revoke, CRM create/list/stage update, owner-only audit.
+- **P10.2-FAILCLOSED:** Disabled by default; cannot start pilot in production or on nonloopback/untrusted DB, inappropriate DB name or checkout JSON store. No app-wide runtime switch, no public SQL or tenant/actor GUC input endpoint. Audit failure rolls back whole operation.
+- **P10.2-CI:** Real PostgreSQL 16 staged import/RLS **23/23**, actual authenticated PostgreSQL HTTP **41/41**, separate PostgreSQL dump/restore **17/17**; existing TypeScript/build, HTTP/role/Chromium suites green. [Push CI 42996562963](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42996562963) and [PR CI 42996571429](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42996571429) passed for code SHA `da0e65cc`.
+- **Remaining P0:** Full PostgreSQL CRUD/domain transaction migration across all modules, secure non-impersonable DB session identity, historical customer/tenant mapping and parity, cross-module audit integrity, actual authorized restore/rollback, Hostinger readiness and integration acceptance. Current runtime remains JSON. Keep Draft PR.
+- [Phase 10.2 scope, security and operations report](PHASE_10_2_AUTHENTICATED_PG_PILOT_2026-11-11.md).
+
+
+### Phase 10.2 additional staging source-parity gate
+
+- `scripts/postgres/verify_staging_parity.mjs` is a separate read-only offline comparator for an explicitly selected local `apex_stage_*` PostgreSQL instance and an original private JSON source snapshot. It compares import SHA-256 and SQL source provenance, tenant identity, staff roles/disable state (never raw passwords), customer IDs/names, customer grants, all 11 scoped record collections including proposal/RMA derived associations, project shares, 12 owner-only legacy collections and original audit payloads.
+- It detects both **source SHA drift** and **database payload tampering even when source SHA still matches**. Tests restore their ephemeral fixture after deliberately corrupting it; no deployed file or real database changed.
+- Usage: `npm run verify:pg:parity -- --source /absolute/private/verified-staging-snapshot.json` against the **same isolated staging DB before any pilot writes**. This verifier intentionally fails once the separate PostgreSQL pilot has written new customer/CRM records, because JSON source and PostgreSQL diverge; that is expected and must not be treated as a production synchronization mechanism.
+- This improves **staging source/target row parity**, not full production migration parity: source tenant metadata beyond ID/name, credentials/sessions and other non-staged runtime fields are intentionally excluded from the SQL target, and real deployed data has not been reconciled. Never promise full cutover or omit required historical mapping.
+- [GitHub Actions push #42997972470](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42997972470) and [PR #42997981644](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/42997981644) green at code commit `ab399322`: isolated staging RLS/import+parity **27/27**, authenticated SQL HTTP **41/41**, second-database SQL restore **17/17**; original TypeScript/build, existing API/role, auth, data safety and real Chromium browser verification also green.
+
+## Phase 10.3 — 11 November 2026 (partial: signed identity and expanded staged transactional repositories)
+
+- **AUTH-PG-10.3:** Database transaction attestation: HMAC(tenant, actor, PostgreSQL transaction ID, backend PID), verified in SECURITY DEFINER `apex.pilot_context_is_attested` through `apex.active_role` on every RLS permission. Separate database secret table, no SQL writer SELECT, CI-generated ephemeral key, SQL-replay/impersonation tests.
+- **SQL-PROJECT-TICKET:** Customer-scoped project create/list, owner share grant/revoke with same-customer composite FKs; tickets create/list/status transitions with trusted actor ID; SQL-trigger audit and transaction rollback.
+- **SQL-ASSET-FIELD:** Asset and field-job create/list, manager-only active field engineer assignments requiring customer grants, field-only exact-assignee reads/status, tenant-wide case-insensitive assetTag uniqueness, assignment JSONB projection constraint and immediate access revocation. External job completion remains unsupported.
+- **CI-10.3:** PostgreSQL 16 source import/parity, five-role/staff signed context HTTP security, cross-customer object access, forced audit failure/rollback and independent restore verification added to existing Node/Chromium regression matrix.
+- **OPEN P0:** Full module SQL CRUD/transaction parity, normalized tenancy tables, production attestation/credential policy, real customer mapping + source/target data safety, workflow invariants, signed provider evidence, actual Hostinger DB deployment and rollback/restore rehearsal. Normal runtime is still JSON, PR #1 remains Draft.
+- [Detailed Phase 10.3 implementation report](PHASE_10_3_SIGNED_CONTEXT_DOMAIN_REPOSITORIES_2026-11-11.md).
+
+## Phase 10.3 verified CI evidence — 11 November 2026
+
+- **Code SHA:** [`68b0376`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/68b0376463578a439eb87d8aee6d5ee104c39262).
+- [GitHub Actions push #43042984912](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43042984912) PostgreSQL 16 staging **27/27**, authenticated SQL HTTP including project/ticket/asset/job workflows and signed context replay **93/93**, PostgreSQL dump/restore with attestation **18/18**. The same commit's existing TypeScript/build and Node backend job completed successfully.
+- Real PostgreSQL service checks include HMAC signature of tenant+actor+transaction+backend, rejection of unsigned/forged/replayed context, owner-only project sharing, field-assigned asset/job custody, customer membership grant/revoke, SQL audit and failure rollback, source SHA/parity, backup and restored RLS.
+- These verification numbers refer to **ephemeral CI fixtures, not a live Postgres deployment or a completed multi-tenant cutover**. Existing JSON application and production customer data were unchanged.
+
+## Phase 10.4 — 11 November 2026 (internal commerce drafts; not operational finance)
+
+- **P10.4-SQL** Implemented migration 005: FORCE-RLS quote draft, unverified internal proposal and RMA intake insert permissions; two composite tenant/customer draft ledgers for procurement (`REQUEST_DRAFT`) and owner finance (`PREVIEW_UNISSUED`). Foreign keys tie project/proposal, asset/RMA, quote/preview; server and DB reject forged verified payment/provider/OEM claims.
+- **P10.4-API** Authenticated staging-only create/list operations for quotes, proposals, RMAs, procurement drafts, finance previews; creator and owner authorizations validated in HMAC-signed PostgreSQL transactions. No actual dispatch/settlement/approval capability.
+- **P10.4-AUDIT** New SQL triggers audit every accepted insert and roll back complete finance drafts when audit fails. Direct SQL writer does not have financial/procurement UPDATE/DELETE. Existing JSON-backed app remains unchanged.
+- **P10.4-VERIFY** Tests added for five-role/customer access, linked FK cross-customer denial, invoice/PO/provider/OEM claim refusal, failed audit atomic rollback, source-parity and independent PG16 restore comparing 12 RLS tables. Final Actions evidence to be recorded after CI finishes.
+- **P0 BLOCKERS** Production SQL repositories, actual invoices/taxes/PO/payment/OEM/provider workflows, historical customer crosswalk, secure managed database, migration rollback, DR/Hostinger signoff. PR #1 still Draft; main untouched.
+- [Detailed Phase 10.4 report](PHASE_10_4_COMMERCE_DRAFTS_2026-11-11.md).
+
+## Phase 10.5A — 12 November 2026 (partial: safe staging draft retries and explicit cutover denial)
+
+- **PG-10.5A-RETRY:** `006_staging_idempotent_drafts.sql` creates a 13th FORCE-RLS table (`pilot_request_keys`) with unique tenant+authenticated actor+key and immutable operation, customer, digest and draft resource pointer. Narrow writer SELECT/INSERT only; no UPDATE/DELETE.
+- **HTTP-10.5A:** Optional Idempotency-Key for *internal procurement request drafts* and *unissued finance previews*. 201 new, 200 exact replay, 409 conflicting key reuse. Server-side SHA256 normalized request digest, server actor/tenant context; failed audit rolls back claimed key with the business draft.
+- **TX-10.5A:** Bounded PostgreSQL 40001/40P01 transaction retries with fresh per-attempt signed context. CI adds parallel same-key HTTP requests, one-record/one-audit checks, actor separation, malformed key and cross-operation rejection.
+- **GATE-10.5A:** `scripts/postgres/cutover_readiness_gate.mjs` and dedicated smoke test enforce local read-only verification: migration markers, PostgreSQL 16, thirteen FORCE-RLS tables, SQL role privileges, source SHA provenance, and static release blockers. `gate: BLOCKED` exit 3 is intentionally the **successful safe decision**, not production readiness.
+- **P0 STILL BLOCKED:** Normal JSON business runtime, production DB session/secret model, all-module SQL transactional parity, real procurement/finance external authorization, customer historical crosswalk, multi-instance sessions, migration dry-run on approved non-PII source, encrypted recovery and verified Hostinger rollback. Draft PR #1 stays unmerged.
+- [Phase 10.5A scope and safety runbook](PHASE_10_5_TRANSACTION_RETRIES_CUTOVER_GATE_2026-11-12.md).
+
+## Phase 10.5A retry-pool hardening and acceptance checkpoint — 12 November 2026
+
+- Code commit `f5d97ad7d43853aa0c2242d312055352ee5608e3` releases the checked-out PostgreSQL connection **before** bounded serialization/deadlock backoff. This prevents a four-connection pilot pool from needlessly holding connections while eight concurrent HTTP test clients retry.
+- On PostgreSQL transaction failure the service first attempts explicit ROLLBACK. If rollback itself fails, the connection is treated as broken and discarded via `client.release(true)`; that attempt is not retried. Only `40001` and `40P01` with a confirmed rollback can be retried. New attempts create fresh tenant/actor HMAC signatures bound to their own transaction and backend PID.
+- Verified pre-Phase 10.5A starting state: Phase 10.4 Push CI `43048956948` and PR CI `43048974274` both finished with SUCCESS. Previous intermediate Phase 10.5A commits had failures because schema installation and read-only gate were added in separate commits; the integrated current revision contains both.
+- **Final Phase 10.5A acceptance remains pending:** [Push CI #43098055997](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43098055997) and [PR CI #43098061347](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43098061347) were queued at the last inspection. A queued run is not a green result. Do not merge/deploy or upgrade readiness status until both the latest-commit workflows complete successfully.
+- Database cutover is still **BLOCKED by design**, even if these tests eventually pass. Historical migration, full SQL runtime parity, secure production identity, external finance/provider sandbox evidence and recovery exercises are still P0 blockers.
+
+## Phase 10.5B — 12 November 2026 (normalized service SQL + two-process concurrency, STAGING GREEN)
+
+- **PG-NORMAL-10.5B:** migration 007 creates `pilot_service_work_orders` and append-only `pilot_service_work_order_events` with relational FKs, full FORCE RLS, title/identity immutability, DB-owned optimistic revision, role-scoped assignment and audit triggers; schema total **15 FORCE-RLS tables / 7 migration markers**.
+- **HTTP-NORMAL-10.5B:** staging-only GET/POST normalized orders, PATCH manager assignment, PATCH authorized sequential internal progress with `expectedVersion`, GET owner history. Restricts engineer to exact assigned customer and never supports external completion.
+- **MULTI-INSTANCE-10.5B:** two actual independent compiled Express processes, separate local auth stores, same disposable PG16. Simultaneous revision-2 update: exactly one HTTP 200, one HTTP 409. 26/26 tests, including row-version/SQL audit count, server-crossing visibility, customer grant revoke and direct SQL tampering denial.
+- **CI VERIFIED GREEN:** [Push #43102224573](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43102224573) and [PR #43102234533](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43102234533), both `completed success` on code commit `397f840b48a065f14096add8b3ca29f0d3532689`. PostgreSQL stage **27/27**, authenticated SQL HTTP **155/155**, multi-instance **26/26**, cutover checks **8/8**, restored PostgreSQL **29/29**, TypeScript/build and Chromium PASS.
+- **P0 OPEN:** Normal app still JSON; normalized work order is isolated stage route, not full domain migration; customer historical crosswalk, production identity/shared sessions, outbox/external effects, broad multi-tenant tests, managed disaster recovery and Hostinger cutover remain blocked. Draft PR #1 remains open/unmerged; `main` unchanged.
+- [Phase 10.5B technical and staging safety report](PHASE_10_5B_NORMALIZED_SERVICE_MULTI_INSTANCE_2026-11-12.md).
+
+## Phase 10.5C — 12 November 2026 (read-only shadow parity + per-customer digest + inert outbox)
+
+- **SHADOW-10.5C:** New actual compiled JSON HTTP GET vs PG16 staging RLS comparator, **18 authenticated role/route pairs** across customer/projects/assets/tickets/CRM. Operates only from a private copy of the staged immutable fixture, uses PostgreSQL read-only transactions, checks snapshot SHA and customer grants, fails on injected SQL JSONB tamper or unsafe DB. **Not production real-time dual-read.**
+- **CROSSWALK-10.5C:** New read-only per-customer reconciliation manifest checks customer/tenant identity, staff grant equivalence, all customer-scoped record row digests, linked proposal/RMA ownership and owner-only legacy row digest. Does not leak customer names or payloads; explicitly reports `ownerOnlyMappingApproved:false` / `productionCutoverReady:false` until human-reviewed ownership exists.
+- **OUTBOX-10.5C:** Migration 008 creates `pilot_service_outbox` (16th FORCE-RLS table) tied by FK to normalized service work-order and revision. Trigger writes pending message atomically with accepted transition + pilot audit. `PENDING_REVIEW`, `delivery_enabled=false`, attempts 0 enforced by SQL CHECK. No dispatcher or network delivery, and restricted app writer has no insert/update/delete.
+- **FINAL CODE CI GREEN:** complete Phase 10.5C code `2c9e58712feef56a9598a803efe6efcd957ec702` Push [#43107048558](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43107048558), PR [#43107057579](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43107057579), both `completed success`: staging + authenticated JSON HTTP shadow + customer/grant digest/tamper tests **33/33**, SQL pilot HTTP **155/155**, two-process/outbox **33/33**, cutover denial **8/8**, independent PG restore **30/30**, backend and Chromium PASS. Documentation-only follow-up commits have their own CI. All checks use disposable data; production is still BLOCKED.
+- **RELEASE P0:** JSON production runtime still source of truth, legacy owner-only customer mapping unapproved, no production SQL security/managed secrets/shared auth/recovery/cutover, no approved provider outbound integration or delivery worker. CI-green staging does NOT authorize deployment. Draft PR #1, main untouched.
+- [Detailed Phase 10.5C technical report and operator runbook](PHASE_10_5C_SHADOW_OUTBOX_RECONCILIATION_2026-11-12.md).
+
+## Phase 10.5D — 12 November 2026 (staging-only repository adapter, extended graph and blocked outbox plan, CODE CI GREEN)
+
+- **REPOSITORY-10.5D:** `server/staging_read_repository.ts` is a bounded typed `StagingReadRepository` contract for five domain projections. Optional `APEX_PG_REPOSITORY_SHADOW_READS=true` is accepted only inside the signed local staging pilot; owner-only GET compares server-side SHA canonicalized JSON-primary and PG-RLS views in a **READ ONLY** PostgreSQL transaction. No automatic reconciliation, no SQL source switch, no data exposure.
+- **CROSS-MODULE-10.5D:** `customer_reconciliation_manifest.mjs` adds SQL/source project↔proposal, asset↔RMA, ticket/asset/job custody fields, creator/reporter identity, project collaborator shares and customer grant equivalence. Tests reject cross-customer proposal foreign key and detect deliberate PG project-share drift. Legacy owner-only customer mappings remain unapproved.
+- **OUTBOX-10.5D:** `outbox_dispatch_plan.mjs` + 8 smoke tests prove every pending internal event matches append-only service history, forced RLS, restricted SQL writer privileges and zero enabled delivery; command **intentionally returns exit 3 BLOCKED**, has no send option and refuses production/default DB/enable flags. External worker/lease/retries/provider adapters are strictly future design, not enabled. [Preapproval architecture](OUTBOX_DISPATCH_PREAPPROVAL_DESIGN_2026-11-12.md).
+- **CI CODE GREEN:** [Push #43180700209](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43180700209) and [PR #43180707071](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43180707071) succeeded on code SHA `8f09da7dc94c9e63a3504c2318bb2b81606f8565` with `verify`, `browser`, `postgres-staging` all PASS: PostgreSQL stage **35/35**, authenticated PG pilot **160/160**, multi-instance **33/33**, blocked outbox design **8/8**, blocked cutover **8/8**, independent restore **30/30**. Final documentation commit has its own CI.
+- **P0 REMAINING:** full PostgreSQL business domain migration, approved owner-only historical customer crosswalk, production KMS/auth/sessions/multi-tenant, provider sandbox, financial/legal compliance, live dispatcher receipts/lease/ DLQ, managed encrypted backups and Hostinger release/rollback. Phase 10.5D CI pass is NOT cutover approval. Draft PR #1 stays open, main and production untouched.
+- [Phase 10.5D implementation/runbook](PHASE_10_5D_REPOSITORY_CROSSMODULE_DISPATCH_DESIGN_2026-11-12.md).
+
+
+---
+
+## Phase 10.5E — controlled CRM read-through + two-tenant authorization acceptance (12 November 2026)
+
+**Branch:** `fix/phase1-security-integrity-20261106`; Draft PR #1. **Status:** implementation pushed for CI review; production rollout **BLOCKED**.
+
+- Opt-in `APEX_PG_CRM_READ_THROUGH=true` + mandatory explicit staff ID allowlist under the existing signed staging-only SQL pilot; default `GET /api/crm` remains JSON. Only the single CRM GET route participates.
+- Read-only SQL transaction, authenticated signed tenant/user context and forced RLS; full per-actor CRM JSON/SQL content, ID and customer custody parity; no response rows on drift (409) or SQL outage (503). No automatic backfill, writes, source switch or audit telemetry containing customer IDs.
+- Real independent two-tenant, two-process PostgreSQL acceptance with same per-tenant CRM/customer IDs, cookie isolation, manager role gates, signed vs forged context, grant drift, SQL payload tamper and no read-triggered audit writes.
+- Named staging customer migration acceptance gates and evidence requirements in [Phase 10.5E runbook](PHASE_10_5E_CRM_CANARY_MIGRATION_ACCEPTANCE_2026-11-12.md): source immutable, exact per-customer record/grant/link parity, explicit owner-only legacy mapping signoffs, reversible rehearsed restore and multi-tenant access proofs. None implies release approval.
+- **CI verified on code SHA `e0d69cc`:** [Push #43215153638](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215153638) and [PR #43215162295](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43215162295) both **SUCCESS**, including TypeScript/build, backend, Chromium and full PostgreSQL staging+restore. Separate two-tenant CRM canary suite **18/18 PASS**. Documentation-only commit has its own CI.
+- **No production/Hostinger customer migration**, dispatch worker, KMS identity solution or legal finance-provider integration. Leave main unchanged and PR Draft.
+
+
+---
+
+## Phase 10.5F — historical ownership review, restore rollback evidence and cross-domain tenant RLS (12 November 2026)
+
+**Branch:** `fix/phase1-security-integrity-20261106`; Draft PR #1; production cutover **BLOCKED**.
+
+- New `scripts/postgres/owner_legacy_review.mjs`: strictly private, read-only source/reviewer proposal with exact source SHA, SQL import provenance, complete 12-class legacy row coverage, distinct claimed data owner/security reviewer references, customer ID registration and row-level content hashes. It *never* verifies external signatures, applies reassignment or flips the source of truth.
+- `customer_reconciliation_manifest.mjs` extends full scoped/customer-link digest checks to exact historic staff role, disabled status, duplicate grant and project-collaborator detection. Synthetic negative tests reject missing review coverage, invalid proposed owner, reviewer duplication and stale source SHA.
+- `tests/postgres/tenant_domain_matrix.mjs` independently checks **two** real tenant identities with overlapping customer/record IDs, six domain kinds (`crmOpportunities`, projects, assets, tickets, jobs, quotes), role/assignment/customer RLS, signed context mismatch, cross-tenant insert denial, immutable customer custody, disabled account exclusion and immediate grant revocation.
+- `scripts/postgres/rehearsal_evidence.mjs` compares the source stage DB with a separate PG16 clone using read-only independent transactions, all 18 tables (16 FORCE RLS), policies, FK/check constraints, indexes, staging markers, immutable import provenance and canonical hashes. CI deliberately corrupts *only* the restored clone, must detect drift, then recreates it from an unchanged SHA256 archive and rechecks full RLS/restore smoke acceptance.
+- **Release:** review references do not prove legal authorization; real customer-data snapshot, approval signatures, encrypted offsite backup, live tenant identities, operational rollback and Hostinger are **not verified**. Cutover and outbox remain BLOCKED.
+- **CI verified:** Implementation SHA [`2a20b094`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/2a20b0941708f37499fc3c64156f9a5ba9c3b554), [Push #43228070837](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43228070837) and [PR #43228083159](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43228083159) **both success**: staging+review 41/41, SQL HTTP 163/163, 2-process 33/33, 2-tenant CRM 18/18, 6-domain matrix 79/79, restore 30/30 (repeated after deliberate restored-clone corruption), verify and Chromium PASS. Production gate still BLOCKED. Final documentation-only commit requires its own CI. [Technical report](PHASE_10_5F_HISTORICAL_OWNERSHIP_RECOVERY_2026-11-12.md).
+
+---
+
+## Phase 10.5G — independent signatures, full route-level authorization inventory and operator rehearsal gate (12 November 2026)
+
+**Branch:** `fix/phase1-security-integrity-20261106` / Draft PR #1. **No production migration, no new PG business endpoint.**
+
+- `scripts/postgres/review_signoff_gate.mjs` is a strictly offline cryptographic validation preflight. Four distinct Ed25519 public keys/principals and ordered DATA_CUSTODIAN, SECURITY_REVIEWER, DBA_RESTORE_REVIEWER and RELEASE_MANAGER hash-chain attestations; reviewer trust-file SHA256 pinned externally, source and complete owner-only mapping SHA, independent restored-clone evidence SHA, explicit RPO/RTO/maximum downtime/window/write freeze/incident owner/rollback trigger. **Always returns BLOCKED (exit 3) even for fully valid fixture attestations.**
+- `tests/review_signoff_smoke.mjs` uses per-run ephemeral keys and tamper/role/replay/expiry/trust mismatch negative controls; does not create approvals or execute a migration.
+- `tests/business_route_inventory.mjs`, `tests/business_api_authorization_matrix.mjs`: all main and PostgreSQL-pilot routes enumerated from TS AST; inventory enforces authentication for every nonpublic route; all main protected routes receive anonymous HTTP 401 checks, and every role-gated route receives a disallowed authenticated role HTTP 403 check. PostgreSQL pilot HTTP suite extends anonymous denial to every registered pilot route. **Coverage limited to route-level RBAC; full object-level tenancy still open.**
+- Existing 10.5F isolated source→restored schema/row digest and clone corrupt-detect-recover rehearsal remains. Real operator RPO/RTO measured at an approved window, encrypted offsite recovery, independently certified real reviewer identities, business freeze/resume and cross-instance customer access are not done.
+- **CI verified at code SHA `3b7d56c`:** [Push #43253492203](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43253492203) and [PR #43253506158](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43253506158) **both SUCCESS** (verify, Chromium, PostgreSQL staging+restore). Route inventory: **95** main + **39** PG pilot; **90** normal anonymous denials, **84** disallowed-role HTTP denials, **4** authenticated broad GETs; synthetic 4-role Ed25519 review **21/21 PASS**. Documentation-only final SHA has separate CI. [Technical report](PHASE_10_5G_REVIEW_AUTHORIZATION_REHEARSAL_2026-11-12.md).
+- **Hard release gate:** production cutover, owner-only customer remapping, provider outbox delivery and Hostinger deploy remain **BLOCKED**. Keep main unchanged and Draft PR #1 unmerged.
+
+
+---
+
+## Phase 10.5H — dual-issuer identity/evidence custody, object-level API matrix, measured recovery (12 November 2026)
+
+**Development:** `fix/phase1-security-integrity-20261106`, Draft PR #1; main and production unchanged.
+
+- New `scripts/postgres/identity_custody_gate.mjs`: strict private/offline evidence review; validates original 10.5G four-reviewer Ed25519 hash chain, independently SHA256-pinned **two issuer** keys, current jointly signed revocation list, four distinct organizational-subject/key/role claims with validity windows, and **8 chained dual-signed custody receipts**. Always BLOCKED exit 3 on valid evidence, 1 on tamper, 2 on unsafe execution; no actual HR-system verification or human approval.
+- New `tests/identity_custody_smoke.mjs`: ephemeral issuer and review keys plus forged root, self-certification, suspended/duplicated identity, stale/tampered revocation, altered custody, signature and environment negative controls.
+- New `tests/business_object_isolation_matrix.mjs`: independent two-customer JSON fixture with real owner/Sales/IT/Field/Procurement authenticated HTTP tests; all **11 scoped business collections**, customer-denied creates, existing B record ID tampering, no denied writes, grant revocation, forged tenant headers. Every main dynamic object route is either exercised on foreign private object or specifically classified as owner-only, global, or legacy. Full production multi-tenant authorization is NOT established.
+- New `scripts/postgres/recovery_measurement_gate.mjs` and `tests/recovery_measurement_smoke.mjs`: measured disposable PG archive/restore/detection/rollback wall-clock observations, immutable archive and evidence SHA, explicit CI operator session, frozen source snapshot, RPO-age surrogate, RTO and maximum downtime budgets. Successful checks still return BLOCKED 3, and cannot restore or approve production.
+- CI extends `verify` with all three suites and the existing PostgreSQL restore/corrupt/recover workflow with actual observed timing thresholds. Real-world reviewer employment/role authority, external evidence key custody, operator-approved real migration, encrypted backups, production data-loss assessment and full JSON tenant isolation remain P0 blockers.
+- **CI verified at implementation SHA `f98d4c1`:** [Push #43269141150](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43269141150) and [PR #43269153828](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43269153828) **both SUCCESS**, with verify/Chromium/PostgreSQL jobs. Object BOLA **51/51**, dual-issuer custody **18/18**, synthetic recovery budget **15/15**, restored PostgreSQL acceptance **30/30**. Measured disposable corruption→verified rollback **977ms**, rollback restore+verify **973ms**, initial restore **1046ms**, no-write window **2473ms**, source-age surrogate **161ms**. Production RTO/RPO remains unapproved. Documentation-only SHA gets separate CI. [Phase 10.5H report](PHASE_10_5H_IDENTITY_CUSTODY_OBJECT_AUTH_RECOVERY_2026-11-12.md).
+
+**No customer migration, SQL business endpoint rollout, Hostinger production deployment, or outbox provider dispatch.**
+
+
+---
+
+## Phase 10.5I — legacy scope hardening, exhaustive object route denial, independently witnessed operator evidence (13 November 2026)
+
+**Development branch:** `fix/phase1-security-integrity-20261106`; Draft PR #1. Keep main unchanged and do not enable production migration, provider dispatch or new SQL read-through endpoints.
+
+- Legacy object routes: add `tests/legacy_object_integrity_matrix.mjs` testing the **18** previously excluded dynamic routes, both wrong-role and missing-ID denial/501 behavior, unchanged persistent state, and full 30-route dynamic API accounting alongside the 12 10.5H customer-scoped BOLA checks. These tests do not certify cross-customer access for owner-only/tenant-global records.
+- Prevent direct caller-controlled Product/Supplier/RFQ source IDs or arbitrary Product fields in `server.ts`, enforce strict typed catalog mutation, SKU uniqueness and stock invariants; reject forged RFQ quote/PO creation, duplicate supplier quotes and supplier quote revisions after PO preparation; `server/db.ts` adds defensive transaction-time ID/SKU and PO quote immutability.
+- Add `scripts/postgres/governed_handoff_gate.mjs` and `tests/governed_handoff_smoke.mjs`: require separately pinned Ed25519 DBA operator + independent security witness signing the exact synthetic CI recovery plan, archived PostgreSQL dump, observed restore/damage/rollback timings, independent SQL digest, run session, and externally reviewed-ticket SHA256. All signatures/approval claims are **synthetic evidence** and success returns `BLOCKED` status 3.
+- **Final CI green at SHA `8d484cc4`:** [Push #43342468573](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43342468573) and [PR #43342474822](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43342474822) both **SUCCESS** with backend, Chromium and PG16. Paired monotonic `/proc/uptime` plus UTC event clocks now enforce true causal order and strict synthetic RPO-age/RTO/downtime, allowing <=2s *drift* only; negative controls **19/19**, legacy object **71**, governed handoff **18/18**, SQL tenant **79/79**, restore **30/30** both sides of clone corruption. CI measured detected→verified rollback **1,150ms**, synthetic window **2,190ms**, maximum UTC clock drift **832ms**. Previous wall-clock-only PR failures are recorded, not hidden. **No production approval.**
+- **Historical earlier CI verified at code SHA `58448faa`:** [Push #43341197271](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43341197271) and [PR #43341203992](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43341203992) **both SUCCESS**, backend/Chromium/PostgreSQL jobs. New legacy matrix **71 PASS**, independent operator witness **18/18**, API smoke **96/96**, role API **133/133**, initial PG staging **41/41**, SQL tenant matrix **79/79**, PG restore **30/30** before/after clone tamper. Clone recovery **1,108ms** corruption detection→verified rollback, synthetic window **2,178ms** (nonproduction only). Earlier SHA `cd9a563` initially failed the synthetic measurement timing-window gate, follow-up SHA `58448faa` added diagnostic offsets; both subsequent full workflows passed. Documentation-only SHA requires independent CI.
+- **Still blockers:** genuine operator identity verified by actual organization, externally archived dual-signed approvals, real customer historical ownership decisions, confirmed live encrypted offsite backups and RTO/RPO, independently proved all runtime multi-tenant endpoints, legal invoice/payment reconciliation and Hostinger deployment sign-off. Production cutover NO-GO.
+
+[10.5I technical and safety report](PHASE_10_5I_LEGACY_OBJECT_GOVERNED_HANDOFF_2026-11-13.md).
+
+
+---
+
+## Phase 10.5J — governed release evidence intake and offline nonproduction operator handoff (13 November 2026)
+
+**Status:** CI-verified on `fix/phase1-security-integrity-20261106` (Draft PR #1), production release **NO-GO**. `main` unchanged. [Push CI #43404580231](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43404580231) and [PR CI #43404587089](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43404587089) **both SUCCESS** on SHA `075769eb` (backend, Chromium, PG16). Phase 10.5J composite signed dossier **35/35**, H identity/custody **18/18**, I handoff **18/18**, monotonic recovery **19/19**, authenticated API **96/96**, roles **133/133**, SQL isolation **79/79**, PG import **41/41**, cutover BLOCKED **8/8**, PG restore **30/30** twice. Disposable clone corruption→verified rollback **970 ms**, synthetic no-write window **1960 ms**. No actual corporate approvals or customer data tested.
+
+- `scripts/postgres/release_dossier_gate.mjs` adds read-only **composite evidence verification**: reruns both the Phase 10.5H identity/custody gate and 10.5I signed recovery handoff against the exact original private files; enforces same historical tenant source SHA256, review, immutable clone schema/data digest and witnessed recovery archive.
+- **Operator credentials:** requires 4 independently pinned new external-governance public keys (personnel IdP, security IdP, data controller, privacy officer), excludes reused reviewer/witness/issuer keys, enforces jointly signed recent revocation list and 2 distinct operator/witness credential claims bound to their actual operator Ed25519 public keys, distinct hashed personnel/IdP account identifiers, MFA-assertion digest and operator plan. All verifications remain cryptographic statements, not a live connection to an external IdP/HR.
+- **Authorized nonproduction custody proposal:** data controller and privacy officer must sign identical scope-limited source/review/custody/operator/recovery/evidence SHA256 digests, identity credential chain, immutable ticket, tenant, exact historical owner-only decision counts, explicit owner-only retention vs customer proposals, privacy/legal basis and retention/deletion evidence digests. Only synthetic or declared pseudonymized encrypted nonproduction data is eligible; no raw production dataset. All claims are unverified against actual outside systems.
+- `tests/release_dossier_smoke.mjs` exercises complete independently signed synthetic reviewer, operator and release governance identities plus negative cases (revocation, self-certification, source drift, missing rows, illicit data class, forged ticket, expired approval, retroactive data permission, unencrypted data claims and attempted production activation). CI integrates via `smoke:release-dossier`.
+- **Critical limits:** NO actual corporate human credential check, government/legal custody validation, corporate IdP login or independent approval ticket API query; no real encrypted authorized source, real operator witnessed database rehearsal, production RPO/RTO, customer ownership reassignment or PostgreSQL cutover. This phase cannot be certified production ready from synthetic evidence. [Phase 10.5J report/runbook](PHASE_10_5J_EXTERNALLY_GOVERNED_RELEASE_ACCEPTANCE_2026-11-13.md).

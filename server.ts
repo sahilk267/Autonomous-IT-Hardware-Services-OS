@@ -5,7 +5,9 @@ import crypto from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { dbStore, defaultConnectors, hashPassword, verifyPassword } from './server/db.ts';
-import { UserRole } from './src/types.ts';
+import { UserRole, Project, ProjectMilestone, ProductItem, SupplierInfo, RFQItem } from './src/types.ts';
+import { loginAttemptLimiter } from './server/login_limit.ts';
+import { registerPostgresPilotRoutes } from './server/postgres_pilot.ts';
 
 const app = express();
 
@@ -16,7 +18,7 @@ function resolvePort(): number {
     if (!isNaN(parsed) && parsed > 0) return parsed;
   }
   // Development server must always listen on port 3000 (port 8080 is reserved for reverse proxy)
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'staging') {
     return 3000;
   }
   return Number(process.env.PORT) || 3000;
@@ -24,7 +26,46 @@ function resolvePort(): number {
 
 const PORT = resolvePort();
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
+
+// Browser-origin CSRF defense for state-changing API requests. Telegram webhooks
+// use a separate authenticated integration secret and are not browser sessions.
+app.use('/api', (req, res, next) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+  // Fetch Metadata and Origin are browser-supplied, but neither the proxy headers
+  // nor an X-Forwarded-Host from an arbitrary client are trusted.
+  const fetchSite = req.get('sec-fetch-site');
+  if (fetchSite === 'cross-site') {
+    return res.status(403).json({ success: false, error: 'Cross-site mutation rejected.' });
+  }
+  const origin = req.headers.origin;
+  if (origin) {
+    try {
+      const parsed = new URL(origin);
+      const configured = process.env.APEX_PUBLIC_ORIGIN?.trim();
+      const expected = configured ? new URL(configured).origin : null;
+      const host = req.get('host');
+      if (parsed.origin === 'null' ||
+          (expected ? parsed.origin !== expected :
+            !host || parsed.host.toLowerCase() !== host.toLowerCase())) {
+        return res.status(403).json({ success: false, error: 'Cross-origin mutation rejected.' });
+      }
+    } catch {
+      return res.status(403).json({ success: false, error: 'Malformed request origin.' });
+    }
+  } else if (req.headers.cookie && fetchSite && fetchSite !== 'same-origin') {
+    // Modern browsers identify same-site requests from sibling subdomains;
+    // without an Origin, they cannot mutate a cookie-authenticated session.
+    return res.status(403).json({ success: false, error: 'Missing same-origin proof.' });
+  }
+  next();
+});
+
+function setSessionCookie(res: express.Response, token: string, clear = false) {
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.setHeader('Set-Cookie',
+    `apex_session=${token}; Path=/; HttpOnly; SameSite=Strict${secure}; Max-Age=${clear ? 0 : 86400}`);
+}
 
 // Cookie parser helper
 function parseCookies(cookieHeader?: string): Record<string, string> {
@@ -77,6 +118,58 @@ function requireRole(...roles: UserRole[]) {
   };
 }
 
+const ROLE_READ_COLLECTIONS: Record<UserRole, readonly string[]> = {
+  BUSINESS_OWNER: ['products','leads','quotes','telegramMessages','suppliers','rfqs','tickets','endpoints','jobs','assets','licenses','amcs','projects','proposals','providers','events','invoices','workflows','connectors','rmaClaims','knowledgeArticles','crmOpportunities','marketplaceDisputes','inventoryTransactions','customers'],
+  SALES_MANAGER: ['products','leads','quotes','projects','proposals','crmOpportunities','knowledgeArticles','customers'],
+  PROCUREMENT_LEAD: ['products','suppliers','rfqs','quotes','projects','assets','inventoryTransactions','customers'],
+  ENTERPRISE_IT_HEAD: ['tickets','endpoints','jobs','assets','licenses','amcs','projects','proposals','rmaClaims','knowledgeArticles','customers'],
+  FIELD_ENGINEER: ['products','tickets','endpoints','jobs','assets','rmaClaims','knowledgeArticles','customers']
+};
+
+// Phase 9 — explicit customer membership AND role/object permission for customer-bound records.
+// Unmapped legacy records have no inferred customer membership. Only the owner can access them.
+type LocalActor = { role: UserRole; userId: string };
+const customerRecord = (customerId: unknown) =>
+  typeof customerId === 'string' ? dbStore.getState().customers.find(
+    c => c.id === customerId && c.tenantId === dbStore.getState().tenant.id) : undefined;
+const canAccessCustomer = (customerId: string | undefined, actor: LocalActor) =>
+  actor.role === 'BUSINESS_OWNER' ||
+  !!(customerRecord(customerId)?.staffUserIds.includes(actor.userId));
+const visibleCustomers = (actor: LocalActor) =>
+  dbStore.getState().customers.filter(c => canAccessCustomer(c.id, actor));
+const customerFromInput = (input: unknown, actor: LocalActor): import('./src/types.ts').CustomerAccount | null => {
+  const customer = customerRecord(input);
+  return customer && canAccessCustomer(customer.id, actor) ? customer : null;
+};
+const visibleAsset = (asset: { customerId?: string; assignedUserId?: string }, actor: LocalActor) =>
+  canAccessCustomer(asset.customerId, actor) &&
+  (actor.role !== 'FIELD_ENGINEER' || (!!asset.assignedUserId && asset.assignedUserId === actor.userId));
+const visibleEndpoint = (endpoint: { customerId?: string; assignedUserId?: string }, actor: LocalActor) =>
+  canAccessCustomer(endpoint.customerId, actor) &&
+  (actor.role !== 'FIELD_ENGINEER' || (!!endpoint.assignedUserId && endpoint.assignedUserId === actor.userId));
+const visibleRMA = (claim: { assetId?: string; customerId?: string }, actor: LocalActor) =>
+  actor.role === 'BUSINESS_OWNER' ||
+  (!!claim.assetId && dbStore.getState().assets.some(asset =>
+    asset.id === claim.assetId && asset.customerId === claim.customerId && visibleAsset(asset, actor)));
+const visibleProject = (project: Project, actor: LocalActor) =>
+  canAccessCustomer(project.customerId, actor) &&
+  (actor.role === 'BUSINESS_OWNER' ||
+    ((actor.role === 'SALES_MANAGER' || actor.role === 'ENTERPRISE_IT_HEAD' ||
+      actor.role === 'PROCUREMENT_LEAD') &&
+     (project.createdByUserId === actor.userId ||
+      (Array.isArray(project.collaboratorUserIds) && project.collaboratorUserIds.includes(actor.userId)))));
+const mayManageProject = (project: Project, actor: LocalActor) =>
+  visibleProject(project, actor) && (actor.role === 'BUSINESS_OWNER' ||
+   (actor.role === 'ENTERPRISE_IT_HEAD' && project.createdByUserId === actor.userId));
+const visibleProjects = (actor: LocalActor) =>
+  dbStore.getState().projects.filter(project => visibleProject(project, actor));
+const visibleProposals = (actor: LocalActor) => {
+  const visibleIds = new Set(visibleProjects(actor).map(project => project.id));
+  return dbStore.getState().proposals.filter(proposal => visibleIds.has(proposal.projectId));
+};
+
+// Internal customer boundaries are not database-enforced tenant isolation. Other modules remain in scope for expansion.
+
 // Helper for Gemini initialization using modern @google/genai SDK
 function getGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -94,35 +187,9 @@ function getGeminiClient(): GoogleGenAI | null {
 // --- Public Endpoints ---
 
 // 1. Health check & configuration status (Safe public endpoint - NO confidential business or PII leak)
+// Public liveness check: no business record counts or integration configuration leak.
 app.get('/api/health', (req, res) => {
-  const state = dbStore.getState();
-  const geminiConfigured = !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY';
-  const telegramConfigured = !!process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_TOKEN !== 'MY_TELEGRAM_BOT_TOKEN';
-
-  res.json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    integrations: {
-      gemini: geminiConfigured ? 'CONFIGURED' : 'NOT_CONFIGURED',
-      telegram: telegramConfigured ? 'CONFIGURED' : 'NOT_CONFIGURED',
-      payments: process.env.RAZORPAY_KEY_ID ? 'CONFIGURED' : 'NOT_CONFIGURED',
-      gst: process.env.GST_API_KEY ? 'CONFIGURED' : 'NOT_CONFIGURED'
-    },
-    database: {
-      status: 'ready',
-      recordCounts: {
-        products: state.products.length,
-        quotes: state.quotes.length,
-        invoices: state.invoices.length,
-        tickets: state.tickets.length,
-        jobs: state.jobs.length,
-        assets: state.assets.length,
-        projects: state.projects.length,
-        events: state.events.length
-      }
-    }
-  });
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // Auth Status (Check if first-time administrator enrollment is needed)
@@ -150,6 +217,13 @@ app.post('/api/auth/setup', (req, res) => {
     if (users.length > 0) {
       return res.status(403).json({ success: false, error: 'Initial administrator enrollment is already completed.' });
     }
+    const setupSecret = process.env.APEX_INITIAL_SETUP_TOKEN;
+    if (process.env.NODE_ENV === 'production' && !setupSecret) {
+      return res.status(503).json({ success: false, error: 'Set APEX_INITIAL_SETUP_TOKEN in the server environment before first administrator setup.' });
+    }
+    if (setupSecret && req.body?.setupToken !== setupSecret) {
+      return res.status(403).json({ success: false, error: 'Invalid administrator setup token.' });
+    }
     const { username, password, name, email } = req.body;
     if (!username || typeof username !== 'string' || username.trim().length < 3) {
       return res.status(400).json({ success: false, error: 'Username must be at least 3 characters.' });
@@ -173,7 +247,7 @@ app.post('/api/auth/setup', (req, res) => {
 
     dbStore.addUser(newUser);
     const session = dbStore.createSession(newUser.id, newUser.username, newUser.role);
-    res.setHeader('Set-Cookie', `apex_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
+    setSessionCookie(res, session.token);
     res.status(201).json({
       success: true,
       user: {
@@ -184,7 +258,6 @@ app.post('/api/auth/setup', (req, res) => {
         role: newUser.role,
         tenantId: newUser.tenantId
       },
-      token: session.token
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -193,36 +266,39 @@ app.post('/api/auth/setup', (req, res) => {
 
 // Secure Login (scrypt KDF verification)
 app.post('/api/auth/login', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
+  const { username, password } = req.body || {};
+  if (typeof username !== 'string' || !username.trim() || username.length > 120 ||
+      typeof password !== 'string' || !password || password.length > 1024) {
+    return res.status(400).json({ success: false, error: 'Username and password are required.' });
+  }
+  // Only use the socket peer here: untrusted X-Forwarded-For can be forged.
+  // With a shared reverse-proxy IP, source throttling is conservative; configure
+  // a central rate limiter before load-balancing to multiple server instances.
+  const source = req.socket.remoteAddress || 'unknown';
+  const retrySeconds = loginAttemptLimiter.getRetryAfterSeconds(username, source);
+  if (retrySeconds) {
+    res.setHeader('Retry-After', String(retrySeconds));
+    return res.status(429).json({ success: false, error: 'Too many failed sign-in attempts. Try again later.' });
+  }
   try {
-    const { username, password } = req.body;
-    if (!username || !password) {
-      return res.status(400).json({ success: false, error: 'Username and password are required.' });
-    }
-    const user = dbStore.getUserByUsername(username);
-    if (!user || !user.salt || !user.passwordHash) {
+    const user = dbStore.getUserByUsername(username.trim());
+    const valid = Boolean(user && !user.disabledAt && user.salt && user.passwordHash &&
+      verifyPassword(password, user.salt, user.passwordHash));
+    if (!valid || !user) {
+      loginAttemptLimiter.recordFailure(username, source);
       return res.status(401).json({ success: false, error: 'Invalid username or password.' });
     }
-    const isValid = verifyPassword(password, user.salt, user.passwordHash);
-    if (!isValid) {
-      return res.status(401).json({ success: false, error: 'Invalid username or password.' });
-    }
-
+    loginAttemptLimiter.recordSuccess(username);
     const session = dbStore.createSession(user.id, user.username, user.role);
-    res.setHeader('Set-Cookie', `apex_session=${session.token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`);
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        username: user.username,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        tenantId: user.tenantId
-      },
-      token: session.token
-    });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    setSessionCookie(res, session.token);
+    return res.json({ success: true, user: {
+      id: user.id, username: user.username, name: user.name, email: user.email,
+      role: user.role, tenantId: user.tenantId
+    } });
+  } catch (err) {
+    console.error('Login failed due to a server error:', err);
+    return res.status(500).json({ success: false, error: 'Authentication is temporarily unavailable.' });
   }
 });
 
@@ -230,15 +306,10 @@ app.post('/api/auth/login', (req, res) => {
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
   const session = (req as any).user;
-  const user = dbStore.getUserById(session.userId) || {
-    id: session.userId,
-    username: session.username,
-    name: session.username,
-    email: `${session.username}@apex-it.internal`,
-    role: session.role,
-    tenantId: dbStore.getState().tenant.id,
-    createdAt: session.createdAt
-  };
+  const user = dbStore.getUserById(session.userId);
+  if (!user || !user.passwordHash || !user.salt) {
+    return res.status(401).json({ success: false, error: 'User account no longer valid.' });
+  }
   res.json({
     success: true,
     user: {
@@ -258,15 +329,101 @@ app.post('/api/auth/logout', requireAuth, (req, res) => {
   if (token) {
     dbStore.deleteSession(token);
   }
-  res.setHeader('Set-Cookie', 'apex_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
+  setSessionCookie(res, '', true);
   res.json({ success: true, message: 'Logged out successfully.' });
+});
+
+// Phase 4: local-only staff directory and credential lifecycle.
+// This is not Microsoft Entra/SSO provisioning and does not confer cross-tenant access.
+const STAFF_ROLES: readonly UserRole[] = [
+  'SALES_MANAGER', 'PROCUREMENT_LEAD', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'
+];
+const publicAccount = (user: {
+  id: string; username: string; name: string; email: string; role: UserRole;
+  tenantId: string; createdAt: string; disabledAt?: string; passwordChangedAt?: string;
+}) => ({
+  id: user.id, username: user.username, name: user.name, email: user.email,
+  role: user.role, tenantId: user.tenantId, createdAt: user.createdAt,
+  disabledAt: user.disabledAt, passwordChangedAt: user.passwordChangedAt
+});
+const validLocalPassword = (value: unknown): value is string =>
+  typeof value === 'string' && value.length >= 12 && value.length <= 128;
+
+app.get('/api/admin/staff', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  res.json({ success: true, data: dbStore.getUsers().map(publicAccount) });
+});
+
+app.post('/api/admin/staff', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const { username, name, email, role, temporaryPassword } = req.body || {};
+  if (typeof username !== 'string' || !/^[a-zA-Z0-9_-]{3,40}$/.test(username) ||
+      typeof name !== 'string' || name.trim().length < 2 || name.trim().length > 120 ||
+      typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.length > 254 ||
+      !STAFF_ROLES.includes(role) || !validLocalPassword(temporaryPassword)) {
+    return res.status(400).json({
+      success: false,
+      error: 'Valid username (3–40), name, email, non-owner role and temporary password (12–128 characters) required.'
+    });
+  }
+  try {
+    const { salt, hash } = hashPassword(temporaryPassword);
+    const user = dbStore.addStaffUser({
+      id: 'usr-' + crypto.randomUUID(),
+      username: username.trim(), name: name.trim(), email: email.trim(),
+      role: role as UserRole, tenantId: dbStore.getState().tenant.id,
+      createdAt: new Date().toISOString(), salt, passwordHash: hash
+    }, (req as any).user.username);
+    return res.status(201).json({ success: true, data: publicAccount(user), externalProvisioning: false });
+  } catch (err: any) {
+    const duplicate = String(err?.message || '').includes('already in use');
+    return res.status(duplicate ? 409 : 500).json({ success: false, error: duplicate ? 'Username or email already exists.' : 'Account could not be saved.' });
+  }
+});
+
+app.patch('/api/admin/staff/:id/disable', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const actor = (req as any).user;
+  if (req.params.id === actor.userId) {
+    return res.status(403).json({ success: false, error: 'You cannot disable your own account.' });
+  }
+  try {
+    const account = dbStore.disableStaffUser(req.params.id, actor.username);
+    if (!account) return res.status(404).json({ success: false, error: 'Staff account not found.' });
+    return res.json({ success: true, data: publicAccount(account), externalDeprovisioning: false });
+  } catch (err: any) {
+    if (String(err?.message || '').includes('Business owner')) {
+      return res.status(403).json({ success: false, error: 'The business owner cannot be disabled through this API.' });
+    }
+    return res.status(500).json({ success: false, error: 'Unable to disable staff account.' });
+  }
+});
+
+app.post('/api/auth/change-password', requireAuth, (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  const actor = (req as any).user;
+  const account = dbStore.getUserById(actor.userId);
+  if (!account || !account.passwordHash || !account.salt) {
+    return res.status(401).json({ success: false, error: 'Account not available.' });
+  }
+  if (!validLocalPassword(newPassword) || typeof currentPassword !== 'string' || currentPassword === newPassword) {
+    return res.status(400).json({ success: false, error: 'Enter current password and a different new password (12–128 characters).' });
+  }
+  if (!verifyPassword(currentPassword, account.salt, account.passwordHash)) {
+    return res.status(403).json({ success: false, error: 'Current password is incorrect.' });
+  }
+  try {
+    const { salt, hash } = hashPassword(newPassword);
+    dbStore.rotateUserPassword(actor.userId, salt, hash);
+    setSessionCookie(res, '', true);
+    return res.json({ success: true, reauthenticationRequired: true, message: 'Password changed. All sessions revoked; sign in again.' });
+  } catch {
+    return res.status(500).json({ success: false, error: 'Password rotation failed; old password was not intentionally changed.' });
+  }
 });
 
 app.get('/api/tenant', requireAuth, (req, res) => {
   res.json({ success: true, data: dbStore.getState().tenant });
 });
 
-app.post('/api/tenant', requireAuth, (req, res) => {
+app.post('/api/tenant', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const { name, gstin, state, address, contactEmail, contactPhone, pan } = req.body;
     const updated = dbStore.updateTenant({
@@ -298,19 +455,75 @@ app.post('/api/tenant', requireAuth, (req, res) => {
   }
 });
 
+// An explicitly enabled staging SQL pilot does not replace the JSON business APIs.
+const crmReadThrough = registerPostgresPilotRoutes(app, requireAuth, requireRole, dbStore);
+
+// Customer ownership is local-only. Client-facing identity and portal login are NOT implemented.
+app.get('/api/customers', requireAuth, (req, res) => {
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: visibleCustomers(actor) });
+});
+
+app.post('/api/customers', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).length !== 1 || typeof body.name !== 'string' ||
+      !body.name.trim() || body.name.trim().length > 160) {
+    return res.status(400).json({ success: false, error: 'Only a real customer name (1–160 chars) is accepted.' });
+  }
+  try {
+    const customer = dbStore.registerCustomer(body.name.trim(), (req as any).user.username);
+    return res.status(201).json({ success: true, data: customer, externalAccountCreated: false });
+  } catch (err: any) {
+    return res.status(409).json({ success: false, error: err.message });
+  }
+});
+
+app.patch('/api/customers/:id/access', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).sort().join(',') !== 'grant,userId' ||
+      typeof body.userId !== 'string' || typeof body.grant !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'Require an exact staff userId and boolean grant.' });
+  }
+  try {
+    const customer = dbStore.setCustomerStaffAccess(req.params.id, body.userId, body.grant, (req as any).user.username);
+    return customer ? res.json({ success: true, data: customer, externalAccessChanged: false }) :
+      res.status(404).json({ success: false, error: 'Customer not found.' });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 // Full Application State (Protected - secrets and password hashes stripped)
 app.get('/api/state', requireAuth, (req, res) => {
   try {
     const rawState = dbStore.getState();
-    const safeUsers = rawState.users.map(({ passwordHash, salt, ...u }) => u);
-    res.json({
-      success: true,
-      data: {
-        ...rawState,
-        users: safeUsers,
-        sessions: undefined
-      }
-    });
+    const actor = (req as any).user as { userId: string; role: UserRole };
+    const allowed = new Set(ROLE_READ_COLLECTIONS[actor.role] || []);
+    const safeUsers = rawState.users
+      .filter(u => actor.role === 'BUSINESS_OWNER' || u.id === actor.userId)
+      .map(({ passwordHash, salt, ...u }) => u);
+    const safeState: Record<string, unknown> = { ...rawState, users: safeUsers };
+    delete safeState.sessions;
+    delete safeState.processedTelegramUpdateIds;
+    for (const [key, value] of Object.entries(safeState)) {
+      if (Array.isArray(value) && key !== 'users' && !allowed.has(key)) safeState[key] = [];
+    }
+    if (allowed.has('customers')) safeState.customers = visibleCustomers(actor);
+    if (allowed.has('tickets')) safeState.tickets = rawState.tickets.filter(t => visibleTicket(t, actor));
+    if (allowed.has('jobs')) safeState.jobs = rawState.jobs.filter(j => visibleJob(j, actor));
+    if (allowed.has('assets')) safeState.assets = rawState.assets.filter(a => visibleAsset(a, actor));
+    if (allowed.has('endpoints')) safeState.endpoints = rawState.endpoints.filter(e => visibleEndpoint(e, actor));
+    if (allowed.has('rmaClaims')) safeState.rmaClaims = rawState.rmaClaims.filter(r => visibleRMA(r, actor));
+    if (allowed.has('amcs')) safeState.amcs = rawState.amcs.filter(a => canAccessCustomer(a.customerId, actor));
+    if (allowed.has('crmOpportunities')) safeState.crmOpportunities =
+      rawState.crmOpportunities.filter(c => canAccessCustomer(c.customerId, actor));
+    if (allowed.has('leads')) safeState.leads = rawState.leads.filter(l => canAccessCustomer(l.customerId, actor));
+    if (allowed.has('quotes')) safeState.quotes = rawState.quotes.filter(q => canAccessCustomer(q.customerId, actor));
+    if (allowed.has('projects')) safeState.projects = visibleProjects(actor);
+    if (allowed.has('proposals')) safeState.proposals = visibleProposals(actor);
+    res.json({ success: true, data: safeState });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -318,6 +531,9 @@ app.get('/api/state', requireAuth, (req, res) => {
 
 // Administrative Clean State Reset (Protected, requires BUSINESS_OWNER + explicit confirmation)
 app.post('/api/state/reset', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  if ((process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') && process.env.APEX_ALLOW_PRODUCTION_RESET !== 'true') {
+    return res.status(403).json({ success: false, error: 'Production reset is disabled. Explicit server-side authorization required.' });
+  }
   try {
     const confirm = req.body?.confirm === true || req.headers['x-apex-confirm-reset'] === 'true';
     if (!confirm) {
@@ -337,20 +553,80 @@ app.post('/api/state/reset', requireAuth, requireRole('BUSINESS_OWNER'), (req, r
   }
 });
 
+// Phase 10.5I: legacy catalogs are tenant-level, NOT customer-owned.
+// Constrain mutable business fields and prohibit supplied object IDs, metadata,
+// grants, settlement flags, or nested objects that could corrupt identity.
+const productTextFields = new Set([
+  'sku','name','brand','specs','warehouseLocation','hsn'
+]);
+const productMoneyFields = new Set([
+  'purchaseCost','marketPrice','sellingPrice','minPrice','targetMarginPercent',
+  'gstPercent','warrantyYears'
+]);
+const productStockFields = new Set(['stockAvailable','stockReserved']);
+const productCategories = new Set([
+  'Laptop','Desktop','Server','Networking','Power','Component','Storage','Peripheral'
+]);
+const productEditableFields = new Set([
+  ...productTextFields,...productMoneyFields,...productStockFields,
+  'category','serialTrackingRequired'
+]);
+function validatedProductFields(body: unknown, required: boolean): Partial<ProductItem> | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const input = body as Record<string, unknown>;
+  const entries = Object.entries(input);
+  if (!entries.length || entries.some(([k])=>!productEditableFields.has(k))) return null;
+  const fields: Record<string, unknown> = {};
+  for (const [key,value] of entries) {
+    if (productTextFields.has(key)) {
+      if (typeof value !== 'string' || !value.trim() || value.length > 200) return null;
+      fields[key]=value.trim();
+    } else if (productMoneyFields.has(key)) {
+      if (typeof value !== 'number' || !Number.isFinite(value) ||
+          value > 1_000_000_000_000 ||
+          (key === 'gstPercent' ? (value !== -1 && (value < 0 || value > 100)) : value < 0)) return null;
+      fields[key]=value;
+    } else if (productStockFields.has(key)) {
+      if (!Number.isSafeInteger(value) || (value as number)<0 || (value as number)>10000000) return null;
+      fields[key]=value;
+    } else if (key === 'category') {
+      if (typeof value !== 'string' || !productCategories.has(value)) return null;
+      fields[key]=value;
+    } else if (key === 'serialTrackingRequired') {
+      if (typeof value !== 'boolean') return null;
+      fields[key]=value;
+    }
+  }
+  if (required && (!fields.sku || !fields.name)) return null;
+  return fields as Partial<ProductItem>;
+}
 // Products CRUD (Protected)
-app.get('/api/products', requireAuth, (req, res) => {
+app.get('/api/products', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'PROCUREMENT_LEAD', 'FIELD_ENGINEER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().products });
 });
 
-app.post('/api/products', requireAuth, (req, res) => {
+app.post('/api/products', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const prod = req.body;
-    if (!prod || !prod.name || !prod.sku) {
-      return res.status(400).json({ success: false, error: 'Product name and SKU are required' });
+    const prod = validatedProductFields(req.body, true);
+    if (!prod?.sku || !prod.name) {
+      return res.status(400).json({ success: false, error: 'Only allowed product fields, name and SKU are accepted.' });
+    }
+    if ((prod.stockReserved ?? 0) > (prod.stockAvailable ?? 0)) {
+      return res.status(400).json({success:false,error:'Reserved stock cannot exceed available stock.'});
+    }
+    if (dbStore.getState().products.some(p=>p.sku.toLowerCase()===prod.sku!.toLowerCase())) {
+      return res.status(409).json({ success: false, error: 'Product SKU already registered.' });
     }
     const created = dbStore.addProduct({
-      ...prod,
-      id: prod.id || `prod-${crypto.randomUUID()}`
+      id: 'prod-' + crypto.randomUUID(), sku:prod.sku, name:prod.name,
+      brand:prod.brand ?? '',category:prod.category ?? 'Component',
+      specs:prod.specs ?? '', purchaseCost:prod.purchaseCost ?? 0,
+      marketPrice:prod.marketPrice ?? 0,sellingPrice:prod.sellingPrice ?? 0,
+      minPrice:prod.minPrice ?? 0,targetMarginPercent:prod.targetMarginPercent ?? 0,
+      stockAvailable:prod.stockAvailable ?? 0,stockReserved:prod.stockReserved ?? 0,
+      warehouseLocation:prod.warehouseLocation ?? '',hsn:prod.hsn ?? '',
+      gstPercent:prod.gstPercent ?? -1,warrantyYears:prod.warrantyYears ?? 0,
+      serialTrackingRequired:prod.serialTrackingRequired ?? false
     });
 
     dbStore.addEvent({
@@ -371,9 +647,21 @@ app.post('/api/products', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/products/:id', requireAuth, (req, res) => {
+app.patch('/api/products/:id', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const updated = dbStore.updateProduct(req.params.id, req.body);
+    const changes = validatedProductFields(req.body, false);
+    if (!changes) return res.status(400).json({
+      success: false,error: 'Only allowed typed catalog fields may be changed; object IDs and provenance are immutable.'
+    });
+    const existing = dbStore.getState().products.find(p=>p.id===req.params.id);
+    if (changes.sku && dbStore.getState().products.some(
+      p=>p.id!==req.params.id && p.sku.toLowerCase()===changes.sku!.toLowerCase()
+    )) return res.status(409).json({success:false,error:'Product SKU already registered.'});
+    if (existing && ((changes.stockReserved ?? existing.stockReserved ?? 0) >
+                     (changes.stockAvailable ?? existing.stockAvailable ?? 0))) {
+      return res.status(400).json({success:false,error:'Reserved stock exceeds available stock.'});
+    }
+    const updated = dbStore.updateProduct(req.params.id, changes);
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Product not found' });
     }
@@ -383,7 +671,7 @@ app.patch('/api/products/:id', requireAuth, (req, res) => {
   }
 });
 
-app.delete('/api/products/:id', requireAuth, (req, res) => {
+app.delete('/api/products/:id', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
     const deleted = dbStore.deleteProduct(req.params.id);
     if (!deleted) {
@@ -396,20 +684,39 @@ app.delete('/api/products/:id', requireAuth, (req, res) => {
 });
 
 // Suppliers CRUD (Protected)
-app.get('/api/suppliers', requireAuth, (req, res) => {
+app.get('/api/suppliers', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'PROCUREMENT_LEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().suppliers });
 });
 
-app.post('/api/suppliers', requireAuth, (req, res) => {
+app.post('/api/suppliers', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const supp = req.body;
-    if (!supp || !supp.name) {
-      return res.status(400).json({ success: false, error: 'Supplier name is required' });
+    const supp = req.body as Record<string, unknown> | undefined;
+    const permitted = new Set([
+      'name','rating','deliveryScore','defectRate','paymentTerms','authorizedBrands','contactPerson','phone'
+    ]);
+    if (!supp || typeof supp !== 'object' || Array.isArray(supp) ||
+        Object.keys(supp).some(k=>!permitted.has(k)) ||
+        typeof supp.name !== 'string' || !supp.name.trim() || supp.name.length > 160 ||
+        ['rating','deliveryScore','defectRate'].some(k=>
+          supp[k] !== undefined && (typeof supp[k] !== 'number' ||
+            !Number.isFinite(supp[k]) || (supp[k] as number)<0 || (supp[k] as number)>100)) ||
+        ['paymentTerms','contactPerson','phone'].some(k=>
+          supp[k] !== undefined && (typeof supp[k] !== 'string' || (supp[k] as string).length>200)) ||
+        (supp.authorizedBrands !== undefined &&
+          (!Array.isArray(supp.authorizedBrands) || supp.authorizedBrands.length>50 ||
+            supp.authorizedBrands.some((x: unknown)=>typeof x!=='string'||!x.trim()||x.length>100)))) {
+      return res.status(400).json({ success: false, error: 'Only valid supplier catalog details are accepted.' });
     }
     const created = dbStore.addSupplier({
-      ...supp,
-      id: supp.id || `sup-${crypto.randomUUID()}`
-    });
+      id:'sup-'+crypto.randomUUID(),name:supp.name.trim(),
+      rating:(supp.rating as number | undefined)??0,
+      deliveryScore:(supp.deliveryScore as number | undefined)??0,
+      defectRate:(supp.defectRate as number | undefined)??0,
+      paymentTerms:(supp.paymentTerms as string | undefined)??'',
+      authorizedBrands:(supp.authorizedBrands as string[] | undefined)??[],
+      contactPerson:(supp.contactPerson as string | undefined)??'',
+      phone:(supp.phone as string | undefined)??''
+    } as SupplierInfo);
     res.status(201).json({ success: true, data: created });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -417,21 +724,29 @@ app.post('/api/suppliers', requireAuth, (req, res) => {
 });
 
 // RFQs CRUD (Protected)
-app.get('/api/rfqs', requireAuth, (req, res) => {
+app.get('/api/rfqs', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().rfqs });
 });
 
-app.post('/api/rfqs', requireAuth, (req, res) => {
+app.post('/api/rfqs', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const rfq = req.body;
-    if (!rfq || !rfq.productName) {
-      return res.status(400).json({ success: false, error: 'productName is required' });
+    const rfq = req.body as Record<string, unknown> | undefined;
+    if (!rfq || typeof rfq !== 'object' || Array.isArray(rfq) ||
+        Object.keys(rfq).some(k=>!['productName','requiredQty','urgency','status'].includes(k)) ||
+        (rfq.status !== undefined && rfq.status !== 'PO_DISPATCHED') ||
+        typeof rfq.productName !== 'string' || !rfq.productName.trim() ||
+        rfq.productName.length > 200 ||
+        !Number.isSafeInteger(rfq.requiredQty) || (rfq.requiredQty as number)<=0 ||
+        (rfq.requiredQty as number)>10000000 ||
+        !['HIGH','MEDIUM','LOW'].includes(rfq.urgency as string)) {
+      return res.status(400).json({
+        success: false,error:'RFQ requires a product, positive quantity and urgency. Supplier quotes/PO status cannot be supplied.'
+      });
     }
     const created = dbStore.addRFQ({
-      ...rfq,
-      id: rfq.id || `rfq-${Date.now().toString().slice(-6)}`,
-      supplierQuotes: rfq.supplierQuotes || [],
-      status: 'OPEN'
+      id:'rfq-'+crypto.randomUUID(), productName:rfq.productName.trim(),
+      requiredQty:rfq.requiredQty as number, urgency:rfq.urgency as RFQItem['urgency'],
+      supplierQuotes:[],status:'OPEN'
     });
 
     dbStore.addEvent({
@@ -452,124 +767,198 @@ app.post('/api/rfqs', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/rfqs/:id/quotes', requireAuth, (req, res) => {
+app.post('/api/rfqs/:id/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const quote = req.body;
-    if (!quote || !quote.supplierName || quote.unitCost === undefined) {
-      return res.status(400).json({ success: false, error: 'supplierName and unitCost are required' });
+    const quote = req.body as Record<string, unknown> | undefined;
+    if (!quote || typeof quote !== 'object' || Array.isArray(quote) ||
+        Object.keys(quote).sort().join(',') !== 'inStock,leadTimeDays,supplierId,supplierName,unitCost' ||
+        typeof quote.supplierId !== 'string' || !quote.supplierId.trim() ||
+        quote.supplierId.length > 160 ||
+        typeof quote.supplierName !== 'string' || !quote.supplierName.trim() ||
+        quote.supplierName.length > 200 ||
+        typeof quote.unitCost !== 'number' || !Number.isFinite(quote.unitCost) ||
+        quote.unitCost<0 || quote.unitCost>1_000_000_000 ||
+        !Number.isSafeInteger(quote.leadTimeDays) || (quote.leadTimeDays as number)<0 ||
+        (quote.leadTimeDays as number)>3650 || typeof quote.inStock !== 'boolean') {
+      return res.status(400).json({
+        success: false,error:'Supplier quote requires exact verified-format fields; no client PO or recommendation flags.'
+      });
     }
-    const updated = dbStore.addSupplierQuoteToRFQ(req.params.id, quote);
+    const updated = dbStore.addSupplierQuoteToRFQ(req.params.id, {
+      supplierId:quote.supplierId.trim(),supplierName:quote.supplierName.trim(),
+      unitCost:quote.unitCost,leadTimeDays:quote.leadTimeDays as number,
+      inStock:quote.inStock
+    });
     if (!updated) {
       return res.status(404).json({ success: false, error: 'RFQ not found' });
     }
     res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch {
+    res.status(409).json({ success: false,
+      error: 'RFQ supplier quote cannot be duplicated or added after PO preparation.' });
   }
 });
 
-app.post('/api/rfqs/:id/dispatch-po', requireAuth, (req, res) => {
+// Legacy route path retained for existing UI; only PREPARES a PO.
+app.post('/api/rfqs/:id/dispatch-po', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const { supplierId } = req.body;
-    const updated = dbStore.dispatchPO(req.params.id, supplierId);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'RFQ not found' });
-    }
-
+    const supplierId = typeof req.body?.supplierId === 'string' ? req.body.supplierId.trim() : '';
+    if (!supplierId) return res.status(400).json({ success: false, error: 'An actual quoted supplierId is required.' });
+    const updated = dbStore.preparePO(req.params.id, supplierId, (req as any).user.username);
+    if (!updated) return res.status(404).json({ success: false, error: 'RFQ not found.' });
     dbStore.addEvent({
       id: `evt-${crypto.randomUUID()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'PurchaseOrderDispatched',
-      agent: (req as any).user?.username || 'Procurement',
-      summary: `Dispatched Purchase Order for RFQ #${req.params.id} to supplier ID ${supplierId}.`,
-      autonomousActionTaken: 'Updated RFQ status to PO_DISPATCHED in procurement ledger.',
+      timestamp: new Date().toISOString(),
+      eventType: 'PurchaseOrderPreparedInternally',
+      agent: (req as any).user.username,
+      summary: `Internal PO ${updated.preparedPO?.poReference} prepared for ${updated.preparedPO?.supplierName}; not sent.`,
+      autonomousActionTaken: 'Recorded supplier selection and PO preparation in internal ledger only.',
       humanApprovalRequired: false,
       approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
+      confidenceScore: 1
     });
-
-    res.json({ success: true, data: updated });
+    return res.json({ success: true, data: updated, delivery: 'NOT_SENT' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(400).json({ success: false, error: err.message });
   }
 });
 
 // Quotations CRUD (Protected, P3.2 Server-side Recalculation)
-app.get('/api/quotes', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().quotes });
+app.get('/api/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'PROCUREMENT_LEAD'), (req, res) => {
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().quotes.filter(q => canAccessCustomer(q.customerId, actor)) });
 });
 
-app.post('/api/quotes', requireAuth, (req, res) => {
+app.post('/api/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
-    const quote = req.body;
-    if (!quote || !quote.customerName) {
-      return res.status(400).json({ success: false, error: 'customerName is required' });
+    const quote = req.body || {};
+    const customer = customerFromInput(quote.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose a registered customer with an authorized staff grant.' });
+    if (quote.customerName !== undefined && quote.customerName !== customer.name) {
+      return res.status(400).json({ success: false, error: 'Customer name must match the authoritative registered customer.' });
     }
-
     const items = Array.isArray(quote.items) ? quote.items : [];
-    let calculatedSubtotal = 0;
-    let calculatedTotalCost = 0;
-
-    for (const item of items) {
-      const q = Number(item.qty) || 0;
-      const unitCost = Number(item.purchaseCost) || 0;
-      const unitPrice = Number(item.sellingPrice) || 0;
-      if (q <= 0 || unitCost < 0 || unitPrice < 0) {
-        return res.status(400).json({ success: false, error: 'Invalid item values: qty must be > 0, costs must be non-negative' });
+    const services = Array.isArray(quote.services) ? quote.services : [];
+    if (items.length + services.length === 0) {
+      return res.status(400).json({ success: false, error: 'Quotation requires an item or service.' });
+    }
+    const round2 = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
+    const catalog = dbStore.getState().products;
+    const taxLines: { lineId: string; gross: number; hsnOrSac: string; rate: number | null }[] = [];
+    let subtotal = 0;
+    let totalCost = 0;
+    for (const [i, item] of items.entries()) {
+      const qty = item.qty, selling = item.sellingPrice, requestedCost = item.purchaseCost;
+      if (!Number.isSafeInteger(qty) || qty <= 0 ||
+          !Number.isFinite(selling) || selling < 0 ||
+          !Number.isFinite(requestedCost) || requestedCost < 0) {
+        return res.status(400).json({ success: false, error: 'Invalid quantity, selling price or cost.' });
       }
-      calculatedSubtotal += q * unitPrice;
-      calculatedTotalCost += q * unitCost;
+      const registered = item.productId ? catalog.find(p => p.id === item.productId) : undefined;
+      if (item.productId && !registered) {
+        return res.status(400).json({ success: false, error: 'Referenced catalog productId not found.' });
+      }
+      const cost = registered ? registered.purchaseCost : requestedCost;
+      if (!Number.isFinite(cost) || cost < 0) {
+        return res.status(400).json({ success: false, error: 'Product cost is invalid.' });
+      }
+      const rate = registered?.gstPercent ?? item.gstPercent;
+      if (rate != null && rate !== -1 && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+        return res.status(400).json({ success: false, error: 'Invalid product tax rate; verify HSN classification.' });
+      }
+      const gross = round2(qty * selling);
+      subtotal += gross;
+      totalCost += qty * cost;
+      taxLines.push({
+        lineId: typeof item.id === 'string' && item.id ? item.id : 'item-' + i,
+        gross,
+        hsnOrSac: String(registered?.hsn ?? item.hsn ?? '').trim(),
+        rate: rate == null || rate === -1 ? null : rate
+      });
     }
-
-    const discount = Number(quote.discount) || 0;
-    if (discount < 0 || (calculatedSubtotal > 0 && discount >= calculatedSubtotal)) {
-      return res.status(400).json({ success: false, error: 'Discount must be non-negative and less than subtotal' });
+    for (const [i, service] of services.entries()) {
+      if (!Number.isFinite(service.price) || service.price < 0) {
+        return res.status(400).json({ success: false, error: 'Service price must be non-negative.' });
+      }
+      const rate = service.gstPercent;
+      if (rate != null && (!Number.isFinite(rate) || rate < 0 || rate > 100)) {
+        return res.status(400).json({ success: false, error: 'Invalid service tax rate; verify SAC classification.' });
+      }
+      const gross = round2(service.price);
+      subtotal += gross;
+      taxLines.push({
+        lineId: typeof service.id === 'string' && service.id ? service.id : 'service-' + i,
+        gross,
+        hsnOrSac: String(service.sac || '').trim(),
+        rate: rate == null || rate === -1 ? null : rate
+      });
     }
-
-    const netSubtotal = Math.max(0, calculatedSubtotal - discount);
-    const profit = netSubtotal - calculatedTotalCost;
-    const marginPercent = netSubtotal > 0 ? Math.round(((profit / netSubtotal) * 100) * 10) / 10 : 0;
-    const gstTotal = Math.round(netSubtotal * 0.18);
-    const grandTotal = netSubtotal + gstTotal;
-
-    const isException = marginPercent < 15;
-    const authoritativeStatus = isException ? 'PENDING_APPROVAL' : 'APPROVED';
-
+    subtotal = round2(subtotal);
+    const discountAmount = quote.discountAmount == null ? 0 : quote.discountAmount;
+    if (!Number.isFinite(subtotal) || subtotal <= 0 ||
+        !Number.isFinite(discountAmount) || discountAmount < 0 || discountAmount >= subtotal) {
+      return res.status(400).json({ success: false, error: 'Subtotal must be positive; discount must be less than subtotal.' });
+    }
+    const netSubtotal = round2(subtotal - discountAmount);
+    const marginPercent = round2(((netSubtotal - totalCost) / netSubtotal) * 100);
+    const taxClassificationComplete = taxLines.every(line => line.hsnOrSac && line.rate !== null);
+    const taxStatus = taxClassificationComplete ? 'ESTIMATED_UNVERIFIED' : 'PENDING_CLASSIFICATION';
+    let gstAmount = 0;
+    let breakdown: { lineId: string; taxableAmount: number; taxRatePercent: number; taxAmount: number }[] = [];
+    if (taxClassificationComplete) {
+      let allocated = 0;
+      breakdown = taxLines.map((line, i) => {
+        // Allocate the quotation discount proportionally; the final line absorbs any rounding residual.
+        const taxableAmount = i === taxLines.length - 1
+          ? round2(netSubtotal - allocated)
+          : round2(line.gross - discountAmount * line.gross / subtotal);
+        allocated = round2(allocated + taxableAmount);
+        const taxRatePercent = line.rate as number;
+        const taxAmount = round2(taxableAmount * taxRatePercent / 100);
+        gstAmount = round2(gstAmount + taxAmount);
+        return { lineId: line.lineId, taxableAmount, taxRatePercent, taxAmount };
+      });
+    }
+    // If classification is missing, totalAmount EXCLUDES unknown GST, not an asserted final invoice total.
+    const totalAmount = round2(netSubtotal + gstAmount);
+    const isException = marginPercent < 12;
     const created = dbStore.addQuote({
       ...quote,
       id: `quote-${crypto.randomUUID()}`,
-      quoteNumber: quote.quoteNumber || `QT-${Date.now().toString().slice(-6)}`,
-      items,
-      subtotal: calculatedSubtotal,
-      discount,
-      gstTotal,
-      grandTotal,
-      marginPercent,
-      status: authoritativeStatus,
-      createdAt: new Date().toISOString()
+      quoteNumber: `QT-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
+      customerId: customer.id,
+      customerName: customer.name,
+      items, services, subtotal, discountAmount,
+      marginPercent, gstAmount, totalAmount, grandTotal: totalAmount,
+      taxStatus, taxBreakdown: breakdown,
+      status: isException ? 'PENDING_OWNER_APPROVAL' : 'DRAFT',
+      createdDate: new Date().toISOString().slice(0, 10),
+      validUntil: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      paymentTerms: typeof quote.paymentTerms === 'string' ? quote.paymentTerms : ''
     });
-
     dbStore.addEvent({
-      id: `evt-${crypto.randomUUID()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: isException ? 'MarginThresholdBreach' : 'QuotationGenerated',
-      agent: (req as any).user?.username || 'Pricing Engine',
-      summary: `Quotation ${created.quoteNumber} created for ${created.customerName} (${created.marginPercent}% margin, Total: ₹${created.grandTotal.toLocaleString('en-IN')}).`,
-      autonomousActionTaken: isException ? 'Placed on hold for Owner authorization' : 'Pricing verified against policy rules.',
+      id: `evt-${crypto.randomUUID()}`, timestamp: new Date().toISOString(),
+      eventType: isException ? 'MarginThresholdBreach' : 'QuotationDraftCreated',
+      agent: (req as any).user.username,
+      summary: `Quote ${created.quoteNumber} saved as ${created.status}; GST: ${taxStatus}; not sent to customer.`,
+      autonomousActionTaken: 'Draft estimate calculated in ledger. Tax classification and provider filing not verified.',
       humanApprovalRequired: isException,
       approvalStatus: isException ? 'PENDING_TELEGRAM' : 'AUTO_APPROVED',
-      confidenceScore: 1.0
+      confidenceScore: 1
     });
-
-    res.status(201).json({ success: true, data: created });
+    return res.status(201).json({ success: true, data: created });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
 app.patch('/api/quotes/:id/approve', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const actor = (req as any).user?.username || 'Business Owner';
+    const targetQuote = dbStore.getState().quotes.find(q => q.id === req.params.id || q.quoteNumber === req.params.id);
+    if (targetQuote?.taxStatus === 'PENDING_CLASSIFICATION') {
+      return res.status(409).json({ success: false, error: 'Owner approval blocked: quote requires HSN/SAC classification and tax rates before approval.' });
+    }
     const approved = dbStore.approveQuote(req.params.id, actor);
     if (!approved) {
       return res.status(404).json({ success: false, error: 'Quotation not found' });
@@ -593,7 +982,7 @@ app.patch('/api/quotes/:id/approve', requireAuth, requireRole('BUSINESS_OWNER'),
   }
 });
 
-app.patch('/api/quotes/:id/reject', requireAuth, (req, res) => {
+app.patch('/api/quotes/:id/reject', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const { reason } = req.body;
     const actor = (req as any).user?.username || 'Business Owner';
@@ -621,45 +1010,52 @@ app.patch('/api/quotes/:id/reject', requireAuth, (req, res) => {
 });
 
 // Invoices CRUD (Protected)
-app.get('/api/invoices', requireAuth, (req, res) => {
+app.get('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().invoices });
 });
 
-app.post('/api/invoices', requireAuth, (req, res) => {
+// A receivables ledger entry is NOT a government-issued GST tax invoice.
+app.post('/api/invoices', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const inv = req.body;
-    if (!inv || !inv.customer || !inv.amount) {
-      return res.status(400).json({ success: false, error: 'Customer and amount are required' });
+    const customer = typeof req.body?.customer === 'string' ? req.body.customer.trim() : '';
+    const amount = req.body?.amount;
+    const dueInDays = req.body?.dueInDays ?? 30;
+    if (!customer || typeof amount !== 'number' || !Number.isFinite(amount) || amount <= 0 ||
+        !Number.isSafeInteger(dueInDays) || dueInDays < 0 || dueInDays > 365) {
+      return res.status(400).json({ success: false, error: 'Real customer, positive finite amount and valid due days (0–365) required.' });
     }
+    const id = crypto.randomUUID();
     const created = dbStore.addInvoice({
-      ...inv,
-      id: inv.id || `inv-${crypto.randomUUID()}`,
-      invoiceNo: inv.invoiceNo || `INV-${Date.now().toString().slice(-6)}`,
-      createdAt: inv.createdAt || new Date().toISOString().split('T')[0],
-      status: inv.status || 'ACTIVE'
+      id: 'inv-' + id,
+      invoiceNo: 'INV-DRAFT-' + id.slice(0, 12).toUpperCase(),
+      customer, amount, dueInDays,
+      gstin: typeof req.body?.gstin === 'string' ? req.body.gstin.trim() : '',
+      tenantId: dbStore.getState().tenant.id,
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString().slice(0, 10)
     });
-
     dbStore.addEvent({
-      id: `evt-${crypto.randomUUID()}`,
-      timestamp: new Date().toLocaleTimeString(),
-      eventType: 'InvoiceCreated',
-      agent: (req as any).user?.username || 'Billing',
-      summary: `Created invoice ${created.invoiceNo} for ${created.customer} (Amount: ₹${created.amount.toLocaleString('en-IN')}).`,
-      autonomousActionTaken: 'Saved invoice in receivables ledger.',
+      id: `evt-${crypto.randomUUID()}`, timestamp: new Date().toISOString(),
+      eventType: 'ReceivablesDraftRecorded',
+      agent: (req as any).user.username,
+      summary: `Created internal receivable draft ${created.invoiceNo} for ${created.customer} (₹${created.amount.toLocaleString('en-IN')}).`,
+      autonomousActionTaken: 'Saved internal receivable only; no NIC IRN or settlement was generated.',
       humanApprovalRequired: false,
       approvalStatus: 'AUTO_APPROVED',
-      confidenceScore: 1.0
+      confidenceScore: 1
     });
-
-    res.status(201).json({ success: true, data: created });
+    return res.status(201).json({ success: true, data: created, taxInvoiceIssued: false });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-app.patch('/api/invoices/:invoiceNo/settle', requireAuth, (req, res) => {
+app.patch('/api/invoices/:invoiceNo/settle', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const { paymentReference, method } = req.body;
+    const { paymentReference, method } = req.body || {};
+    if (typeof paymentReference !== 'string' || paymentReference.trim().length < 4) {
+      return res.status(400).json({ success: false, error: 'Verified bank or UPI payment reference is required before marking settlement.' });
+    }
     const settled = dbStore.settleInvoice(req.params.invoiceNo, { paymentReference, method });
     if (!settled) {
       return res.status(404).json({ success: false, error: 'Invoice not found' });
@@ -683,23 +1079,66 @@ app.patch('/api/invoices/:invoiceNo/settle', requireAuth, (req, res) => {
   }
 });
 
+// Identity-based assignments. A display name is never an authorization credential.
+const visibleTicket = (ticket: { customerId?: string; assignedUserId?: string; reportedByUserId?: string },
+  actor: LocalActor) =>
+  canAccessCustomer(ticket.customerId, actor) &&
+  (actor.role !== 'FIELD_ENGINEER' ||
+   ticket.assignedUserId === actor.userId || ticket.reportedByUserId === actor.userId);
+const visibleJob = (job: { customerId?: string; assignedUserId?: string }, actor: LocalActor) =>
+  canAccessCustomer(job.customerId, actor) &&
+  (actor.role !== 'FIELD_ENGINEER' || job.assignedUserId === actor.userId);
+const validateAssignment = (userId: unknown): boolean => {
+  if (userId === undefined || userId === null || userId === '') return true;
+  if (typeof userId !== 'string') return false;
+  const user = dbStore.getUserById(userId);
+  return Boolean(user && user.role === 'FIELD_ENGINEER' &&
+    !user.disabledAt && user.tenantId === dbStore.getState().tenant.id);
+};
+const JOB_STAGES = [
+  'SCHEDULED', 'EN_ROUTE', 'CHECKED_IN', 'DIAGNOSING', 'PARTS_REPLACED', 'COMPLETED'
+] as const;
+const TICKET_STATES = ['OPEN','IN_PROGRESS','WAITING_ON_PARTS','RESOLVED'] as const;
+
+app.get('/api/field-engineers', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const data = dbStore.getUsers().filter(u => u.role === 'FIELD_ENGINEER' && !u.disabledAt)
+      .map(u => ({ id: u.id, username: u.username, name: u.name }));
+    res.json({ success: true, data });
+  });
+
 // Tickets CRUD (Protected)
-app.get('/api/tickets', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().tickets });
+app.get('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
+  const actor = (req as any).user;
+  res.json({ success: true, data: dbStore.getState().tickets.filter(t => visibleTicket(t, actor)) });
 });
 
-app.post('/api/tickets', requireAuth, (req, res) => {
+app.post('/api/tickets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
     const ticket = req.body;
-    if (!ticket || !ticket.title) {
+    if (!ticket || typeof ticket.title !== 'string' || !ticket.title.trim()) {
       return res.status(400).json({ success: false, error: 'Ticket title is required' });
     }
+    const actor = (req as any).user as LocalActor;
+    const customer = customerFromInput(ticket.customerId, actor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
+    const requestedAssignee = actor.role === 'FIELD_ENGINEER' ? null : (ticket.assignedUserId || null);
+    if (!validateAssignment(requestedAssignee)) {
+      return res.status(400).json({ success: false, error: 'Unknown or inactive assigned field engineer.' });
+    }
+    if (requestedAssignee && !canAccessCustomer(customer.id, { role: 'FIELD_ENGINEER', userId: requestedAssignee })) {
+      return res.status(403).json({ success: false, error: 'Assigned engineer has no access to this customer.' });
+    }
+    const assignee = requestedAssignee ? dbStore.getUserById(requestedAssignee) : null;
     const created = dbStore.addTicket({
       ...ticket,
-      id: ticket.id || `tkt-${crypto.randomUUID()}`,
-      ticketNumber: ticket.ticketNumber || `INC-${Date.now().toString().slice(-6)}`,
-      createdAt: ticket.createdAt || new Date().toISOString().split('T')[0],
-      status: ticket.status || 'OPEN'
+      customerId: customer.id,
+      id: `tkt-${crypto.randomUUID()}`,
+      ticketNumber: `INC-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
+      createdAt: new Date().toISOString().slice(0, 10),
+      status: 'OPEN', assignedUserId: assignee?.id,
+      assignedAgent: assignee?.name || 'Unassigned',
+      reportedByUserId: actor.userId
     });
 
     dbStore.addEvent({
@@ -720,39 +1159,78 @@ app.post('/api/tickets', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/tickets/:id', requireAuth, (req, res) => {
-  try {
-    const updated = dbStore.updateTicket(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Ticket not found' });
-    }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+app.patch('/api/tickets/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
+  const actor = (req as any).user as { userId: string; role: UserRole };
+  const ticket = dbStore.getState().tickets.find(t => t.id === req.params.id);
+  if (!ticket || !visibleTicket(ticket, actor)) return res.status(404).json({ success: false, error: 'Ticket not found.' });
+  if (actor.role === 'FIELD_ENGINEER' && ticket.assignedUserId !== actor.userId) {
+    return res.status(403).json({ success: false, error: 'Only the assigned engineer may update this ticket.' });
   }
+  const body = req.body || {};
+  const keys = Object.keys(body);
+  if (!keys.length || keys.some(k => k !== 'status' && k !== 'rootCause') ||
+      (body.status !== undefined && !TICKET_STATES.includes(body.status)) ||
+      (body.rootCause !== undefined && (typeof body.rootCause !== 'string' || body.rootCause.length > 2000))) {
+    return res.status(400).json({ success: false, error: 'Only valid ticket status and root-cause notes are editable. Use assignment route for staff changes.' });
+  }
+  const updated = dbStore.updateTicket(ticket.id, body);
+  res.json({ success: true, data: updated });
 });
+
+app.patch('/api/tickets/:id/assign', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const userId = req.body?.assignedUserId ?? null;
+    if (!validateAssignment(userId)) {
+      return res.status(400).json({ success: false, error: 'Select an active local field engineer ID.' });
+    }
+    const actor = (req as any).user as LocalActor;
+    const ticket = dbStore.getState().tickets.find(t => t.id === req.params.id);
+    if (!ticket || !visibleTicket(ticket, actor)) return res.status(404).json({ success: false, error: 'Ticket not found.' });
+    if (userId && !canAccessCustomer(ticket.customerId, { role: 'FIELD_ENGINEER', userId }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
+    try {
+      const updated = dbStore.assignTicket(req.params.id, userId || null, (req as any).user.username);
+      return updated ? res.json({ success: true, data: updated, externalNotificationSent: false }) :
+        res.status(404).json({ success: false, error: 'Ticket not found.' });
+    } catch {
+      return res.status(400).json({ success: false, error: 'Ticket assignment could not be saved.' });
+    }
+  });
 
 // Endpoints CRUD (Protected)
-app.get('/api/endpoints', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().endpoints });
+app.get('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().endpoints.filter(e => visibleEndpoint(e, actor)) });
 });
 
-app.post('/api/endpoints', requireAuth, (req, res) => {
+app.post('/api/endpoints', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const ep = req.body;
-    if (!ep || !ep.deviceName) {
+    if (!ep || typeof ep.deviceName !== 'string' || !ep.deviceName.trim()) {
       return res.status(400).json({ success: false, error: 'deviceName is required' });
     }
+    const customer = customerFromInput(ep.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
     const created = dbStore.addEndpoint({
       ...ep,
-      id: ep.id || `ep-${crypto.randomUUID()}`,
-      lastSeen: new Date().toISOString()
+      id: `ep-${crypto.randomUUID()}`,
+      customerId: customer.id,
+      assignedUserId: undefined, // assignment requires owner/IT manager authorization
+      lastSeen: 'Awaiting agent check-in',
+      status: 'UNENROLLED',
+      telemetryAvailable: false,
+      cpuLoad: -1,
+      ramUsagePercent: -1,
+      diskFreePercent: -1,
+      batteryHealthPercent: -1,
+      smartStatus: 'UNAVAILABLE',
+      antivirusStatus: 'UNAVAILABLE'
     });
 
     dbStore.addEvent({
       id: `evt-${crypto.randomUUID()}`,
       timestamp: new Date().toLocaleTimeString(),
-      eventType: 'RMMAgentEnrolled',
+      eventType: 'EndpointRegisteredWithoutAgent',
       agent: (req as any).user?.username || 'RMM',
       summary: `Registered device ${created.deviceName} in asset directory.`,
       autonomousActionTaken: 'Saved hardware record in directory.',
@@ -767,23 +1245,60 @@ app.post('/api/endpoints', requireAuth, (req, res) => {
   }
 });
 
+
+// Only internal service assignment IDs authorize endpoint visibility. No agent deployment occurs.
+app.patch('/api/endpoints/:id/assign', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const body = req.body;
+    if (!body || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'assignedUserId')) {
+      return res.status(400).json({ success: false, error: 'Exact assignedUserId is required (string or null).' });
+    }
+    const userId = body.assignedUserId;
+    if (userId !== null && (typeof userId !== 'string' || !userId.trim())) {
+      return res.status(400).json({ success: false, error: 'Use an active field engineer ID or null.' });
+    }
+    if (!validateAssignment(userId)) return res.status(400).json({ success: false, error: 'Unknown, inactive or non-field user ID.' });
+    const endpointRecord = dbStore.getState().endpoints.find(e => e.id === req.params.id);
+    if (!endpointRecord || !visibleEndpoint(endpointRecord, (req as any).user as LocalActor))
+      return res.status(404).json({ success: false, error: 'Endpoint not found.' });
+    if (userId && !canAccessCustomer(endpointRecord.customerId, { userId, role: 'FIELD_ENGINEER' }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
+    const endpoint = dbStore.assignEndpoint(req.params.id, userId, (req as any).user.username);
+    return endpoint ? res.json({ success: true, data: endpoint, agentEnrolled: false }) :
+      res.status(404).json({ success: false, error: 'Endpoint not found.' });
+  });
+
 // Field Jobs & P3.1 Inventory Consumption (Protected)
-app.get('/api/jobs', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().jobs });
+app.get('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
+  const actor = (req as any).user;
+  res.json({ success: true, data: dbStore.getState().jobs.filter(j => visibleJob(j, actor)) });
 });
 
-app.post('/api/jobs', requireAuth, (req, res) => {
+app.post('/api/jobs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const job = req.body;
-    if (!job || !job.title) {
+    if (!job || typeof job.title !== 'string' || !job.title.trim()) {
       return res.status(400).json({ success: false, error: 'Job title is required' });
     }
+    const customer = customerFromInput(job.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
+    if (!validateAssignment(job.assignedUserId)) {
+      return res.status(400).json({ success: false, error: 'Select an active local field engineer ID.' });
+    }
+    if (job.assignedUserId && !canAccessCustomer(customer.id, { role: 'FIELD_ENGINEER', userId: job.assignedUserId }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
+    const assignee = job.assignedUserId ? dbStore.getUserById(job.assignedUserId) : null;
     const created = dbStore.addJob({
       ...job,
-      id: job.id || `job-${crypto.randomUUID()}`,
-      jobCode: job.jobCode || `JOB-${Date.now().toString().slice(-6)}`,
-      status: job.status || 'SCHEDULED',
-      partsConsumed: job.partsConsumed || []
+      customerId: customer.id,
+      customerName: customer.name,
+      id: `job-${crypto.randomUUID()}`,
+      jobCode: `JOB-${crypto.randomUUID().slice(0, 10).toUpperCase()}`,
+      status: 'SCHEDULED',
+      assignedUserId: assignee?.id,
+      technicianName: assignee?.name || 'Unassigned',
+      customerSignatureObtained: false,
+      partsConsumed: []
     });
 
     dbStore.addEvent({
@@ -804,36 +1319,57 @@ app.post('/api/jobs', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/jobs/:id', requireAuth, (req, res) => {
-  try {
-    const updated = dbStore.updateJob(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Job not found' });
-    }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+app.patch('/api/jobs/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
+  const actor = (req as any).user as { role: UserRole; userId: string };
+  const job = dbStore.getState().jobs.find(j => j.id === req.params.id);
+  if (!job || !visibleJob(job, actor)) return res.status(404).json({ success: false, error: 'Job not found.' });
+  const body = req.body || {};
+  if (Object.keys(body).length !== 1 || !JOB_STAGES.includes(body.status)) {
+    return res.status(400).json({ success: false, error: 'Only valid job status updates are supported. Customer sign-off cannot be self-certified.' });
   }
+  const current = JOB_STAGES.indexOf(job.status);
+  const next = JOB_STAGES.indexOf(body.status);
+  if (next !== current + 1) {
+    return res.status(409).json({ success: false, error: 'Advance field jobs one stage at a time.' });
+  }
+  const updated = dbStore.updateJob(job.id, { status: body.status });
+  return res.json({ success: true, data: updated, customerSignatureVerified: false });
 });
 
+app.patch('/api/jobs/:id/assign', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const userId = req.body?.assignedUserId ?? null;
+    if (!validateAssignment(userId)) {
+      return res.status(400).json({ success: false, error: 'Select an active local field engineer ID.' });
+    }
+    const actor = (req as any).user as LocalActor;
+    const job = dbStore.getState().jobs.find(j => j.id === req.params.id);
+    if (!job || !visibleJob(job, actor)) return res.status(404).json({ success: false, error: 'Job not found.' });
+    if (userId && !canAccessCustomer(job.customerId, { role: 'FIELD_ENGINEER', userId }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
+    try {
+      const updated = dbStore.assignJob(req.params.id, userId || null, (req as any).user.username);
+      return updated ? res.json({ success: true, data: updated, externalDispatchSent: false }) :
+        res.status(404).json({ success: false, error: 'Job not found.' });
+    } catch {
+      return res.status(400).json({ success: false, error: 'Job assignment could not be saved.' });
+    }
+  });
+
 // P3.1 Strict Inventory Consumption
-app.post('/api/jobs/:id/consume-part', requireAuth, (req, res) => {
+app.post('/api/jobs/:id/consume-part', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
-    const { productId, partName, quantity, cost } = req.body;
-    const targetProduct = productId || partName;
-    if (!targetProduct) {
-      return res.status(400).json({ success: false, error: 'productId or partName is required' });
+    const actor = (req as any).user as { role: UserRole; userId: string };
+    const job = dbStore.getState().jobs.find(j => j.id === req.params.id);
+    if (!job || !visibleJob(job, actor)) return res.status(404).json({ success: false, error: 'Job not found.' });
+    const { productId, quantity } = req.body || {};
+    if (typeof productId !== 'string' || !productId.trim()) {
+      return res.status(400).json({ success: false, error: 'Exact productId is required' });
     }
-    const qty = Number(quantity) || 1;
-    if (qty <= 0 || !Number.isInteger(qty)) {
-      return res.status(400).json({ success: false, error: 'Quantity must be a positive integer' });
+    if (!Number.isSafeInteger(quantity) || quantity <= 0) {
+      return res.status(400).json({ success: false, error: 'Quantity must be a positive safe integer' });
     }
-    const updated = dbStore.consumeJobPart(
-      req.params.id,
-      targetProduct,
-      qty,
-      cost !== undefined ? Number(cost) : undefined
-    );
+    const updated = dbStore.consumeJobPart(req.params.id, productId, quantity);
     res.json({ success: true, data: updated });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
@@ -841,20 +1377,46 @@ app.post('/api/jobs/:id/consume-part', requireAuth, (req, res) => {
 });
 
 // Assets CRUD (Protected)
-app.get('/api/assets', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().assets });
+app.get('/api/assets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER', 'PROCUREMENT_LEAD'), (req, res) => {
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().assets.filter(a => visibleAsset(a, actor)) });
 });
 
-app.post('/api/assets', requireAuth, (req, res) => {
+app.post('/api/assets', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const asset = req.body;
-    if (!asset || !asset.name) {
+    if (!asset || typeof asset.name !== 'string' || !asset.name.trim()) {
       return res.status(400).json({ success: false, error: 'Asset name is required' });
+    }
+    if (asset.assetTag !== undefined &&
+        (typeof asset.assetTag !== 'string' || !/^[A-Za-z0-9._-]{2,80}$/.test(asset.assetTag))) {
+      return res.status(400).json({ success: false, error: 'Asset tag must be 2–80 letters, digits, dots, underscores or dashes.' });
+    }
+    const customer = customerFromInput(asset.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
+    const assetTag = asset.assetTag || ('TAG-' + crypto.randomUUID().slice(0, 12).toUpperCase());
+    if (dbStore.getState().assets.some(a => a.assetTag.toLowerCase() === assetTag.toLowerCase())) {
+      return res.status(409).json({ success: false, error: 'Asset tag already registered.' });
     }
     const created = dbStore.addAsset({
       ...asset,
-      id: asset.id || `ast-${crypto.randomUUID()}`,
-      assetTag: asset.assetTag || `TAG-${Date.now().toString().slice(-6)}`
+      id: `ast-${crypto.randomUUID()}`, // never trust client-selected record IDs
+      customerId: customer.id,
+      assetTag,
+      name: asset.name.trim(),
+      assignedUserId: undefined, // explicit managerial assignment required; display label not an access grant
+      serialNumber: typeof asset.serialNumber === 'string' ? asset.serialNumber : '',
+      category: ['Laptop','Server','Switch','Firewall','Workstation','UPS'].includes(asset.category) ? asset.category : 'Laptop',
+      brand: typeof asset.brand === 'string' ? asset.brand : '',
+      model: typeof asset.model === 'string' ? asset.model : '',
+      assignedUser: typeof asset.assignedUser === 'string' ? asset.assignedUser : '',
+      department: typeof asset.department === 'string' ? asset.department : '',
+      location: typeof asset.location === 'string' ? asset.location : '',
+      purchaseDate: typeof asset.purchaseDate === 'string' ? asset.purchaseDate : '',
+      purchaseCost: typeof asset.purchaseCost === 'number' && Number.isFinite(asset.purchaseCost) && asset.purchaseCost >= 0 ? asset.purchaseCost : 0,
+      warrantyExpiresAt: typeof asset.warrantyExpiresAt === 'string' ? asset.warrantyExpiresAt : '',
+      status: ['IN_USE','AVAILABLE_IN_STOCK','UNDER_REPAIR','RETIRED'].includes(asset.status)
+        ? asset.status : 'AVAILABLE_IN_STOCK'
     });
 
     dbStore.addEvent({
@@ -875,24 +1437,48 @@ app.post('/api/assets', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/assets/:id', requireAuth, (req, res) => {
-  try {
-    const updated = dbStore.updateAsset(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Asset not found' });
-    }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+app.patch('/api/assets/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+  const body = req.body;
+  if (!body || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'status') ||
+      !['IN_USE','AVAILABLE_IN_STOCK','UNDER_REPAIR','RETIRED'].includes(body.status)) {
+    return res.status(400).json({ success: false,
+      error: 'Only an allowed status may be changed here. Staff assignment uses the dedicated endpoint.' });
   }
+  const asset = dbStore.getState().assets.find(a => a.id === req.params.id);
+  if (!asset || !visibleAsset(asset, (req as any).user as LocalActor))
+    return res.status(404).json({ success: false, error: 'Asset not found.' });
+  const updated = dbStore.updateAsset(req.params.id, { status: body.status });
+  return updated ? res.json({ success: true, data: updated }) :
+    res.status(404).json({ success: false, error: 'Asset not found.' });
 });
 
+app.patch('/api/assets/:id/assign', requireAuth,
+  requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+    const body = req.body;
+    if (!body || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'assignedUserId')) {
+      return res.status(400).json({ success: false, error: 'Exact assignedUserId is required (string or null).' });
+    }
+    const userId = body.assignedUserId;
+    if (userId !== null && (typeof userId !== 'string' || !userId.trim())) {
+      return res.status(400).json({ success: false, error: 'Use an active field engineer ID or null.' });
+    }
+    if (!validateAssignment(userId)) return res.status(400).json({ success: false, error: 'Unknown, inactive or non-field user ID.' });
+    const assetRecord = dbStore.getState().assets.find(a => a.id === req.params.id);
+    if (!assetRecord || !visibleAsset(assetRecord, (req as any).user as LocalActor))
+      return res.status(404).json({ success: false, error: 'Asset not found.' });
+    if (userId && !canAccessCustomer(assetRecord.customerId, { userId, role: 'FIELD_ENGINEER' }))
+      return res.status(403).json({ success: false, error: 'Engineer has no access to this customer.' });
+    const asset = dbStore.assignAsset(req.params.id, userId, (req as any).user.username);
+    return asset ? res.json({ success: true, data: asset, externalNotificationSent: false }) :
+      res.status(404).json({ success: false, error: 'Asset not found.' });
+  });
+
 // Software Licenses CRUD (Protected)
-app.get('/api/licenses', requireAuth, (req, res) => {
+app.get('/api/licenses', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().licenses });
 });
 
-app.post('/api/licenses', requireAuth, (req, res) => {
+app.post('/api/licenses', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const lic = req.body;
     if (!lic || !lic.softwareName) {
@@ -908,7 +1494,7 @@ app.post('/api/licenses', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/licenses/:id/reclaim', requireAuth, (req, res) => {
+app.patch('/api/licenses/:id/reclaim', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const reclaimed = dbStore.reclaimLicense(req.params.id);
     if (!reclaimed) {
@@ -934,20 +1520,26 @@ app.patch('/api/licenses/:id/reclaim', requireAuth, (req, res) => {
 });
 
 // AMC Contracts CRUD (Protected)
-app.get('/api/amcs', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().amcs });
+app.get('/api/amcs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().amcs.filter(a => canAccessCustomer(a.customerId, actor)) });
 });
 
-app.post('/api/amcs', requireAuth, (req, res) => {
+app.post('/api/amcs', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
     const amc = req.body;
     if (!amc || !amc.clientName) {
       return res.status(400).json({ success: false, error: 'clientName is required' });
     }
+    const customer = customerFromInput(amc.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
+    if (amc.clientName !== customer.name) return res.status(400).json({ success: false, error: 'AMC client name must match the registered customer.' });
     const created = dbStore.addAMC({
       ...amc,
-      id: amc.id || `amc-${crypto.randomUUID()}`,
-      contractNumber: amc.contractNumber || `AMC-${Date.now().toString().slice(-6)}`
+      customerId: customer.id,
+      clientName: customer.name,
+      id: `amc-${crypto.randomUUID()}`,
+      contractNumber: `AMC-${crypto.randomUUID().slice(0, 10).toUpperCase()}`
     });
 
     res.status(201).json({ success: true, data: created });
@@ -957,241 +1549,479 @@ app.post('/api/amcs', requireAuth, (req, res) => {
 });
 
 // Projects & Proposals CRUD (Protected)
-app.get('/api/projects', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().projects });
+// Project and milestone financial facts must never be copied from untrusted client payloads.
+const PROJECT_CATEGORIES: readonly Project['category'][] = [
+  'Cloud Migration', 'Enterprise Cabling', 'Network Security', 'Hardware Overhaul', 'Disaster Recovery'
+];
+const PROJECT_EDITABLE = new Set([
+  'title', 'clientName', 'clientLocation', 'budget', 'category',
+  'scopeDescription', 'deliverables', 'skillsRequired'
+]);
+function projectInputObject(input: unknown): Record<string, any> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('A JSON object is required.');
+  }
+  return input as Record<string, any>;
+}
+function projectEditableFields(input: unknown, required = false): Partial<Project> {
+  const body = projectInputObject(input);
+  const keys = Object.keys(body);
+  if ((!keys.length && !required) || keys.some(key => !PROJECT_EDITABLE.has(key))) {
+    throw new Error('Project updates may only change declared project details, never IDs, status, milestones or financial evidence.');
+  }
+  const fields: Partial<Project> = {};
+  for (const key of keys) {
+    const value = body[key];
+    if (['title', 'clientName', 'clientLocation', 'scopeDescription'].includes(key)) {
+      const maxLength = key === 'scopeDescription' ? 5000 : 160;
+      if (typeof value !== 'string' || value.trim().length > maxLength ||
+          ((key === 'title' || key === 'clientName') && !value.trim())) {
+        throw new Error('Invalid project ' + key + '.');
+      }
+      (fields as any)[key] = value.trim();
+    } else if (key === 'budget') {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1_000_000_000_000) {
+        throw new Error('Project budget must be a finite, non-negative amount.');
+      }
+      fields.budget = value;
+    } else if (key === 'category') {
+      if (!PROJECT_CATEGORIES.includes(value)) throw new Error('Unknown project category.');
+      fields.category = value;
+    } else {
+      if (!Array.isArray(value) || value.length > 30 ||
+          value.some(item => typeof item !== 'string' || !item.trim() || item.length > 300)) {
+        throw new Error('Invalid project list: ' + key + '.');
+      }
+      (fields as any)[key] = value.map((item: string) => item.trim());
+    }
+  }
+  if (required && (!fields.title || !fields.clientName)) {
+    throw new Error('Project title and actual client name are required.');
+  }
+  return fields;
+}
+function verifiedProjectMilestoneInput(input: unknown): ProjectMilestone {
+  const body = projectInputObject(input);
+  if (Object.keys(body).sort().join(',') !== 'amount,dueDate,title') {
+    throw new Error('Milestones require only title, amount and dueDate; client IDs, status and payment proofs are forbidden.');
+  }
+  if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 160 ||
+      typeof body.amount !== 'number' || !Number.isFinite(body.amount) ||
+      body.amount <= 0 || body.amount > 1_000_000_000_000) {
+    throw new Error('Milestone requires a real title and positive finite amount.');
+  }
+  const dueDate = body.dueDate;
+  if (typeof dueDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(dueDate) ||
+      !Number.isFinite(Date.parse(dueDate + 'T00:00:00.000Z')) ||
+      new Date(dueDate + 'T00:00:00.000Z').toISOString().slice(0, 10) !== dueDate) {
+    throw new Error('Milestone dueDate must be a real YYYY-MM-DD calendar date.');
+  }
+  return {
+    id: 'milestone-' + crypto.randomUUID(), title: body.title.trim(),
+    amount: body.amount, dueDate, status: 'PENDING_FUNDING'
+  };
+}
+function verifyMilestoneBudget(milestones: ProjectMilestone[], budget: number) {
+  const total = milestones.reduce((sum, item) => sum + item.amount, 0);
+  if (!Number.isFinite(total) || total > budget) {
+    throw new Error('Milestone amounts cannot exceed the documented project budget.');
+  }
+}
+app.get('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'PROCUREMENT_LEAD'), (req, res) => {
+  res.json({ success: true, data: visibleProjects((req as any).user as LocalActor) });
 });
 
-app.post('/api/projects', requireAuth, (req, res) => {
+app.post('/api/projects', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const proj = req.body;
-    if (!proj || !proj.title) {
-      return res.status(400).json({ success: false, error: 'Project title is required' });
+    const raw = projectInputObject(req.body);
+    const { milestones: milestoneInput, customerId, ...editable } = raw;
+    const customer = customerFromInput(customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
+    const fields = projectEditableFields(editable, true);
+    if (fields.clientName !== customer.name) {
+      return res.status(400).json({ success: false, error: 'Project clientName must equal the registered customer; customer identity is not free text.' });
     }
+    if (milestoneInput !== undefined &&
+        (!Array.isArray(milestoneInput) || milestoneInput.length > 50)) {
+      throw new Error('Milestones must be an array of at most 50 explicitly supplied records.');
+    }
+    const milestones = ((milestoneInput || []) as unknown[]).map(verifiedProjectMilestoneInput);
+    verifyMilestoneBudget(milestones, fields.budget ?? 0);
     const created = dbStore.addProject({
-      ...proj,
-      id: proj.id || `proj-${crypto.randomUUID()}`,
-      projectCode: proj.projectCode || `PRJ-${Date.now().toString().slice(-6)}`,
-      createdAt: proj.createdAt || new Date().toISOString().split('T')[0],
-      milestones: proj.milestones || []
+      id: 'proj-' + crypto.randomUUID(),
+      customerId: customer.id,
+      createdByUserId: (req as any).user.userId,
+      collaboratorUserIds: [],
+      projectCode: 'PRJ-' + crypto.randomUUID().slice(0, 12).toUpperCase(),
+      title: fields.title!, clientName: fields.clientName!,
+      clientLocation: fields.clientLocation ?? '',
+      budget: fields.budget ?? 0, category: fields.category ?? 'Hardware Overhaul',
+      scopeDescription: fields.scopeDescription ?? '',
+      deliverables: fields.deliverables ?? [], skillsRequired: fields.skillsRequired ?? [],
+      status: 'PROPOSALS_OPEN', proposalsCount: 0,
+      createdAt: new Date().toISOString().slice(0, 10), milestones
     });
-
-    res.status(201).json({ success: true, data: created });
+    return res.status(201).json({ success: true, data: created, externalEscrowVerified: false });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(400).json({ success: false, error: err.message });
   }
 });
 
-app.patch('/api/projects/:id', requireAuth, (req, res) => {
+app.patch('/api/projects/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const updated = dbStore.updateProject(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Project not found' });
+    const fields = projectEditableFields(req.body);
+    if (fields.clientName !== undefined) {
+      return res.status(400).json({ success: false, error: 'Customer identity cannot be modified on a project.' });
     }
-    res.json({ success: true, data: updated });
+    if (fields.budget !== undefined && (req as any).user.role !== 'BUSINESS_OWNER') {
+      return res.status(403).json({ success: false, error: 'Only the business owner can change project budget.' });
+    }
+    const project = dbStore.getState().projects.find(p => p.id === req.params.id);
+    if (!project || !mayManageProject(project, (req as any).user as LocalActor)) {
+      return res.status(404).json({ success: false, error: 'Project not found.' });
+    }
+    if (fields.budget !== undefined) verifyMilestoneBudget(project.milestones, fields.budget);
+    const updated = dbStore.updateProject(project.id, fields);
+    return res.json({ success: true, data: updated });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(400).json({ success: false, error: err.message });
   }
 });
 
-app.patch('/api/projects/:id/milestones/:milestoneId', requireAuth, (req, res) => {
+
+app.patch('/api/projects/:id/access', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body) ||
+      Object.keys(body).sort().join(',') !== 'grant,userId' ||
+      typeof body.userId !== 'string' || typeof body.grant !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'Require exact staff userId and boolean grant.' });
+  }
+  const target = dbStore.getUserById(body.userId);
+  if (!target || target.tenantId !== dbStore.getState().tenant.id ||
+      !['SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'PROCUREMENT_LEAD'].includes(target.role) ||
+      (body.grant && target.disabledAt)) {
+    return res.status(400).json({ success: false, error: 'Only eligible local active staff may be granted project access.' });
+  }
   try {
-    const updated = dbStore.updateProjectMilestone(req.params.id, req.params.milestoneId, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Project or milestone not found' });
-    }
-    res.json({ success: true, data: updated });
+    const existingProject = dbStore.getState().projects.find(p => p.id === req.params.id);
+    if (!existingProject) return res.status(404).json({ success: false, error: 'Project not found.' });
+    if (body.grant && !canAccessCustomer(existingProject.customerId, { userId: target.id, role: target.role }))
+      return res.status(403).json({ success: false, error: 'Staff member must first be granted customer access.' });
+    const project = dbStore.setProjectCollaborator(req.params.id, target.id, body.grant, (req as any).user.username);
+    return project ? res.json({ success: true, data: project, externalCustomerAccessChanged: false }) :
+      res.status(404).json({ success: false, error: 'Project not found.' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(400).json({ success: false, error: err.message });
   }
 });
 
-app.get('/api/proposals', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().proposals });
+app.post('/api/projects/:id/milestones', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  try {
+    const project = dbStore.getState().projects.find(p => p.id === req.params.id);
+    if (!project) return res.status(404).json({ success: false, error: 'Project not found.' });
+    if (project.milestones.length >= 50) throw new Error('Maximum 50 milestones per project.');
+    const milestone = verifiedProjectMilestoneInput(req.body);
+    const milestones = [...project.milestones, milestone];
+    verifyMilestoneBudget(milestones, project.budget);
+    const updated = dbStore.updateProject(project.id, { milestones });
+    return res.status(201).json({ success: true, data: updated, externalEscrowVerified: false });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
 });
 
-app.post('/api/proposals', requireAuth, (req, res) => {
+app.patch('/api/projects/:id/milestones/:milestoneId', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const proposal = req.body;
-    if (!proposal || !proposal.providerName || !proposal.projectId) {
-      return res.status(400).json({ success: false, error: 'providerName and projectId are required' });
+    const body = projectInputObject(req.body);
+    if (Object.keys(body).length !== 1 || !Object.hasOwn(body, 'status') ||
+        !['IN_PROGRESS', 'COMPLETED'].includes(body.status)) {
+      return res.status(400).json({ success: false, error: 'Only internal work progression is permitted; escrow, release and payment cannot be self-certified.' });
     }
-    const created = dbStore.addProposal({
-      ...proposal,
-      id: proposal.id || `prop-${crypto.randomUUID()}`,
-      status: proposal.status || 'SUBMITTED'
+    const project = dbStore.getState().projects.find(p => p.id === req.params.id);
+    const milestone = project?.milestones.find(m => m.id === req.params.milestoneId);
+    if (!project || !milestone) {
+      return res.status(404).json({ success: false, error: 'Project or milestone not found.' });
+    }
+    const permitted = (milestone.status === 'PENDING_FUNDING' && body.status === 'IN_PROGRESS') ||
+      (milestone.status === 'IN_PROGRESS' && body.status === 'COMPLETED');
+    if (!permitted) {
+      return res.status(409).json({ success: false, error: 'Work milestones must progress one stage at a time; historical escrow statuses require separate verification.' });
+    }
+    const updated = dbStore.updateProjectMilestone(project.id, milestone.id, { status: body.status });
+    return res.json({ success: true, data: updated, externalEscrowVerified: false, paymentReleased: false });
+  } catch (err: any) {
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+app.get('/api/proposals', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+  res.json({ success: true, data: visibleProposals((req as any).user as LocalActor) });
+});
+
+// Proposal inputs describe a candidate bid, not verified provider credentials, identity or matching.
+app.post('/api/proposals', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
+  const body = req.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return res.status(400).json({ success: false, error: 'A real proposal record is required.' });
+  }
+  const projectId = typeof body.projectId === 'string' ? body.projectId.trim() : '';
+  const providerName = typeof body.providerName === 'string' ? body.providerName.trim() : '';
+  const commercialBid = body.commercialBid;
+  const timelineDays = body.timelineDays;
+  const technicalApproach = body.technicalApproach === undefined ? '' : body.technicalApproach;
+  if (!projectId || !providerName || providerName.length > 200 ||
+      typeof commercialBid !== 'number' || !Number.isFinite(commercialBid) ||
+      commercialBid <= 0 || commercialBid > 1_000_000_000_000 ||
+      !Number.isSafeInteger(timelineDays) || timelineDays < 1 || timelineDays > 3650 ||
+      typeof technicalApproach !== 'string' || technicalApproach.length > 4000) {
+    return res.status(400).json({ success: false, error: 'Valid existing project, provider, positive bid and turnaround days are required.' });
+  }
+  const project = dbStore.getState().projects.find(p => p.id === projectId);
+  if (!project || !visibleProject(project, (req as any).user as LocalActor)) {
+    return res.status(404).json({ success: false, error: 'Referenced project not found.' });
+  }
+  if (project.status !== 'PROPOSALS_OPEN') return res.status(409).json({ success: false, error: 'Project is not accepting new proposals.' });
+  try {
+    const created = dbStore.submitProjectProposal({
+      id: 'prop-' + crypto.randomUUID(), projectId, providerName, commercialBid, timelineDays,
+      submittedByUserId: (req as any).user.userId,
+      technicalApproach: technicalApproach.trim(),
+      providerVerified: false, providerRating: 0, matchScore: 0,
+      matchExplanation: 'Provider rating, credentials and AI matching have not been verified.',
+      oemCertifications: [], status: 'SUBMITTED'
     });
-
-    const project = dbStore.getState().projects.find(p => p.id === proposal.projectId);
-    if (project) {
-      dbStore.updateProject(project.id, { proposalsCount: (project.proposalsCount || 0) + 1 });
-    }
-
-    res.status(201).json({ success: true, data: created });
+    return res.status(201).json({ success: true, data: created, externalProviderVerified: false });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(409).json({ success: false, error: err.message });
   }
 });
 
-app.patch('/api/proposals/:id/accept', requireAuth, (req, res) => {
+// Atomic single-award acceptance: no second accepted proposal, no fake vendor dispatch or escrow.
+app.patch('/api/proposals/:id/accept', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const prop = dbStore.getState().proposals.find(p => p.id === req.params.id);
-    if (!prop) {
-      return res.status(404).json({ success: false, error: 'Proposal not found' });
+    const proposal = dbStore.getState().proposals.find(p => p.id === req.params.id);
+    const project = proposal && dbStore.getState().projects.find(p => p.id === proposal.projectId);
+    if (!proposal || !project || !mayManageProject(project, (req as any).user as LocalActor)) {
+      return res.status(404).json({ success: false, error: 'Proposal not found.' });
     }
-    const updated = dbStore.updateProposal(prop.id, { status: 'ACCEPTED' });
-    if (prop.projectId) {
-      dbStore.updateProject(prop.projectId, { status: 'IN_PROGRESS' });
-    }
-    res.json({ success: true, data: updated });
+    const award = dbStore.acceptProjectProposal(req.params.id, (req as any).user.username);
+    return award
+      ? res.json({ success: true, data: award.proposal, project: award.project,
+          affectedProposals: award.proposals, providerNotified: false, paymentReleased: false })
+      : res.status(404).json({ success: false, error: 'Proposal not found.' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(409).json({ success: false, error: err.message });
   }
 });
 
-// P3.4 Missing Collections: RMA, Knowledge Base, CRM, Disputes
-app.get('/api/rma', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().rmaClaims });
-});
+/**
+ * Persistent business collections: validate input against the actual TS types.
+ * Client-created IDs, settlement statuses and verification claims are ignored.
+ * No operation here can move money, contact OEMs or confirm courier dispatch.
+ */
+const rmaStages = ['FAULT_LOGGED', 'OEM_APPROVED', 'IN_TRANSIT', 'SERVICE_CENTER', 'REPLACED_RETURN', 'TESTED_CLOSED'] as const;
+const crmStages = ['LEAD', 'QUALIFIED', 'TECHNICAL_SCOPING', 'PROPOSAL_SENT', 'NEGOTIATION', 'WON'] as const;
+const disputeDecisions = ['RELEASE_RECOMMENDED', 'REFUND_RECOMMENDED', 'REWORK_RECOMMENDED'] as const;
+const stringField = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
+const stringArray = (value: unknown): string[] | null =>
+  Array.isArray(value) && value.every(item => typeof item === 'string' && item.trim())
+    ? value.map(item => (item as string).trim())
+    : null;
 
-app.post('/api/rma', requireAuth, (req, res) => {
+app.get('/api/rma', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().rmaClaims.filter(r => visibleRMA(r, actor)) });
+});
+app.post('/api/rma', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   try {
-    const claim = req.body;
-    if (!claim || !claim.assetName || !claim.faultDescription) {
-      return res.status(400).json({ success: false, error: 'assetName and faultDescription are required' });
+    const assetTag = stringField(req.body?.assetTag);
+    const faultSymptom = stringField(req.body?.faultSymptom);
+    const asset = dbStore.getState().assets.find(a => a.assetTag === assetTag);
+    if (!asset || !visibleAsset(asset, (req as any).user as LocalActor)) {
+      return res.status(404).json({ success: false, error: 'Asset not found or not assigned.' });
     }
+    if (!faultSymptom) return res.status(400).json({ success: false, error: 'An actual fault symptom is required.' });
+    const identifier = crypto.randomUUID();
     const created = dbStore.addRMAClaim({
-      ...claim,
-      id: claim.id || `rma-${crypto.randomUUID()}`,
-      status: 'FAULT_LOGGED',
+      id: 'rma-' + identifier,
+      rmaNumber: 'RMA-' + identifier.slice(0, 10).toUpperCase(),
+      customerId: asset.customerId,
+      assetId: asset.id, assetTag: asset.assetTag, assetName: asset.name,
+      serialNumber: asset.serialNumber || '', oemBrand: asset.brand || '',
+      oemCaseNumber: '', faultSymptom, warrantyStatus: 'UNVERIFIED',
+      courierTracking: '', courierPartner: '', stage: 'FAULT_LOGGED',
       createdAt: new Date().toISOString()
     });
-    res.status(201).json({ success: true, data: created });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    return res.status(201).json({ success: true, data: created });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
-
-app.patch('/api/rma/:id', requireAuth, (req, res) => {
+app.patch('/api/rma/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const updated = dbStore.updateRMAClaim(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'RMA claim not found' });
+    const current = dbStore.getState().rmaClaims.find(c => c.id === req.params.id);
+    if (!current || !visibleRMA(current, (req as any).user as LocalActor))
+      return res.status(404).json({ success: false, error: 'RMA claim not found.' });
+    const stage = req.body?.stage;
+    const index = rmaStages.indexOf(current.stage);
+    if (typeof stage !== 'string' || stage !== rmaStages[index + 1]) {
+      return res.status(400).json({ success: false, error: 'Only the immediate next RMA stage may be recorded.' });
     }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    const updates: Partial<typeof current> = { stage: stage as typeof current.stage };
+    if (stage === 'OEM_APPROVED') {
+      const caseNumber = stringField(req.body?.oemCaseNumber);
+      if (!caseNumber) return res.status(400).json({ success: false, error: 'Actual OEM case number required. Approval is not automatic.' });
+      updates.oemCaseNumber = caseNumber;
+    }
+    if (stage === 'IN_TRANSIT') {
+      const courier = stringField(req.body?.courierPartner), tracking = stringField(req.body?.courierTracking);
+      if (!courier || !tracking) return res.status(400).json({ success: false, error: 'Actual courier name and AWB required.' });
+      updates.courierPartner = courier;
+      updates.courierTracking = tracking;
+    }
+    if (stage === 'TESTED_CLOSED') updates.resolvedAt = new Date().toISOString();
+    const updated = dbStore.updateRMAClaim(req.params.id, updates);
+    return res.json({ success: true, data: updated });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
 
-app.get('/api/knowledge', requireAuth, (req, res) => {
+app.get('/api/knowledge', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().knowledgeArticles });
 });
-
-app.post('/api/knowledge', requireAuth, (req, res) => {
+app.post('/api/knowledge', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const article = req.body;
-    if (!article || !article.title || !article.content) {
-      return res.status(400).json({ success: false, error: 'title and content are required' });
+    const title = stringField(req.body?.title), summary = stringField(req.body?.summary);
+    const steps = stringArray(req.body?.selfServiceSteps);
+    if (!title || !summary || !steps?.length) {
+      return res.status(400).json({ success: false, error: 'Title, summary and at least one validated SOP step are required.' });
     }
     const created = dbStore.addKnowledgeArticle({
-      ...article,
-      id: article.id || `kb-${crypto.randomUUID()}`,
-      views: 0,
-      helpfulCount: 0,
-      tags: article.tags || [],
-      lastUpdated: new Date().toISOString()
+      id: 'kb-' + crypto.randomUUID(), title, summary,
+      category: stringField(req.body?.category) || 'General',
+      readTime: 'Not measured', views: 0, solvedCount: 0,
+      tags: stringArray(req.body?.tags) || [],
+      symptoms: stringArray(req.body?.symptoms) || [],
+      selfServiceSteps: steps
     });
-    res.status(201).json({ success: true, data: created });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    return res.status(201).json({ success: true, data: created });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
-
-app.patch('/api/knowledge/:id', requireAuth, (req, res) => {
+app.patch('/api/knowledge/:id', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD'), (req, res) => {
   try {
-    const updated = dbStore.updateKnowledgeArticle(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Knowledge article not found' });
+    const current = dbStore.getState().knowledgeArticles.find(a => a.id === req.params.id);
+    if (!current) return res.status(404).json({ success: false, error: 'Knowledge article not found.' });
+    const updates: Partial<typeof current> = {};
+    if (req.body?.title !== undefined) {
+      const title = stringField(req.body.title);
+      if (!title) return res.status(400).json({ success: false, error: 'Article title required.' });
+      updates.title = title;
     }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    if (req.body?.summary !== undefined) {
+      const summary = stringField(req.body.summary);
+      if (!summary) return res.status(400).json({ success: false, error: 'Article summary required.' });
+      updates.summary = summary;
+    }
+    if (req.body?.selfServiceSteps !== undefined) {
+      const steps = stringArray(req.body.selfServiceSteps);
+      if (!steps?.length) return res.status(400).json({ success: false, error: 'At least one valid SOP step required.' });
+      updates.selfServiceSteps = steps;
+    }
+    if (req.body?.category !== undefined) updates.category = stringField(req.body.category);
+    const updated = dbStore.updateKnowledgeArticle(req.params.id, updates);
+    return res.json({ success: true, data: updated });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
-
-app.get('/api/crm', requireAuth, (req, res) => {
-  res.json({ success: true, data: dbStore.getState().crmOpportunities });
-});
-
-app.post('/api/crm', requireAuth, (req, res) => {
+// Self-resolution acknowledgement is atomic and not a client-supplied arbitrary count.
+app.post('/api/knowledge/:id/solve', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER', 'SALES_MANAGER'), (req, res) => {
   try {
-    const opp = req.body;
-    if (!opp || !opp.clientName || !opp.title) {
-      return res.status(400).json({ success: false, error: 'clientName and title are required' });
+    const updated = dbStore.markKnowledgeArticleSolved(req.params.id);
+    if (!updated) return res.status(404).json({ success: false, error: 'Knowledge article not found.' });
+    return res.json({ success: true, data: updated });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
+});
+
+app.get('/api/crm', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'),
+  ...(crmReadThrough ? [crmReadThrough] : []), (req, res) => {
+  const actor = (req as any).user as LocalActor;
+  res.json({ success: true, data: dbStore.getState().crmOpportunities.filter(c => canAccessCustomer(c.customerId, actor)) });
+});
+app.post('/api/crm', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
+  try {
+    const title = stringField(req.body?.title), clientName = stringField(req.body?.clientName);
+    const value = Number(req.body?.value);
+    const customer = customerFromInput(req.body?.customerId, (req as any).user as LocalActor);
+    if (!customer) return res.status(404).json({ success: false, error: 'Choose an authorized registered customer.' });
+    if (!title || clientName !== customer.name || !Number.isFinite(value) || value < 0) {
+      return res.status(400).json({ success: false, error: 'Real client, opportunity title and valid deal value required.' });
     }
     const created = dbStore.addCRMOpportunity({
-      ...opp,
-      id: opp.id || `crm-${crypto.randomUUID()}`,
-      createdAt: new Date().toISOString()
+      id: 'crm-' + crypto.randomUUID(), customerId: customer.id, title, clientName: customer.name, value,
+      stage: 'LEAD', winProbability: 0,
+      contactPerson: stringField(req.body?.contactPerson),
+      expectedCloseDate: stringField(req.body?.expectedCloseDate),
+      assignedEngineer: '', category: stringField(req.body?.category)
     });
-    res.status(201).json({ success: true, data: created });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    return res.status(201).json({ success: true, data: created });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
-
-app.patch('/api/crm/:id', requireAuth, (req, res) => {
+app.patch('/api/crm/:id', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), (req, res) => {
   try {
-    const updated = dbStore.updateCRMOpportunity(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'CRM opportunity not found' });
+    const current = dbStore.getState().crmOpportunities.find(o => o.id === req.params.id);
+    if (!current || !canAccessCustomer(current.customerId, (req as any).user as LocalActor))
+      return res.status(404).json({ success: false, error: 'CRM opportunity not found.' });
+    const next = stringField(req.body?.stage);
+    const idx = crmStages.indexOf(current.stage as typeof crmStages[number]);
+    if (idx === -1 || next !== crmStages[idx + 1]) {
+      return res.status(400).json({ success: false, error: 'CRM stage can advance only one step at a time.' });
     }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    const updated = dbStore.updateCRMOpportunity(req.params.id, { stage: next });
+    return res.json({ success: true, data: updated });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
 
-app.get('/api/disputes', requireAuth, (req, res) => {
+app.get('/api/disputes', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().marketplaceDisputes });
 });
-
-app.post('/api/disputes', requireAuth, (req, res) => {
+app.post('/api/disputes', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const dispute = req.body;
-    if (!dispute || !dispute.reason || !dispute.projectTitle) {
-      return res.status(400).json({ success: false, error: 'reason and projectTitle are required' });
+    const projectId = stringField(req.body?.projectId), reason = stringField(req.body?.reason);
+    const customerClaim = stringField(req.body?.customerClaim);
+    const disputedAmount = Number(req.body?.disputedAmount);
+    const project = dbStore.getState().projects.find(p => p.id === projectId);
+    if (!project || !reason || !customerClaim || !Number.isFinite(disputedAmount) || disputedAmount <= 0) {
+      return res.status(400).json({ success: false, error: 'Existing project, reason, customer statement and positive amount are required.' });
     }
+    const id = crypto.randomUUID();
     const created = dbStore.addMarketplaceDispute({
-      ...dispute,
-      id: dispute.id || `dsp-${crypto.randomUUID()}`,
-      status: 'UNDER_ARBITRATION',
-      createdAt: new Date().toISOString()
+      id: 'dsp-' + id, disputeNumber: 'DSP-' + id.slice(0, 10).toUpperCase(),
+      projectId: project.id, projectTitle: project.title, customerName: project.clientName,
+      providerName: '', disputedAmount, escrowHeld: 0,
+      reason, customerClaim, providerRebuttal: '', aiMediationVerdict: '',
+      status: 'UNDER_ARBITRATION', createdAt: new Date().toISOString()
     });
-    res.status(201).json({ success: true, data: created });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    return res.status(201).json({ success: true, data: created });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
-
-app.patch('/api/disputes/:id', requireAuth, (req, res) => {
+app.patch('/api/disputes/:id', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
-    const updated = dbStore.updateMarketplaceDispute(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ success: false, error: 'Dispute not found' });
+    const current = dbStore.getState().marketplaceDisputes.find(d => d.id === req.params.id);
+    if (!current) return res.status(404).json({ success: false, error: 'Dispute not found.' });
+    const decision = stringField(req.body?.resolutionDecision);
+    if (!disputeDecisions.some(d => d === decision)) {
+      return res.status(400).json({ success: false, error: 'Only an internal recommendation can be recorded; no payout/refund adapter exists.' });
     }
-    res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+    const updated = dbStore.updateMarketplaceDispute(req.params.id, {
+      resolutionDecision: decision as typeof disputeDecisions[number],
+      decisionRecordedAt: new Date().toISOString()
+    });
+    return res.json({ success: true, data: updated, note: 'Internal recommendation only. No escrow transfer or refund executed.' });
+  } catch (err: any) { return res.status(500).json({ success: false, error: err.message }); }
 });
 
 // Workflows CRUD (Protected)
-app.get('/api/workflows', requireAuth, (req, res) => {
+app.get('/api/workflows', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().workflows });
 });
 
-app.post('/api/workflows', requireAuth, (req, res) => {
+app.post('/api/workflows', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   try {
     const wf = req.body;
     if (!wf || !wf.name) {
@@ -1200,7 +2030,7 @@ app.post('/api/workflows', requireAuth, (req, res) => {
     const created = dbStore.addWorkflow({
       ...wf,
       id: wf.id || `wf-${crypto.randomUUID()}`,
-      active: true,
+      active: false,
       executionCount: 0,
       lastExecuted: 'Never'
     });
@@ -1210,27 +2040,29 @@ app.post('/api/workflows', requireAuth, (req, res) => {
   }
 });
 
-app.patch('/api/workflows/:id/toggle', requireAuth, (req, res) => {
-  try {
-    const toggled = dbStore.toggleWorkflow(req.params.id);
-    if (!toggled) {
-      return res.status(404).json({ success: false, error: 'Workflow not found' });
-    }
-    res.json({ success: true, data: toggled });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+app.patch('/api/workflows/:id/toggle', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  return res.status(501).json({
+    success: false, error: 'Workflow activation is disabled until audited execution adapters are implemented.'
+  });
 });
 
 // Connectors & Integrations
-app.get('/api/connectors', requireAuth, (req, res) => {
+// Until real action adapters exist, never claim a workflow executed.
+app.post('/api/workflows/:id/execute', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  return res.status(501).json({
+    success: false,
+    error: 'Workflow execution is unavailable: verified action adapters and audit evidence are not implemented. Use dry-run preview only.'
+  });
+});
+
+app.get('/api/connectors', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().connectors });
 });
 
-app.get('/api/integrations/status', (req, res) => {
+app.get('/api/integrations/status', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({
     gemini: !!process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY',
-    telegram: !!process.env.TELEGRAM_BOT_TOKEN,
+    telegram: !!process.env.TELEGRAM_BOT_TOKEN && !!process.env.TELEGRAM_AUTHORIZED_CHAT_ID,
     m365: !!process.env.M365_CLIENT_ID,
     payments: !!process.env.RAZORPAY_KEY_ID,
     gst: !!process.env.GST_API_KEY
@@ -1238,11 +2070,13 @@ app.get('/api/integrations/status', (req, res) => {
 });
 
 // Authoritative Audit Events (Protected - P1.5 Server-side Agent Assignment)
-app.get('/api/events', requireAuth, (req, res) => {
+app.get('/api/events', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().events });
 });
 
-app.post('/api/events', requireAuth, (req, res) => {
+app.post('/api/events', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
+  return res.status(403).json({ success: false, error: 'Authoritative audit events are emitted only by server business operations.' });
+  /* Legacy client-generated audit event support intentionally disabled.
   try {
     const { eventType, summary, autonomousActionTaken, humanApprovalRequired, approvalStatus } = req.body;
     if (!summary || !eventType) {
@@ -1263,6 +2097,54 @@ app.post('/api/events', requireAuth, (req, res) => {
     res.status(201).json({ success: true, data: created });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+  */
+});
+
+// Live Telegram outbound: only a successful official Bot API response is delivery evidence.
+// A provider-accepted message is not proof that a person read it.
+app.post('/api/telegram/send', requireAuth, requireRole('BUSINESS_OWNER'), async (req, res) => {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_AUTHORIZED_CHAT_ID;
+  if (!token || !chatId) {
+    return res.status(503).json({ success: false, error: 'Telegram bot token and authorized chat ID are not configured.' });
+  }
+  if (!/^\d+:[A-Za-z0-9_-]{10,}$/.test(token)) {
+    return res.status(503).json({ success: false, error: 'Telegram bot token format is invalid.' });
+  }
+  const content = typeof req.body?.text === 'string' ? req.body.text.trim() : '';
+  if (!content || content.length > 4096) {
+    return res.status(400).json({ success: false, error: 'Telegram message must contain 1–4096 characters.' });
+  }
+  try {
+    const result = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: content }),
+      signal: AbortSignal.timeout(8000)
+    });
+    const reply: any = await result.json();
+    if (!result.ok || reply?.ok !== true || !Number.isSafeInteger(reply?.result?.message_id)) {
+      return res.status(502).json({ success: false, error: 'Telegram API did not confirm message acceptance. No delivery was recorded.' });
+    }
+    try {
+      const message = dbStore.addTelegramMessage({
+        id: 'tlg-api-' + crypto.randomUUID(),
+        sender: 'owner', text: content, timestamp: new Date().toISOString(),
+        deliveryStatus: 'ACCEPTED_BY_TELEGRAM_API',
+        telegramMessageId: reply.result.message_id
+      });
+      return res.json({ success: true, data: message, providerAccepted: true });
+    } catch (persistError) {
+      console.error('Telegram API accepted message but local ledger write failed:', persistError);
+      return res.status(500).json({
+        success: false, providerAccepted: true,
+        error: 'Telegram API accepted this message but local persistence failed. Check Telegram before retrying to avoid duplicate sends.'
+      });
+    }
+  } catch (err: any) {
+    console.error('Telegram outbound unavailable:', err?.message || 'provider error');
+    return res.status(502).json({ success: false, error: 'Telegram delivery not confirmed. Check provider connectivity and logs before retrying.' });
   }
 });
 
@@ -1286,6 +2168,20 @@ app.post('/api/telegram/webhook', (req, res) => {
 
     const authorizedChat = process.env.TELEGRAM_AUTHORIZED_CHAT_ID;
     const authorizedUser = process.env.TELEGRAM_AUTHORIZED_USER_ID;
+    if (!authorizedUser || !authorizedChat) {
+      return res.status(503).json({ success: false, error: 'Explicit Telegram authorized user and chat IDs must be configured.' });
+    }
+    if (!Number.isSafeInteger(update.update_id) || update.update_id < 0) {
+      return res.status(400).json({ success: false, error: 'Valid Telegram update_id required for replay protection.' });
+    }
+    const telegramUser = update.callback_query?.from || update.message?.from;
+    const telegramChat = update.callback_query?.message?.chat || update.message?.chat;
+    if (String(telegramUser?.id) !== String(authorizedUser) || String(telegramChat?.id) !== String(authorizedChat)) {
+      return res.status(403).json({ success: false, error: 'Telegram update sender/chat not authorized.' });
+    }
+    if (!dbStore.markTelegramUpdateProcessed(update.update_id)) {
+      return res.json({ success: true, handled: 'duplicate_ignored', updateId: update.update_id });
+    }
 
     if (update.callback_query) {
       const from = update.callback_query.from;
@@ -1365,7 +2261,7 @@ app.post('/api/telegram/webhook', (req, res) => {
 });
 
 // Payments: Honest, zero-mock integration status (Rejects fake payments)
-app.post('/api/payments/create-order', requireAuth, (req, res) => {
+app.post('/api/payments/create-order', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   const hasGateway = !!process.env.RAZORPAY_KEY_ID && !!process.env.RAZORPAY_KEY_SECRET;
   if (!hasGateway) {
     return res.status(503).json({
@@ -1376,7 +2272,7 @@ app.post('/api/payments/create-order', requireAuth, (req, res) => {
   res.status(501).json({ success: false, error: 'Payment provider adapter is not implemented yet. Payment transactions cannot be processed.' });
 });
 
-app.post('/api/payments/verify', requireAuth, (req, res) => {
+app.post('/api/payments/verify', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   const hasGateway = !!process.env.RAZORPAY_KEY_ID && !!process.env.RAZORPAY_KEY_SECRET;
   if (!hasGateway) {
     return res.status(503).json({
@@ -1388,7 +2284,7 @@ app.post('/api/payments/verify', requireAuth, (req, res) => {
 });
 
 // GST: Honest, zero-mock IRN generation (Rejects fake IRN generation)
-app.post('/api/gst/generate-irn', requireAuth, (req, res) => {
+app.post('/api/gst/generate-irn', requireAuth, requireRole('BUSINESS_OWNER'), (req, res) => {
   const hasGstCredentials = !!process.env.GST_API_KEY && !!process.env.GST_SELLER_GSTIN;
   if (!hasGstCredentials) {
     return res.status(503).json({
@@ -1400,7 +2296,7 @@ app.post('/api/gst/generate-irn', requireAuth, (req, res) => {
 });
 
 // Real AI BOM & Solution Builder (Protected)
-app.post('/api/ai/bom-builder', requireAuth, async (req, res) => {
+app.post('/api/ai/bom-builder', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER'), async (req, res) => {
   const { requirement, budget, officeSize, preference } = req.body;
   const gemini = getGeminiClient();
 
@@ -1479,7 +2375,7 @@ The JSON must follow this exact structure:
 });
 
 // Real AI Telegram Command & Natural Language Interface (Protected)
-app.post('/api/ai/telegram-command', requireAuth, async (req, res) => {
+app.post('/api/ai/telegram-command', requireAuth, requireRole('BUSINESS_OWNER'), async (req, res) => {
   const { command } = req.body;
   const state = dbStore.getState();
 
@@ -1584,7 +2480,7 @@ Instructions:
 });
 
 // Real AI Copilot Endpoint (Executive Dashboard, Protected)
-app.post('/api/ai/copilot', requireAuth, async (req, res) => {
+app.post('/api/ai/copilot', requireAuth, requireRole('BUSINESS_OWNER'), async (req, res) => {
   const { query } = req.body;
   const gemini = getGeminiClient();
   const state = dbStore.getState();
@@ -1636,7 +2532,7 @@ Provide a strict, factual, professional answer in JSON format:
 });
 
 // Real AI IT Diagnosis & Problem Solver (Protected)
-app.post('/api/ai/diagnosis', requireAuth, async (req, res) => {
+app.post('/api/ai/diagnosis', requireAuth, requireRole('BUSINESS_OWNER', 'ENTERPRISE_IT_HEAD', 'FIELD_ENGINEER'), async (req, res) => {
   const { symptom, deviceType, urgency } = req.body;
   const gemini = getGeminiClient();
 
@@ -1677,7 +2573,7 @@ Respond in strict JSON only without markdown formatting:
 
 // Production static serving vs Dev Vite middleware
 async function setupVite() {
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'production' && process.env.NODE_ENV !== 'staging') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -1691,8 +2587,9 @@ async function setupVite() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Apex Autonomous IT Hardware & Services OS running on http://0.0.0.0:${PORT}`);
+  const bindHost = process.env.NODE_ENV === 'staging' ? '127.0.0.1' : '0.0.0.0';
+  app.listen(PORT, bindHost, () => {
+    console.log(`Apex Autonomous IT Hardware & Services OS running on http://${bindHost}:${PORT}`);
   });
 }
 

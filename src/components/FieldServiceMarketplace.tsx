@@ -17,34 +17,43 @@ import {
   UserCheck,
   Check
 } from 'lucide-react';
-import { FieldJob } from '../types';
+import { FieldJob, ProductItem, CustomerAccount } from '../types';
 
 interface FieldServiceMarketplaceProps {
+  customers: CustomerAccount[];
   jobs: FieldJob[];
+  products: ProductItem[];
   onUpdateJobStatus: (jobId: string, nextStatus: FieldJob['status']) => void;
-  onConsumePart: (jobId: string, partName: string, cost: number) => void;
+  onConsumePart: (jobId: string, productId: string, quantity: number) => void;
   onSignOffJob: (jobId: string) => void;
   onCreateJob?: (newJob: Partial<FieldJob>) => void;
+  fieldEngineers: { id: string; name: string; username: string }[];
+  canManageJobs: boolean;
+  onAssignJob: (jobId: string, assignedUserId: string | null) => void;
   isCleanSlate?: boolean;
 }
 
 export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = ({
+  customers,
   jobs,
+  products,
   onUpdateJobStatus,
   onConsumePart,
   onSignOffJob,
   onCreateJob,
+  fieldEngineers,
+  canManageJobs,
+  onAssignJob,
   isCleanSlate = false
 }) => {
   const [selectedJobId, setSelectedJobId] = useState<string>(isCleanSlate ? '' : (jobs[0]?.id || ''));
-  const [newPartName, setNewPartName] = useState('');
-  const [newPartCost, setNewPartCost] = useState('4200');
-  const [signatureName, setSignatureName] = useState('');
+  const [selectedPartId, setSelectedPartId] = useState('');
+  const [partQuantity, setPartQuantity] = useState(1);
 
   // Dispatch Job Modal State
   const [showDispatchModal, setShowDispatchModal] = useState(false);
   const [dispatchTitle, setDispatchTitle] = useState('');
-  const [dispatchCustomer, setDispatchCustomer] = useState('');
+  const [dispatchCustomerId, setDispatchCustomerId] = useState('');
   const [dispatchAddress, setDispatchAddress] = useState('');
   const [dispatchTech, setDispatchTech] = useState('');
   const [dispatchPhone, setDispatchPhone] = useState('');
@@ -104,10 +113,10 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
   const handleAddPart = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedJob || !newPartName.trim()) return;
-    const cost = parseInt(newPartCost, 10) || 0;
-    onConsumePart(selectedJob.id, newPartName, cost);
-    setNewPartName('');
+    if (!selectedJob || !selectedPartId || !Number.isSafeInteger(partQuantity) || partQuantity <= 0) return;
+    onConsumePart(selectedJob.id, selectedPartId, partQuantity);
+    setSelectedPartId('');
+    setPartQuantity(1);
   };
 
   const handleBookFromCatalog = (pkg: typeof servicesCatalog[0]) => {
@@ -118,17 +127,19 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
   const handleDispatchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!dispatchTitle.trim() || !dispatchCustomer.trim() || !dispatchAddress.trim() || !dispatchTech.trim()) {
-      setActionBanner('Job title, customer name, site address, and assigned technician are all required.');
+    if (!dispatchTitle.trim() || !dispatchCustomerId || !dispatchAddress.trim()) {
+      setActionBanner('Job title, customer and address are required. Unassigned jobs are internal drafts.');
       return;
     }
     if (!onCreateJob) return;
 
     onCreateJob({
       title: dispatchTitle.trim(),
-      customerName: dispatchCustomer.trim(),
+      customerId: dispatchCustomerId,
+      customerName: customers.find(c => c.id === dispatchCustomerId)?.name || '',
       address: dispatchAddress.trim(),
-      technicianName: dispatchTech.trim(),
+      assignedUserId: dispatchTech || undefined,
+      technicianName: fieldEngineers.find(u => u.id === dispatchTech)?.name || 'Unassigned',
       technicianPhone: dispatchPhone.trim() || 'N/A',
       status: 'SCHEDULED',
       scheduledTime: dispatchSlot.trim() || 'Scheduled Window',
@@ -137,7 +148,7 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
     setShowDispatchModal(false);
     setDispatchTitle('');
-    setDispatchCustomer('');
+    setDispatchCustomerId('');
     setDispatchAddress('');
     setDispatchTech('');
     setDispatchPhone('');
@@ -155,18 +166,18 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
             Field Service Management & On-Demand IT Marketplace
           </h1>
           <p className="text-sm text-slate-400">
-            Urban Company-style technician scheduling, GPS dispatch, live parts consumption, and customer sign-off.
+            Internal job tracking and local staff assignments; GPS dispatch and customer e-sign are not integrated.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5">
-          <button
+          {canManageJobs && <button
             onClick={() => setShowDispatchModal(true)}
             className="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs flex items-center gap-1.5 shadow transition cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Dispatch Engineer</span>
-          </button>
+            <span>Schedule Field Job</span>
+          </button>}
           <div className="text-xs bg-slate-900 border border-slate-800 px-3 py-2 rounded-xl text-slate-300 font-mono">
             Live Dispatch: <span className="text-emerald-400 font-bold">{jobs.length} Jobs Active</span>
           </div>
@@ -250,6 +261,18 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
                 <div className="space-y-1">
                   <span className="text-slate-500 text-[10px] uppercase font-mono">Assigned Field Engineer</span>
                   <div className="font-bold text-white text-sm">{selectedJob.technicianName}</div>
+                  {canManageJobs && (
+                    <div className="my-2 text-xs">
+                      <label htmlFor="field-assign" className="block text-slate-400 mb-1">Assign local field engineer</label>
+                      <select id="field-assign" value={selectedJob.assignedUserId || ''}
+                        onChange={e => onAssignJob(selectedJob.id, e.target.value || null)}
+                        className="w-full bg-slate-950 text-white border border-slate-700 rounded-lg p-2">
+                        <option value="">Unassigned — no external dispatch</option>
+                        {fieldEngineers.map(u => <option key={u.id} value={u.id}>{u.name} ({u.username})</option>)}
+                      </select>
+                      <p className="text-amber-300">Internal assignment; no outbound dispatch sent.</p>
+                    </div>
+                  )}
                   <div className="text-slate-400 flex items-center gap-1">
                     <Phone className="w-3.5 h-3.5 text-emerald-400" />
                     <span>{selectedJob.technicianPhone}</span>
@@ -285,48 +308,44 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
                 {/* Add Part Form */}
                 <form onSubmit={handleAddPart} className="flex gap-2 text-xs">
-                  <input
-                    type="text"
-                    value={newPartName}
-                    onChange={(e) => setNewPartName(e.target.value)}
-                    placeholder="e.g. Cisco SFP+ 10G Optical Transceiver"
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-                  />
+                  <select
+                    aria-label="Warehouse product"
+                    value={selectedPartId}
+                    onChange={e => setSelectedPartId(e.target.value)}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
+                    required
+                  >
+                    <option value="">Select a real warehouse SKU</option>
+                    {products.filter(p => p.stockAvailable - p.stockReserved > 0).map(p => (
+                      <option key={p.id} value={p.id}>{p.sku} — {p.name} ({p.stockAvailable - p.stockReserved} available)</option>
+                    ))}
+                  </select>
                   <input
                     type="number"
-                    value={newPartCost}
-                    onChange={(e) => setNewPartCost(e.target.value)}
-                    placeholder="Cost ₹"
-                    className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white text-right focus:outline-none focus:border-cyan-500"
+                    min={1}
+                    step={1}
+                    aria-label="Part quantity"
+                    value={partQuantity}
+                    onChange={e => setPartQuantity(Number(e.target.value))}
+                    className="w-20 bg-slate-950 border border-slate-700 rounded-lg px-2 py-2 text-white"
                   />
                   <button
                     type="submit"
-                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold border border-slate-700 cursor-pointer"
+                    disabled={!selectedPartId || partQuantity <= 0}
+                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold border border-slate-700 disabled:opacity-40"
                   >
-                    Add Part
+                    Consume
                   </button>
                 </form>
               </div>
 
-              {/* Customer Digital Signature Block */}
               {selectedJob.status === 'PARTS_REPLACED' && (
                 <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 space-y-3 text-xs">
-                  <span className="font-bold text-white block">Customer Digital Sign-Off & Delivery Acceptance</span>
-                  <input
-                    type="text"
-                    value={signatureName}
-                    onChange={(e) => setSignatureName(e.target.value)}
-                    placeholder="Enter Signatory Name (e.g. Aditya Mehta, IT VP)"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white"
-                  />
-                  <button
-                    onClick={() => {
-                      onSignOffJob(selectedJob.id);
-                    }}
-                    disabled={!signatureName.trim()}
-                    className="w-full py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer disabled:opacity-50"
-                  >
-                    Capture E-Sign & Close Job
+                  <strong className="text-white">Internal Completion Only</strong>
+                  <p className="text-amber-300">Customer e-sign and payment are NOT verified.</p>
+                  <button type="button" onClick={() => onSignOffJob(selectedJob.id)}
+                    className="w-full py-2 rounded-lg bg-emerald-600 text-white font-bold">
+                    Mark Work Complete (No E-Sign)
                   </button>
                 </div>
               )}
@@ -336,8 +355,8 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
                 <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-800 text-emerald-300 text-xs flex items-center gap-2">
                   <CheckCircle2 className="w-5 h-5 shrink-0 text-emerald-400" />
                   <div>
-                    <span className="font-bold block">Job Signed Off & Closed</span>
-                    <span>Customer digital signature obtained and billing ledger updated.</span>
+                    <span className="font-bold block">Work Marked Completed Internally</span>
+                    <span>No external customer signature or billing settlement was verified.</span>
                   </div>
                 </div>
               )}
@@ -367,13 +386,13 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
                   The field dispatch queue is clear. Dispatch an on-demand engineer or select a pre-configured service package from the catalog on the right.
                 </p>
               </div>
-              <button
+              {canManageJobs && <button
                 onClick={() => setShowDispatchModal(true)}
                 className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs cursor-pointer shadow-lg inline-flex items-center gap-2 transition active:scale-95"
               >
                 <Plus className="w-4 h-4" />
-                <span>Dispatch New Field Engineer</span>
-              </button>
+                <span>Schedule Field Job</span>
+              </button>}
             </div>
           )}
 
@@ -400,15 +419,16 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
                   <p className="text-[11px] text-slate-400 leading-relaxed">{pkg.description}</p>
 
                   <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-[10px] text-slate-500 font-mono">
-                    <span className="text-cyan-400">SLA: {pkg.sla}</span>
+                    <span className="text-cyan-400">Indicative: {pkg.sla}</span>
                     <span className="text-slate-400 font-sans">Standard Catalog Package</span>
                   </div>
 
                   <button
-                    onClick={() => handleBookFromCatalog(pkg)}
+                    disabled={!canManageJobs}
+                     onClick={() => handleBookFromCatalog(pkg)}
                     className="w-full py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 text-cyan-300 font-bold border border-cyan-800/80 text-[11px] transition cursor-pointer flex items-center justify-center gap-1"
                   >
-                    <span>Instant Dispatch & Book</span>
+                    <span>Prepare Job Draft</span>
                   </button>
                 </div>
               ))}
@@ -419,7 +439,7 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
       </div>
 
       {/* Dispatch Modal */}
-      {showDispatchModal && (
+      {canManageJobs && showDispatchModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/60">
@@ -450,15 +470,13 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-slate-400 block mb-1 font-semibold">Customer / Client Name</label>
-                  <input
-                    type="text"
-                    value={dispatchCustomer}
-                    onChange={(e) => setDispatchCustomer(e.target.value)}
-                    placeholder="e.g. Apex Hospital HQ"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
-                    required
-                  />
+                  <label className="text-slate-400 block mb-1 font-semibold">Registered Customer</label>
+                  <select aria-label="Field job customer" required value={dispatchCustomerId}
+                    onChange={e => setDispatchCustomerId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+                    <option value="">Select customer</option>
+                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
                 </div>
                 <div>
                   <label className="text-slate-400 block mb-1 font-semibold">SLA Window / Schedule Slot</label>
@@ -495,10 +513,8 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
                     onChange={(e) => setDispatchTech(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white"
                   >
-                    <option value="Amit Deshmukh (L2 Network Specialist)">Amit Deshmukh (L2 Network Specialist)</option>
-                    <option value="Suresh Patil (L3 Infrastructure Lead)">Suresh Patil (L3 Infrastructure Lead)</option>
-                    <option value="Pooja Sharma (Cisco Certified Field Engg)">Pooja Sharma (Cisco Certified Field Engg)</option>
-                    <option value="Vikas Mehta (Hardware & Chipset Specialist)">Vikas Mehta (Hardware & Chipset Specialist)</option>
+                    <option value="">Unassigned — internal draft</option>
+                    {fieldEngineers.map(u => <option key={u.id} value={u.id}>{u.name} ({u.username})</option>)}
                   </select>
                 </div>
                 <div>
@@ -524,7 +540,7 @@ export const FieldServiceMarketplace: React.FC<FieldServiceMarketplaceProps> = (
                   type="submit"
                   className="px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold cursor-pointer"
                 >
-                  Confirm & Dispatch Now
+                  Save Internal Job (Not Dispatched)
                 </button>
               </div>
             </form>

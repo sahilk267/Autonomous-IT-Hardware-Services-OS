@@ -15,10 +15,12 @@ import { IntegrationsHub } from './components/IntegrationsHub';
 import { ExecutiveDashboard } from './components/ExecutiveDashboard';
 import { ResetModal } from './components/ResetModal';
 import { AuthModal } from './components/AuthModal';
+import { StaffAccessPanel } from './components/StaffAccessPanel';
 
 import {
   UserRole,
   TenantInfo,
+  CustomerAccount,
   ProductItem,
   Lead,
   Quotation,
@@ -39,7 +41,11 @@ import {
   AMCContract,
   AutomationWorkflow,
   IntegrationConnector,
-  InvoiceRecord
+  InvoiceRecord,
+  RMAClaim,
+  KnowledgeArticle,
+  CRMOpportunity,
+  MarketplaceDispute
 } from './types';
 
 const defaultTenant: TenantInfo = {
@@ -60,6 +66,7 @@ export default function App() {
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Application State Collections (ZERO MOCK DATA - ALL EMPTY BY DEFAULT)
+  const [customers, setCustomers] = useState<CustomerAccount[]>([]);
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [quotes, setQuotes] = useState<Quotation[]>([]);
@@ -69,6 +76,7 @@ export default function App() {
   const [tickets, setTickets] = useState<ITSMTicket[]>([]);
   const [endpoints, setEndpoints] = useState<EndpointHealth[]>([]);
   const [jobs, setJobs] = useState<FieldJob[]>([]);
+  const [fieldEngineers, setFieldEngineers] = useState<{ id: string; username: string; name: string }[]>([]);
   const [cmdbNodes, setCmdbNodes] = useState<CMDBNode[]>([]);
   const [events, setEvents] = useState<AutonomousEvent[]>([]);
 
@@ -81,6 +89,10 @@ export default function App() {
   const [workflows, setWorkflows] = useState<AutomationWorkflow[]>([]);
   const [connectors, setConnectors] = useState<IntegrationConnector[]>([]);
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
+  const [rmaClaims, setRMAClaims] = useState<RMAClaim[]>([]);
+  const [knowledgeArticles, setKnowledgeArticles] = useState<KnowledgeArticle[]>([]);
+  const [crmOpportunities, setCRMOpportunities] = useState<CRMOpportunity[]>([]);
+  const [marketplaceDisputes, setMarketplaceDisputes] = useState<MarketplaceDispute[]>([]);
 
   const [isThinking, setIsThinking] = useState(false);
   const [isTelegramConfigured, setIsTelegramConfigured] = useState(false);
@@ -108,6 +120,7 @@ export default function App() {
       if (data.success && data.data) {
         const s = data.data;
         if (s.tenant) setTenant(s.tenant);
+        setCustomers(s.customers || []);
         if (s.products) setProducts(s.products);
         if (s.leads) setLeads(s.leads);
         if (s.quotes) setQuotes(s.quotes);
@@ -127,6 +140,18 @@ export default function App() {
         if (s.invoices) setInvoices(s.invoices);
         if (s.workflows) setWorkflows(s.workflows);
         if (s.connectors) setConnectors(s.connectors);
+        setRMAClaims(s.rmaClaims || []);
+        setKnowledgeArticles(s.knowledgeArticles || []);
+        setCRMOpportunities(s.crmOpportunities || []);
+        setMarketplaceDisputes(s.marketplaceDisputes || []);
+        fetch('/api/field-engineers')
+          .then(r => r.ok ? r.json() : null)
+          .then(result => setFieldEngineers(Array.isArray(result?.data) ? result.data : []))
+          .catch(() => setFieldEngineers([]));
+        fetch('/api/integrations/status')
+          .then(r => r.ok ? r.json() : null)
+          .then(status => setIsTelegramConfigured(Boolean(status?.telegram)))
+          .catch(() => setIsTelegramConfigured(false));
       }
     } catch (err) {
       console.warn('Could not sync persistent state from server:', err);
@@ -160,12 +185,6 @@ export default function App() {
       })
       .catch(() => setIsAuthModalOpen(true));
 
-    fetch('/api/integrations/status')
-      .then(res => res.json())
-      .then(status => {
-        setIsTelegramConfigured(!!status.telegram);
-      })
-      .catch(() => setIsTelegramConfigured(false));
   }, []);
 
   const handleLoginSuccess = (user: any) => {
@@ -183,6 +202,16 @@ export default function App() {
       console.error('Logout error:', err);
     }
     setCurrentUser(null);
+    // Remove cached confidential operational data from the previous session.
+    setCustomers([]); setQuotes([]); setLeads([]); setInvoices([]); setSuppliers([]);
+    setRfqs([]); setTickets([]); setEndpoints([]); setJobs([]);
+    setFieldEngineers([]);
+    setAssets([]); setLicenses([]); setAMCs([]); setProjects([]);
+    setProposals([]); setProviders([]); setEvents([]); setProducts([]);
+    setTelegramMessages([]); setWorkflows([]); setConnectors([]);
+    setIsTelegramConfigured(false);
+    setRMAClaims([]); setKnowledgeArticles([]);
+    setCRMOpportunities([]); setMarketplaceDisputes([]);
     setIsAuthModalOpen(true);
     showToast('Logged out of Apex OS.');
   };
@@ -210,11 +239,13 @@ export default function App() {
     try {
       const res = await fetch('/api/state/reset', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ confirm: true })
       });
       const data = await res.json();
-      if (data.success && data.data) {
+      if (res.ok && data.success && data.data) {
         const s = data.data;
+        setCustomers(s.customers || []);
         setProducts(s.products || []);
         setLeads(s.leads || []);
         setQuotes(s.quotes || []);
@@ -232,6 +263,10 @@ export default function App() {
         setWorkflows(s.workflows || []);
         setInvoices(s.invoices || []);
         setEvents(s.events || []);
+        setRMAClaims(s.rmaClaims || []);
+        setKnowledgeArticles(s.knowledgeArticles || []);
+        setCRMOpportunities(s.crmOpportunities || []);
+        setMarketplaceDisputes(s.marketplaceDisputes || []);
         showToast('Clean Slate Active: All business records initialized to 0.');
       }
     } catch (err) {
@@ -239,36 +274,47 @@ export default function App() {
     }
   };
 
-  // Invoice Handlers
-  const handleAddInvoice = async (inv: InvoiceRecord) => {
+  // Internal receivable draft creation; a tax invoice is not issued here.
+  const handleAddInvoice = async (inv: InvoiceRecord): Promise<boolean> => {
     try {
       const res = await fetch('/api/invoices', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(inv)
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setInvoices(prev => [data.data, ...prev]);
-        showToast(`Invoice ${data.data.invoiceNo} saved in ledger.`);
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Receivables ledger could not save this draft.');
+        return false;
       }
+      setInvoices(prev => [data.data, ...prev]);
+      showToast(`Receivable draft ${data.data.invoiceNo} recorded. No GST IRN was issued.`);
+      return true;
     } catch (err) {
-      console.error('Sync invoice failed:', err);
+      console.error('Sync receivable draft failed:', err);
+      showToast('Network error; receivables record has not been confirmed.');
+      return false;
     }
   };
 
-  const handleSettleInvoice = async (invoiceNo: string) => {
+  const handleSettleInvoice = async (invoiceNo: string, paymentReference: string): Promise<boolean> => {
     try {
-      const res = await fetch(`/api/invoices/${invoiceNo}/settle`, {
-        method: 'PATCH'
+      const res = await fetch(`/api/invoices/${encodeURIComponent(invoiceNo)}/settle`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paymentReference })
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setInvoices(prev => prev.map(i => i.invoiceNo === invoiceNo ? data.data : i));
-        showToast(`Invoice ${invoiceNo} settled in ledger.`);
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Settlement failed. Check payment reference and permissions.');
+        return false;
       }
+      setInvoices(prev => prev.map(i => i.invoiceNo === invoiceNo ? data.data : i));
+      showToast(`Invoice ${invoiceNo} settled in the ledger with recorded evidence.`);
+      return true;
     } catch (err) {
       console.error('Sync settle invoice failed:', err);
+      showToast('Network error. Invoice was not confirmed settled.');
+      return false;
     }
   };
 
@@ -283,7 +329,7 @@ export default function App() {
   };
 
   // Computed count of pending approvals
-  const pendingApprovalsCount = quotes.filter(q => q.status === 'PENDING_OWNER_APPROVAL').length;
+  const pendingApprovalsCount = quotes.filter(q => q.status === 'PENDING_OWNER_APPROVAL' || q.status === 'PENDING_APPROVAL').length;
 
   // Handle Telegram Chat Messages
   const handleSendMessage = async (text: string) => {
@@ -291,7 +337,8 @@ export default function App() {
       id: `msg-${Date.now()}`,
       sender: 'owner',
       text,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      deliveryStatus: 'LOCAL_ONLY'
     };
 
     setTelegramMessages(prev => [...prev, ownerMsg]);
@@ -305,14 +352,19 @@ export default function App() {
       });
 
       const data = await response.json();
-      const botText = data.text || 'Command processed.';
+      if (!response.ok || !data.success || typeof data.text !== 'string') {
+        showToast(data.error || 'Local AI command failed; no external Telegram message was sent.');
+        return;
+      }
+      const botText = data.text;
 
       const botReply: TelegramMessage = {
         id: `msg-bot-${Date.now()}`,
         sender: 'bot',
         text: botText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        suggestedActions: data.actions
+        suggestedActions: data.actions,
+        deliveryStatus: 'LOCAL_ONLY'
       };
 
       setTelegramMessages(prev => [...prev, botReply]);
@@ -320,6 +372,30 @@ export default function App() {
       console.error('Error in telegram command handler:', err);
     } finally {
       setIsThinking(false);
+    }
+  };
+
+  // Separate from the in-app AI console: only the provider-confirmed API path
+  // can claim a Telegram message was accepted externally.
+  const handleSendExternalTelegram = async (text: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/telegram/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.providerAccepted || !data.data) {
+        showToast(data.error || 'Telegram delivery not confirmed.');
+        return false;
+      }
+      setTelegramMessages(prev => [...prev, data.data]);
+      showToast('Telegram API accepted the message. Human read receipt is not available.');
+      return true;
+    } catch (error) {
+      console.error('Telegram outbound request failed:', error);
+      showToast('Telegram delivery not confirmed. Check connection before retrying.');
+      return false;
     }
   };
 
@@ -331,11 +407,11 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success && data.data) {
-        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber.includes(quoteId) ? data.data : q));
+        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber === quoteId ? data.data : q));
         
         // Update Telegram message approval status
         setTelegramMessages(prev => prev.map(m => {
-          if (m.approvalData && (m.approvalData.referenceId === quoteId || m.approvalData.referenceId.includes(quoteId))) {
+          if (m.approvalData && (m.approvalData.referenceId === quoteId)) {
             return {
               ...m,
               approvalData: { ...m.approvalData, status: 'APPROVED' }
@@ -361,7 +437,7 @@ export default function App() {
       });
       const data = await res.json();
       if (data.success && data.data) {
-        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber.includes(quoteId) ? data.data : q));
+        setQuotes(prev => prev.map(q => q.id === quoteId || q.quoteNumber === quoteId ? data.data : q));
         showToast(`Quotation #${data.data.quoteNumber} rejected.`);
       }
     } catch (err) {
@@ -370,7 +446,16 @@ export default function App() {
   };
 
   // Handle Quotation Generation from BOM Builder
-  const handleGenerateQuote = async (solution: BOMSolution, customerName: string, customerGstin: string, discount: number) => {
+  const handleGenerateQuote = async (solution: BOMSolution, customerId: string, customerGstin: string, discount: number) => {
+    const customer = customers.find(c => c.id === customerId);
+    if (!customer) {
+      showToast('Choose a registered customer before creating a quotation draft.');
+      return;
+    }
+    if (solution.items.length + solution.servicesIncluded.length === 0) {
+      showToast('Quote must contain an actual hardware or service line.');
+      return;
+    }
     const totalCost = solution.items.reduce((acc, i) => acc + (i.purchaseCost * i.qty), 0);
     const grossItems = solution.items.reduce((acc, i) => acc + (i.sellingPrice * i.qty), 0);
     const servicesTotal = solution.servicesIncluded.reduce((acc, s) => acc + s.price, 0);
@@ -383,7 +468,8 @@ export default function App() {
     const newQuote: Quotation = {
       id: `quote-${Date.now()}`,
       quoteNumber: `QT-${Date.now().toString().slice(-6)}`,
-      customerName: customerName || 'Enterprise Client',
+      customerId: customer.id,
+      customerName: customer.name,
       customerGstin: customerGstin || '',
       customerState: tenant.state,
       solutionName: solution.solutionName,
@@ -392,9 +478,10 @@ export default function App() {
       subtotal,
       discountAmount: discount,
       marginPercent: parseFloat(marginPercent.toFixed(1)),
-      gstAmount: Math.round(netSubtotal * 0.18),
-      totalAmount: Math.round(netSubtotal * 1.18),
-      status: isException ? 'PENDING_OWNER_APPROVAL' : 'SENT_TO_CUSTOMER',
+      gstAmount: 0,
+      totalAmount: netSubtotal,
+      taxStatus: 'PENDING_CLASSIFICATION',
+      status: isException ? 'PENDING_OWNER_APPROVAL' : 'DRAFT',
       approvalReason: isException ? `Margin ${marginPercent.toFixed(1)}% is below 12.0% floor policy.` : undefined,
       createdDate: new Date().toISOString().split('T')[0],
       validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -408,7 +495,7 @@ export default function App() {
         body: JSON.stringify(newQuote)
       });
       const data = await res.json();
-      if (data.success && data.data) {
+      if (res.ok && data.success && data.data) {
         setQuotes(prev => [data.data, ...prev]);
 
         if (isException) {
@@ -417,7 +504,7 @@ export default function App() {
             sender: 'bot',
             text: `🚨 *APPROVAL REQUIRED: Quote #${data.data.quoteNumber}*\n\n` +
               `• *Customer:* ${data.data.customerName}\n` +
-              `• *Order Value:* ₹${data.data.totalAmount.toLocaleString('en-IN')}\n` +
+              `• *Draft Amount (GST classification pending if applicable):* ₹${data.data.totalAmount.toLocaleString('en-IN')}\n` +
               `• *Margin:* *${data.data.marginPercent}%* (Floor: 12.0%)\n` +
               `• *Autonomous Action:* Placed on hold. Awaiting Owner decision.`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
@@ -431,18 +518,20 @@ export default function App() {
             }
           };
           setTelegramMessages(prev => [...prev, alertMsg]);
-          showToast(`Quote #${data.data.quoteNumber} escalated to Telegram Command Hub.`);
+          showToast(`Quote #${data.data.quoteNumber} added to the in-app approval queue. Telegram delivery not verified.`);
           setActiveTab('telegram');
         } else {
-          showToast(`Quotation #${data.data.quoteNumber} generated at ${data.data.marginPercent}% margin.`);
+          showToast(`Quote #${data.data.quoteNumber} saved as draft; GST status: ${data.data.taxStatus}. Not sent.`);
         }
+      } else {
+        showToast(data.error || 'Quotation draft could not be saved.');
       }
     } catch (err) {
       console.error('Sync quote failed:', err);
     }
   };
 
-  // Handle PO Dispatch in RFQ
+  // Prepare internal PO from RFQ; no external supplier notification
   const handleDispatchPO = async (rfqId: string, supplierId: string) => {
     try {
       const res = await fetch(`/api/rfqs/${rfqId}/dispatch-po`, {
@@ -451,12 +540,88 @@ export default function App() {
         body: JSON.stringify({ supplierId })
       });
       const data = await res.json();
-      if (data.success && data.data) {
+      if (res.ok && data.success && data.data) {
         setRfqs(prev => prev.map(r => r.id === rfqId ? data.data : r));
-        showToast(`PO dispatched for RFQ #${rfqId}.`);
+        showToast(`PO draft ${data.data.preparedPO?.poReference} saved internally. Supplier has NOT been contacted.`);
+      } else {
+        showToast(data.error || 'PO preparation failed; no supplier contacted.');
       }
     } catch (err) {
       console.error('Dispatch PO failed:', err);
+    }
+  };
+
+  const handleAssignTicket = async (ticketId: string, assignedUserId: string | null) => {
+    try {
+      const res = await fetch(`/api/tickets/${encodeURIComponent(ticketId)}/assign`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedUserId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Ticket assignment was not saved.');
+        return;
+      }
+      setTickets(prev => prev.map(t => t.id === ticketId ? data.data : t));
+      showToast('Ticket assigned in local database. No external message sent.');
+    } catch {
+      showToast('Ticket assignment could not be confirmed.');
+    }
+  };
+
+  const handleAssignJob = async (jobId: string, assignedUserId: string | null) => {
+    try {
+      const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/assign`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedUserId })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Job assignment was not saved.');
+        return;
+      }
+      setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
+      showToast('Field job assigned internally; no provider dispatch sent.');
+    } catch {
+      showToast('Job assignment not confirmed.');
+    }
+  };
+
+
+  const updateServiceAssignment = async (kind: 'assets' | 'endpoints', id: string, assignedUserId: string | null) => {
+    try {
+      const response = await fetch(`/api/${kind}/${encodeURIComponent(id)}/assign`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignedUserId })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !result.data) {
+        showToast(result.error || 'Service access assignment was not saved.');
+        return;
+      }
+      if (kind === 'assets') setAssets(old => old.map(a => a.id === id ? result.data : a));
+      else setEndpoints(old => old.map(e => e.id === id ? result.data : e));
+      showToast('Local service assignment saved. No outside messaging or agent enrollment occurred.');
+    } catch { showToast('Service assignment could not be confirmed.'); }
+  };
+
+  const handleSetProjectAccess = async (projectId: string, userId: string, grant: boolean): Promise<boolean> => {
+    try {
+      const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/access`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, grant })
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success || !result.data) {
+        showToast(result.error || 'Internal project access was not updated.');
+        return false;
+      }
+      setProjects(old => old.map(p => p.id === projectId ? result.data : p));
+      showToast('Local staff access updated; no external customer or provider access was changed.');
+      return true;
+    } catch {
+      showToast('Project sharing could not be confirmed.');
+      return false;
     }
   };
 
@@ -501,24 +666,26 @@ export default function App() {
     }
   };
 
-  const handleConsumePart = async (jobId: string, partName: string, cost: number) => {
+  const handleConsumePart = async (jobId: string, productId: string, quantity: number) => {
     try {
       const res = await fetch(`/api/jobs/${jobId}/consume-part`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ partName, cost })
+        body: JSON.stringify({ productId, quantity })
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
-        // Refresh catalog inventory from server
-        fetch('/api/products')
-          .then(r => r.json())
-          .then(pData => { if (pData.success) setProducts(pData.data); });
-        showToast(`Part "${partName}" consumed on job ${data.data.jobCode}. Warehouse stock updated.`);
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Warehouse part consumption failed.');
+        return;
       }
+      setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
+      const catalogRes = await fetch('/api/products');
+      const catalogData = await catalogRes.json();
+      if (catalogRes.ok && catalogData.success) setProducts(catalogData.data);
+      showToast(`Part consumed on job ${data.data.jobCode}. Warehouse stock updated.`);
     } catch (err) {
       console.error('Consume part failed:', err);
+      showToast('Part consumption not confirmed. Please retry.');
     }
   };
 
@@ -527,47 +694,61 @@ export default function App() {
       const res = await fetch(`/api/jobs/${jobId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'COMPLETED', customerSignatureObtained: true })
+        body: JSON.stringify({ status: 'COMPLETED' })
       });
       const data = await res.json();
       if (data.success && data.data) {
         setJobs(prev => prev.map(j => j.id === jobId ? data.data : j));
-        showToast(`Job ${data.data.jobCode} completed and signed off.`);
+        showToast(`Job ${data.data.jobCode} marked complete internally. Customer e-sign is NOT verified.`);
       }
     } catch (err) {
       console.error('Sign off job failed:', err);
     }
   };
 
-  // Handler: Release Project Milestone Escrow
+  // Work milestones are internal progress records, not payment or escrow instructions.
   const handleReleaseMilestone = async (projectId: string, milestoneId: string) => {
-    setProjects(prev => prev.map(p => {
-      if (p.id !== projectId) return p;
-      return {
-        ...p,
-        milestones: p.milestones.map(m => m.id === milestoneId ? { ...m, status: 'COMPLETED' } : m)
-      };
-    }));
-    showToast('Milestone status marked COMPLETED in ledger (Payment escrow gateway not configured).');
-  };
-
-  // Handler: Accept Project Proposal
-  const handleAcceptProposal = async (projectId: string, proposalId: string) => {
+    const milestone = projects.find(p => p.id === projectId)?.milestones.find(m => m.id === milestoneId);
+    if (!milestone || !['PENDING_FUNDING', 'IN_PROGRESS'].includes(milestone.status)) {
+      showToast('Only pending or in-progress work can be advanced. Escrow is not verified.');
+      return;
+    }
+    const nextStatus = milestone.status === 'PENDING_FUNDING' ? 'IN_PROGRESS' : 'COMPLETED';
     try {
-      const res = await fetch(`/api/proposals/${proposalId}/accept`, {
-        method: 'PATCH'
+      const res = await fetch(`/api/projects/${projectId}/milestones/${milestoneId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
       });
       const data = await res.json();
-      if (data.success) {
-        setProposals(prev => prev.map(p => {
-          if (p.projectId !== projectId) return p;
-          return { ...p, status: p.id === proposalId ? 'ACCEPTED' : 'REJECTED' };
-        }));
-        setProjects(prev => prev.map(p => p.id === projectId ? { ...p, status: 'IN_PROGRESS' } : p));
-        showToast('Proposal accepted. Project moved to IN_PROGRESS.');
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Milestone update failed.');
+        return;
       }
+      setProjects(prev => prev.map(p => p.id === projectId ? data.data : p));
+      showToast(`Internal work milestone updated to ${nextStatus}. No funds or escrow moved.`);
+    } catch (err) {
+      console.error('Update milestone failed:', err);
+      showToast('Milestone update could not be confirmed.');
+    }
+  };
+
+  // Accept exactly one project bid, updating all competing statuses from the authoritative server commit.
+  const handleAcceptProposal = async (projectId: string, proposalId: string) => {
+    try {
+      const res = await fetch(`/api/proposals/${proposalId}/accept`, { method: 'PATCH' });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.project || !Array.isArray(data.affectedProposals)) {
+        showToast(data.error || 'Proposal acceptance could not be confirmed.');
+        return;
+      }
+      const authoritative = new Map<string, Proposal>(data.affectedProposals.map((proposal: Proposal) => [proposal.id, proposal] as [string, Proposal]));
+      setProposals(prev => prev.map(proposal => authoritative.get(proposal.id) || proposal));
+      setProjects(prev => prev.map(project => project.id === data.project.id ? data.project : project));
+      showToast('One proposal selected internally; no provider notification, funding or payment occurred.');
     } catch (err) {
       console.error('Accept proposal failed:', err);
+      showToast('Proposal acceptance could not be confirmed.');
     }
   };
 
@@ -591,20 +772,9 @@ export default function App() {
 
   // Handler: Diagnostic Booking
   const handleRequestDiagnosticBooking = async (diagnosisSummary: string, estimatedCost: number) => {
-    const newJob: Partial<FieldJob> = {
-      title: `Diagnostic: ${diagnosisSummary.slice(0, 45)}`,
-      customerName: 'Enterprise Client',
-      address: 'Client Site',
-      technicianName: 'Field Support Team',
-      technicianPhone: '',
-      status: 'SCHEDULED',
-      scheduledTime: 'Scheduled Onsite',
-      partsConsumed: [
-        { partName: 'Replacement Diagnostic Part', qty: 1, cost: estimatedCost }
-      ]
-    };
-    handleCreateJob(newJob);
+    // AI hypotheses do not authorize technician dispatch or inventory consumption.
     setActiveTab('field');
+    showToast('Enter real customer, site, technician and appointment details in Field Service. No booking created.');
   };
 
   // Handler: Create Field Service Job
@@ -666,9 +836,9 @@ export default function App() {
       return;
     }
     if (type === 'JOINER') {
-      showToast(`JML Joiner initialized: Provisioning profile recorded for ${employeeName}.`);
+      showToast(`JML request for ${employeeName} is a preview. Microsoft/Entra provisioning has NOT occurred.`);
     } else {
-      showToast(`JML Leaver initialized: Revocation & asset recovery recorded for ${employeeName}.`);
+      showToast(`JML request for ${employeeName} is a preview. Microsoft/Entra access has NOT been revoked.`);
     }
   };
   const handleUpdateAssetStatus = async (assetId: string, status: AssetItem['status']) => {
@@ -742,8 +912,74 @@ export default function App() {
     }
   };
 
+  // Phase 2: CRUD operations return a confirmed backend record before changing UI.
+  const saveBusinessRecord = async <T,>(
+    url: string, method: 'POST' | 'PATCH', payload: object
+  ): Promise<T | null> => {
+    try {
+      const response = await fetch(url, {
+        method, headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const parsed = await response.json();
+      if (!response.ok || !parsed.success || !parsed.data) {
+        showToast(parsed.error || 'Could not persist this operation.');
+        return null;
+      }
+      return parsed.data as T;
+    } catch (error) {
+      console.error('Persistent business operation failed:', error);
+      showToast('Network error: record has not been saved.');
+      return null;
+    }
+  };
+
+  const handleCreateRMA = async (claim: Pick<RMAClaim, 'assetTag' | 'faultSymptom'>): Promise<RMAClaim | null> => {
+    const saved = await saveBusinessRecord<RMAClaim>('/api/rma', 'POST', claim);
+    if (saved) setRMAClaims(prev => [saved, ...prev]);
+    return saved;
+  };
+  const handleUpdateRMA = async (id: string, changes: Partial<RMAClaim>): Promise<RMAClaim | null> => {
+    const saved = await saveBusinessRecord<RMAClaim>(`/api/rma/${encodeURIComponent(id)}`, 'PATCH', changes);
+    if (saved) setRMAClaims(prev => prev.map(item => item.id === id ? saved : item));
+    return saved;
+  };
+
+  const handleCreateKnowledge = async (article: Partial<KnowledgeArticle>): Promise<KnowledgeArticle | null> => {
+    const saved = await saveBusinessRecord<KnowledgeArticle>('/api/knowledge', 'POST', article);
+    if (saved) setKnowledgeArticles(prev => [saved, ...prev]);
+    return saved;
+  };
+  const handleKnowledgeSolved = async (id: string): Promise<KnowledgeArticle | null> => {
+    const saved = await saveBusinessRecord<KnowledgeArticle>(`/api/knowledge/${encodeURIComponent(id)}/solve`, 'POST', {});
+    if (saved) setKnowledgeArticles(prev => prev.map(a => a.id === id ? saved : a));
+    return saved;
+  };
+
+  const handleCreateCRM = async (opportunity: Partial<CRMOpportunity>): Promise<CRMOpportunity | null> => {
+    const saved = await saveBusinessRecord<CRMOpportunity>('/api/crm', 'POST', opportunity);
+    if (saved) setCRMOpportunities(prev => [saved, ...prev]);
+    return saved;
+  };
+  const handleAdvanceCRM = async (id: string, stage: CRMOpportunity['stage']): Promise<CRMOpportunity | null> => {
+    const saved = await saveBusinessRecord<CRMOpportunity>(`/api/crm/${encodeURIComponent(id)}`, 'PATCH', { stage });
+    if (saved) setCRMOpportunities(prev => prev.map(o => o.id === id ? saved : o));
+    return saved;
+  };
+
+  const handleCreateDispute = async (claim: { projectId: string; reason: string; customerClaim: string; disputedAmount: number }): Promise<MarketplaceDispute | null> => {
+    const saved = await saveBusinessRecord<MarketplaceDispute>('/api/disputes', 'POST', claim);
+    if (saved) setMarketplaceDisputes(prev => [saved, ...prev]);
+    return saved;
+  };
+  const handleDisputeDecision = async (id: string, resolutionDecision: NonNullable<MarketplaceDispute['resolutionDecision']>): Promise<MarketplaceDispute | null> => {
+    const saved = await saveBusinessRecord<MarketplaceDispute>(`/api/disputes/${encodeURIComponent(id)}`, 'PATCH', { resolutionDecision });
+    if (saved) setMarketplaceDisputes(prev => prev.map(d => d.id === id ? saved : d));
+    return saved;
+  };
+
   // Handler: Add Proposal
-  const handleAddProposal = async (prop: Proposal) => {
+  const handleAddProposal = async (prop: Partial<Proposal>) => {
     try {
       const res = await fetch('/api/proposals', {
         method: 'POST',
@@ -751,22 +987,28 @@ export default function App() {
         body: JSON.stringify(prop)
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setProposals(prev => [data.data, ...prev]);
-        showToast(`Proposal from ${data.data.providerName} received.`);
+      if (!res.ok || !data.success || !data.data) {
+        showToast(data.error || 'Proposal could not be saved.');
+        return;
       }
+      setProposals(prev => [data.data, ...prev]);
+      showToast(`Unverified proposal from ${data.data.providerName} saved internally.`);
     } catch (err) {
       console.error('Add proposal failed:', err);
+      showToast('Proposal could not be saved.');
     }
   };
 
   // Handler: Add Product
   const handleAddProduct = async (prod: ProductItem) => {
     try {
+      // The catalog ID belongs to the server, never to the UI form.
+      // Client-only prototype IDs are intentionally not submitted.
+      const { id: _clientPrototypeId, ...productFields } = prod;
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(prod)
+        body: JSON.stringify(productFields)
       });
       const data = await res.json();
       if (data.success && data.data) {
@@ -781,10 +1023,12 @@ export default function App() {
   // Handler: Create RFQ
   const handleCreateRFQ = async (rfq: RFQItem) => {
     try {
+      // Supplier quotes, status, and RFQ identity are authoritative server data.
+      const { productName, requiredQty, urgency } = rfq;
       const res = await fetch('/api/rfqs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rfq)
+        body: JSON.stringify({ productName, requiredQty, urgency })
       });
       const data = await res.json();
       if (data.success && data.data) {
@@ -803,10 +1047,11 @@ export default function App() {
         method: 'PATCH'
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setWorkflows(prev => prev.map(w => w.id === id ? data.data : w));
-        showToast(`Workflow rule ${data.data.active ? 'activated' : 'paused'}.`);
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Workflow activation is unavailable.');
+        return;
       }
+      if (data.data) setWorkflows(prev => prev.map(w => w.id === id ? data.data : w));
     } catch (err) {
       console.error('Toggle workflow failed:', err);
     }
@@ -819,10 +1064,11 @@ export default function App() {
         method: 'POST'
       });
       const data = await res.json();
-      if (data.success && data.data) {
-        setWorkflows(prev => prev.map(w => w.id === workflowId ? data.data : w));
-        showToast(`Rule "${data.data.name}" evaluated.`);
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Workflow execution is not implemented.');
+        return;
       }
+      if (data.data) setWorkflows(prev => prev.map(w => w.id === workflowId ? data.data : w));
     } catch (err) {
       console.error('Execute workflow failed:', err);
     }
@@ -839,7 +1085,7 @@ export default function App() {
       const data = await res.json();
       if (data.success && data.data) {
         setWorkflows(prev => [data.data, ...prev]);
-        showToast(`Workflow "${data.data.name}" created.`);
+        showToast(`Workflow "${data.data.name}" saved as an inactive draft. No execution scheduled.`);
       }
     } catch (err) {
       console.error('Create workflow failed:', err);
@@ -904,6 +1150,7 @@ export default function App() {
           <TelegramHub
             messages={telegramMessages}
             onSendMessage={handleSendMessage}
+            onSendTelegramMessage={handleSendExternalTelegram}
             onApproveQuote={handleApproveQuote}
             onRejectQuote={handleRejectQuote}
             quotations={quotes}
@@ -914,7 +1161,9 @@ export default function App() {
 
         {activeTab === 'bom' && (
           <BOMBuilder
+            customers={customers}
             products={products}
+            tenant={tenant}
             onGenerateQuote={handleGenerateQuote}
             onRequestTelegramApproval={handleGenerateQuote as any}
           />
@@ -933,6 +1182,7 @@ export default function App() {
 
         {activeTab === 'itsm' && (
           <ITSMDesk
+            customers={customers}
             tickets={tickets}
             endpoints={endpoints}
             cmdbNodes={cmdbNodes}
@@ -940,42 +1190,78 @@ export default function App() {
             onRemoteFix={handleRemoteFix}
             onCreateTicket={handleCreateTicket}
             onAddEndpoint={handleAddEndpoint}
+            knowledgeArticles={knowledgeArticles}
+            fieldEngineers={fieldEngineers}
+            canManageAssignments={currentUser?.role === 'BUSINESS_OWNER' || currentUser?.role === 'ENTERPRISE_IT_HEAD'}
+            onAssignTicket={handleAssignTicket}
+            onAssignEndpoint={(id, userId) => void updateServiceAssignment('endpoints', id, userId)}
+            onCreateKnowledgeArticle={handleCreateKnowledge}
+            onMarkKnowledgeSolved={handleKnowledgeSolved}
           />
         )}
 
         {activeTab === 'projects' && (
           <ProjectMarketplace
+            customers={customers}
             projects={projects}
             proposals={proposals}
             providers={providers}
             onReleaseMilestone={handleReleaseMilestone}
             onAcceptProposal={handleAcceptProposal}
             onCreateProject={handleCreateProject}
+            canManageProjectAccess={currentUser?.role === 'BUSINESS_OWNER'}
+            onSetProjectAccess={handleSetProjectAccess}
             onRequestDiagnosticBooking={handleRequestDiagnosticBooking}
             onAddProposal={handleAddProposal}
+            crmOpportunities={crmOpportunities}
+            marketplaceDisputes={marketplaceDisputes}
+            onCreateCRM={handleCreateCRM}
+            onAdvanceCRM={handleAdvanceCRM}
+            onCreateDispute={handleCreateDispute}
+            onRecordDisputeDecision={handleDisputeDecision}
           />
         )}
 
         {activeTab === 'field' && (
           <FieldServiceMarketplace
+            customers={customers}
             jobs={jobs}
             onUpdateJobStatus={handleUpdateJobStatus}
             onConsumePart={handleConsumePart}
+            products={products}
             onSignOffJob={handleSignOffJob}
             onCreateJob={handleCreateJob}
+            fieldEngineers={fieldEngineers}
+            canManageJobs={currentUser?.role === 'BUSINESS_OWNER' || currentUser?.role === 'ENTERPRISE_IT_HEAD'}
+            onAssignJob={handleAssignJob}
           />
         )}
 
         {activeTab === 'assets' && (
           <AssetAMCManager
+            customers={customers}
             assets={assets}
             licenses={licenses}
             amcs={amcs}
             onReclaimLicenses={handleReclaimLicenses}
             onUpdateAssetStatus={handleUpdateAssetStatus}
+            fieldEngineers={fieldEngineers}
+            canManageAssignments={currentUser?.role === 'BUSINESS_OWNER' || currentUser?.role === 'ENTERPRISE_IT_HEAD'}
+            onAssignAsset={(id, userId) => void updateServiceAssignment('assets', id, userId)}
             onExecuteJML={handleExecuteJML}
             onAddAsset={handleAddAsset}
             onAddAMC={handleAddAMC}
+            rmaClaims={rmaClaims}
+            onCreateRMA={handleCreateRMA}
+            onUpdateRMA={handleUpdateRMA}
+          />
+        )}
+
+        {activeTab === 'staff' && currentUser && (
+          <StaffAccessPanel
+            isOwner={currentUser.role === 'BUSINESS_OWNER'}
+            onCustomersChanged={loadState}
+            onReauthRequired={handleLogout}
           />
         )}
 
@@ -1015,7 +1301,7 @@ export default function App() {
       <footer className="bg-slate-900/90 border-t border-slate-800 text-xs text-slate-500 py-4 px-6 text-center">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <div>
-            <span className="font-semibold text-slate-400">Apex Autonomous IT OS</span> • Multi-Tenant Enterprise Architecture • GSTIN: {tenant.gstin || 'Not Configured'}
+            <span className="font-semibold text-slate-400">Apex Autonomous IT OS</span> • Single-tenant prototype (multi-tenant isolation pending) • GSTIN: {tenant.gstin || 'Not Configured'}
           </div>
           <div className="flex items-center gap-3">
             <span>Verified Server Persistence Active</span>

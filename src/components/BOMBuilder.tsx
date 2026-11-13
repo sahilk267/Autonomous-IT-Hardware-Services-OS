@@ -17,7 +17,7 @@ import {
   ChevronDown,
   X
 } from 'lucide-react';
-import { BOMSolution, BOMItem, Quotation, ProductItem } from '../types';
+import { BOMSolution, BOMItem, Quotation, ProductItem, TenantInfo, CustomerAccount } from '../types';
 
 const emptyBOMSolution: BOMSolution = {
   id: 'sol-blank',
@@ -35,14 +35,18 @@ const emptyBOMSolution: BOMSolution = {
 };
 
 interface BOMBuilderProps {
+  customers: CustomerAccount[];
   products: ProductItem[];
-  onGenerateQuote: (solution: BOMSolution, customerName: string, customerGstin: string, discount: number) => void;
+  tenant: TenantInfo;
+  onGenerateQuote: (solution: BOMSolution, customerId: string, customerGstin: string, discount: number) => void;
   onRequestTelegramApproval: (quote: Quotation) => void;
   isCleanSlate?: boolean;
 }
 
 export const BOMBuilder: React.FC<BOMBuilderProps> = ({
+  customers,
   products,
+  tenant,
   onGenerateQuote,
   onRequestTelegramApproval
 }) => {
@@ -55,7 +59,8 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
   const [currentSolution, setCurrentSolution] = useState<BOMSolution>(emptyBOMSolution);
 
   // Client Details Modal & Negotiation
-  const [customerName, setCustomerName] = useState('');
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const customerName = customers.find(c => c.id === selectedCustomerId)?.name || 'No customer selected';
   const [customerGstin, setCustomerGstin] = useState('');
   const [discountAmount, setDiscountAmount] = useState(0);
   const [showQuoteModal, setShowQuoteModal] = useState(false);
@@ -74,10 +79,10 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
   const totalItemsSelling = currentSolution.items.reduce((acc, i) => acc + (i.sellingPrice * i.qty), 0);
   const totalServices = currentSolution.servicesIncluded.reduce((acc, s) => acc + s.price, 0);
   const grossSubtotal = totalItemsSelling + totalServices;
-  const netSubtotal = grossSubtotal - discountAmount;
+  const netSubtotal = Math.max(0, grossSubtotal - discountAmount);
   const grossProfit = netSubtotal - totalCost;
-  const marginPercent = grossSubtotal > 0 ? ((grossProfit / netSubtotal) * 100) : 0;
-  const isMarginException = marginPercent < 12.0;
+  const marginPercent = netSubtotal > 0 ? ((grossProfit / netSubtotal) * 100) : 0;
+  const isMarginException = netSubtotal <= 0 || marginPercent < 12.0;
 
   // Handle AI BOM Generation via Server Endpoint
   const handleAIGenerateBOM = async () => {
@@ -499,15 +504,13 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
               </div>
 
               <div className="flex justify-between text-slate-400">
-                <span>GST (18% Applicable):</span>
-                <span className="font-mono text-slate-300">₹{Math.round(netSubtotal * 0.18).toLocaleString('en-IN')}</span>
+                <span>GST (requires HSN/SAC & rate verification):</span>
+                <span className="font-mono text-amber-300">Not calculated</span>
               </div>
 
               <div className="flex justify-between text-white font-bold text-base pt-2 border-t border-slate-800">
-                <span>Grand Total (With GST):</span>
-                <span className="font-mono text-emerald-400">
-                  ₹{Math.round(netSubtotal * 1.18).toLocaleString('en-IN')}
-                </span>
+                <span>Pre-tax draft amount (GST excluded):</span>
+                <span className="font-mono text-emerald-400">₹{netSubtotal.toLocaleString('en-IN')}</span>
               </div>
             </div>
 
@@ -547,12 +550,21 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
 
             {/* Action Buttons */}
             <div className="space-y-2 pt-2">
-              <button
-                onClick={() => onGenerateQuote(currentSolution, customerName, customerGstin, discountAmount)}
-                className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg transition active:scale-95 cursor-pointer flex items-center justify-center gap-2"
+              <label className="block text-xs text-slate-300 font-semibold">
+                Registered customer for quotation
+                <select aria-label="Quotation customer" value={selectedCustomerId}
+                  onChange={e => setSelectedCustomerId(e.target.value)}
+                  className="mt-1 w-full rounded border border-slate-700 bg-slate-950 p-2 text-white">
+                  <option value="">Select registered customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
+              <button disabled={!selectedCustomerId}
+                onClick={() => onGenerateQuote(currentSolution, selectedCustomerId, customerGstin, discountAmount)}
+                className="w-full disabled:opacity-50 py-3 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-lg transition active:scale-95 cursor-pointer flex items-center justify-center gap-2"
               >
                 <FileText className="w-4 h-4" />
-                {isMarginException ? 'Submit to Telegram for Owner Approval' : 'Dispatch Quotation to Customer'}
+                {isMarginException ? 'Save Draft Pending Owner Approval' : 'Save Internal Quotation Draft'}
               </button>
             </div>
           </div>
@@ -605,7 +617,7 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
                 <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-mono text-xs font-bold">
                   COMMERCIAL PROPOSAL & BOM
                 </span>
-                <span className="text-xs text-slate-500">Ref: QT-{Date.now().toString().slice(-6)}</span>
+                <span className="text-xs text-amber-700">Unissued draft • reference assigned on save</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -613,7 +625,7 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  Print / Save PDF
+                  Print Draft (Not Tax Invoice)
                 </button>
                 <button
                   onClick={() => setShowQuoteModal(false)}
@@ -627,17 +639,17 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
             {/* Letterhead */}
             <div className="flex justify-between items-start pb-6 border-b">
               <div>
-                <h2 className="text-xl font-black tracking-tight text-slate-950">APEX SYSTEMS & SOLUTIONS PVT LTD</h2>
+                <h2 className="text-xl font-black tracking-tight text-slate-950">{tenant.isConfigured ? tenant.name : 'Seller identity not configured'}</h2>
                 <p className="text-xs text-slate-600 mt-1">
-                  Technology Centre, BKC, Bandra East, Mumbai - 400051<br />
-                  GSTIN: 27AAACA9823P1Z9 • State Code: 27 (Maharashtra)<br />
-                  Email: enterprise@apexsystems.in • Phone: +91 22 6120 8800
+                  Address: {tenant.isConfigured && tenant.address ? tenant.address : 'Not verified / not provided'}<br />
+                  GSTIN: {tenant.isConfigured && tenant.gstin ? tenant.gstin : 'Not verified / not provided'}<br />
+                  Contact: {tenant.isConfigured && tenant.contactEmail ? tenant.contactEmail : 'Not provided'}
                 </p>
               </div>
               <div className="text-right text-xs">
-                <div className="font-bold text-base text-blue-700">TAX QUOTATION</div>
+                <div className="font-bold text-base text-amber-700">DRAFT ESTIMATE — NOT A TAX INVOICE</div>
                 <div className="text-slate-600">Date: {new Date().toLocaleDateString('en-GB')}</div>
-                <div className="text-slate-600">Validity: 14 Days from issuance</div>
+                <div className="text-slate-600">Validity: Subject to verified saved quote terms</div>
               </div>
             </div>
 
@@ -647,12 +659,12 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
                 <span className="font-bold text-slate-500 uppercase text-[10px]">QUOTED TO:</span>
                 <div className="font-bold text-slate-900 text-sm mt-0.5">{customerName}</div>
                 <div className="text-slate-600">GSTIN: {customerGstin}</div>
-                <div className="text-slate-600">Address: Level 5, Trade Hub, BKC, Mumbai</div>
+                <div className="text-slate-600">Customer address not recorded</div>
               </div>
               <div className="text-right">
                 <span className="font-bold text-slate-500 uppercase text-[10px]">SOLUTION ARCHITECTURE:</span>
                 <div className="font-bold text-slate-900 mt-0.5">{currentSolution.solutionName}</div>
-                <div className="text-slate-600">Deployment SLA: Within 48 Hours of PO</div>
+                <div className="text-slate-600">Deployment SLA: Not contracted / not verified</div>
               </div>
             </div>
 
@@ -677,7 +689,7 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
                         <div className="font-bold text-slate-950">{item.name}</div>
                         <div className="text-[11px] text-slate-600">{item.specs}</div>
                       </td>
-                      <td className="py-2 px-2 text-center font-mono">{item.hsn}</td>
+                      <td className="py-2 px-2 text-center font-mono">{item.hsn || 'Pending'}</td>
                       <td className="py-2 px-2 text-center font-bold">{item.qty}</td>
                       <td className="py-2 px-3 text-right font-mono">₹{item.sellingPrice.toLocaleString('en-IN')}</td>
                       <td className="py-2 px-3 text-right font-bold font-mono">₹{(item.sellingPrice * item.qty).toLocaleString('en-IN')}</td>
@@ -687,7 +699,7 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
                     <tr key={s.id} className="bg-slate-50">
                       <td className="py-2 px-3 text-slate-500">{currentSolution.items.length + i + 1}</td>
                       <td className="py-2 px-3 font-semibold text-blue-900">{s.name} ({s.sla})</td>
-                      <td className="py-2 px-2 text-center font-mono">998313</td>
+                      <td className="py-2 px-2 text-center font-mono">{s.sac || 'Pending'}</td>
                       <td className="py-2 px-2 text-center font-bold">1</td>
                       <td className="py-2 px-3 text-right font-mono">₹{s.price.toLocaleString('en-IN')}</td>
                       <td className="py-2 px-3 text-right font-bold font-mono">₹{s.price.toLocaleString('en-IN')}</td>
@@ -714,35 +726,22 @@ export const BOMBuilder: React.FC<BOMBuilderProps> = ({
                   <span>Taxable Subtotal:</span>
                   <span className="font-mono">₹{netSubtotal.toLocaleString('en-IN')}</span>
                 </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>CGST @ 9%:</span>
-                  <span className="font-mono">₹{Math.round(netSubtotal * 0.09).toLocaleString('en-IN')}</span>
-                </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>SGST @ 9%:</span>
-                  <span className="font-mono">₹{Math.round(netSubtotal * 0.09).toLocaleString('en-IN')}</span>
+                <div className="flex justify-between text-amber-700">
+                  <span>GST / classification status:</span>
+                  <span className="font-mono">Not verified — excluded</span>
                 </div>
                 <div className="flex justify-between text-base font-extrabold text-slate-950 pt-2 border-t border-slate-900">
-                  <span>Invoice Amount:</span>
-                  <span className="font-mono text-blue-700">₹{Math.round(netSubtotal * 1.18).toLocaleString('en-IN')}</span>
+                  <span>Pre-tax Draft Total:</span>
+                  <span className="font-mono text-blue-700">₹{netSubtotal.toLocaleString('en-IN')}</span>
                 </div>
               </div>
             </div>
 
-            {/* Terms & Bank Details */}
-            <div className="mt-8 pt-4 border-t text-[10px] text-slate-500 grid grid-cols-2 gap-4">
-              <div>
-                <strong>Terms & Conditions:</strong><br />
-                1. 50% Advance along with formal Purchase Order, 50% upon physical delivery & verification.<br />
-                2. OEM Hardware Warranty: 3 Years onsite direct from Dell & Cisco.<br />
-                3. Deliveries subject to Mumbai Jurisdiction.
-              </div>
-              <div className="text-right">
-                <strong>Bank NEFT Details:</strong><br />
-                Account Name: Apex Systems & Solutions Pvt Ltd<br />
-                Bank: HDFC Bank Ltd • Branch: BKC Complex, Mumbai<br />
-                A/C No: 50200088992211 • IFSC: HDFC0000060
-              </div>
+            {/* No invented bank account, warranty or tax registration */}
+            <div className="mt-8 pt-4 border-t text-[10px] text-amber-800">
+              DRAFT — not a tax invoice, confirmed offer, warranty certificate, bank instruction or signed contract.
+              Seller identity and GSTIN, HSN/SAC tax rates, customer address, delivery commitments and commercial
+              terms must be independently verified before issuance or payment.
             </div>
 
           </div>

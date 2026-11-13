@@ -21,13 +21,21 @@ import {
   Plus,
   X
 } from 'lucide-react';
-import { ITSMTicket, EndpointHealth, CMDBNode, KnowledgeArticle } from '../types';
+import { ITSMTicket, EndpointHealth, CMDBNode, KnowledgeArticle, CustomerAccount } from '../types';
 
 interface ITSMDeskProps {
+  customers: CustomerAccount[];
   tickets: ITSMTicket[];
   endpoints: EndpointHealth[];
   cmdbNodes: CMDBNode[];
+  knowledgeArticles: KnowledgeArticle[];
+  onCreateKnowledgeArticle: (article: Partial<KnowledgeArticle>) => Promise<KnowledgeArticle | null>;
+  onMarkKnowledgeSolved: (id: string) => Promise<KnowledgeArticle | null>;
   onResolveTicket: (ticketId: string) => void;
+  fieldEngineers: { id: string; name: string; username: string }[];
+  canManageAssignments: boolean;
+  onAssignTicket: (ticketId: string, assignedUserId: string | null) => void;
+  onAssignEndpoint: (endpointId: string, assignedUserId: string | null) => void;
   onRemoteFix: (endpointId: string, actionName: string) => void;
   onCreateTicket?: (newTicket: Partial<ITSMTicket> & { description?: string; department?: string }) => void;
   onAddEndpoint?: (endpoint: EndpointHealth) => void;
@@ -35,10 +43,18 @@ interface ITSMDeskProps {
 }
 
 export const ITSMDesk: React.FC<ITSMDeskProps> = ({
+  customers,
   tickets,
   endpoints,
   cmdbNodes,
+  knowledgeArticles: kbArticles,
+  onCreateKnowledgeArticle,
+  onMarkKnowledgeSolved,
   onResolveTicket,
+  fieldEngineers,
+  canManageAssignments,
+  onAssignTicket,
+  onAssignEndpoint,
   onRemoteFix,
   onCreateTicket,
   onAddEndpoint
@@ -50,6 +66,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
 
   // New Ticket Modal State
   const [showNewTicketModal, setShowNewTicketModal] = useState(false);
+  const [newTicketCustomerId, setNewTicketCustomerId] = useState('');
   const [newTitle, setNewTitle] = useState('');
   const [newRequester, setNewRequester] = useState('');
   const [newDept, setNewDept] = useState('IT Operations');
@@ -59,15 +76,17 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
 
   // Endpoint Enrollment Modal State
   const [showEnrollEndpointModal, setShowEnrollEndpointModal] = useState(false);
+  const [newEpCustomerId, setNewEpCustomerId] = useState('');
   const [newEpDeviceName, setNewEpDeviceName] = useState('');
   const [newEpUser, setNewEpUser] = useState('');
   const [newEpOs, setNewEpOs] = useState('Windows 11 Pro 23H2 (x64)');
 
   const handleEnrollEndpointSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEpDeviceName.trim()) return;
+    if (!newEpDeviceName.trim() || !newEpCustomerId) return;
 
     const newEndpoint: EndpointHealth = {
+      customerId: newEpCustomerId,
       id: `ep-${Date.now()}`,
       deviceName: newEpDeviceName.trim(),
       assignedUser: newEpUser.trim() || 'Unassigned',
@@ -87,6 +106,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
       onAddEndpoint(newEndpoint);
     }
     setShowEnrollEndpointModal(false);
+    setNewEpCustomerId('');
     setNewEpDeviceName('');
     setNewEpUser('');
   };
@@ -94,11 +114,10 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
   const selectedTicket = tickets.find(t => t.id === selectedTicketId) || tickets[0] || null;
 
   // Knowledge Base & RAG state
-  const [kbArticles, setKbArticles] = useState<KnowledgeArticle[]>([]);
   const [kbSearchTerm, setKbSearchTerm] = useState('');
   const [selectedKbCat, setSelectedKbCat] = useState<string>('ALL');
   const [selectedArticleId, setSelectedArticleId] = useState<string>('');
-  const [resolvedKbCount, setResolvedKbCount] = useState<number>(0);
+  const resolvedKbCount = kbArticles.reduce((count, article) => count + (article.solvedCount || 0), 0);
   const [copiedStepIndex, setCopiedStepIndex] = useState<number | null>(null);
   const [solvedBanner, setSolvedBanner] = useState<string | null>(null);
 
@@ -300,8 +319,8 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                     ></div>
                   </div>
                   <div className="text-[11px] text-slate-400 flex items-center justify-between pt-1">
-                    <span>Target First Response: 15 mins (Met ✓)</span>
-                    <span>Target Resolution: 4 Hours Max</span>
+                    <span>First-response compliance: Not measured</span>
+                    <span>Contracted SLA: Requires verification</span>
                   </div>
                 </div>
 
@@ -314,13 +333,26 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[10px] uppercase">Assigned Engineer</span>
-                    <span className="font-semibold text-white">{selectedTicket.assignedAgent}</span>
+                    <span className="font-semibold text-white">{selectedTicket.assignedAgent || 'Unassigned'}</span>
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[10px] uppercase">Affected Hardware</span>
                     <span className="font-mono text-indigo-300">{selectedTicket.deviceAffected || 'N/A'}</span>
                   </div>
                 </div>
+
+                {canManageAssignments && (
+                  <div className="border border-slate-800 rounded-lg p-3 text-xs">
+                    <label htmlFor="ticket-assignee" className="block mb-1 text-slate-400">Assign local field engineer</label>
+                    <select id="ticket-assignee" value={selectedTicket.assignedUserId || ''}
+                      onChange={e => onAssignTicket(selectedTicket.id, e.target.value || null)}
+                      className="w-full p-2 rounded-lg bg-slate-950 text-white border border-slate-700">
+                      <option value="">Unassigned</option>
+                      {fieldEngineers.map(u => <option key={u.id} value={u.id}>{u.name} ({u.username})</option>)}
+                    </select>
+                    <p className="text-amber-300 mt-1">Local assignment only. No external notification.</p>
+                  </div>
+                )}
 
                 {/* Diagnostic Root Cause */}
                 {selectedTicket.rootCause && (
@@ -341,7 +373,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                       className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition cursor-pointer flex items-center gap-1.5"
                     >
                       <CheckCircle2 className="w-4 h-4" />
-                      Mark Resolved with Customer Sign-Off
+                      Mark Resolved (Internal Only)
                     </button>
                     <button
                       onClick={() => setSolvedBanner("Parts requisition dispatched to inventory store.")}
@@ -432,6 +464,20 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                       <div>
                         <h4 className="font-bold text-sm text-white">{ep.deviceName}</h4>
                         <span className="text-xs text-slate-400">{ep.assignedUser}</span>
+                        {canManageAssignments && (
+                          <label className="block mt-1 text-[10px] text-slate-400">
+                            Assigned service engineer
+                            <select aria-label={`Engineer assigned to endpoint ${ep.deviceName}`}
+                              value={ep.assignedUserId || ''}
+                              onChange={e => onAssignEndpoint(ep.id, e.target.value || null)}
+                              className="block w-full mt-1 rounded bg-slate-900 border border-slate-700 p-1 text-xs text-white">
+                              <option value="">Unassigned (private)</option>
+                              {fieldEngineers.map(engineer => (
+                                <option key={engineer.id} value={engineer.id}>{engineer.name} ({engineer.username})</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                       </div>
                       <span className="text-[10px] font-mono text-slate-500">{ep.lastSeen}</span>
                     </div>
@@ -509,10 +555,10 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                         onClick={() => {
                           setRemoteSessionDevice(ep);
                           setTerminalOutput([
-                            `Apex RMM Remote Terminal Gateway v4.8 [Secure TLS 1.3 Session #${ep.id.toUpperCase()}]`,
-                            `Connected to endpoint: ${ep.deviceName} (${ep.os})`,
-                            `Assigned User: ${ep.assignedUser} • Consent verified via 2FA token`,
-                            `Type or select any diagnostic command below.`
+                            'Remote terminal is NOT connected. This is a non-executing local preview.',
+                            `Registered device: ${ep.deviceName} (${ep.os})`,
+                            `Assigned user label: ${ep.assignedUser}. Consent has not been verified.`,
+                            'Commands are blocked until a verified RMM agent is integrated.'
                           ]);
                         }}
                         className="py-2 px-2.5 rounded-lg bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 text-xs font-semibold border border-indigo-700/60 transition cursor-pointer flex items-center justify-center gap-1"
@@ -539,7 +585,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 CMDB Configuration Item & Cascading Impact Engine
               </h3>
               <p className="text-xs text-slate-400">
-                Interactive topology showing upstream and downstream dependencies. Click a node to simulate component failure and view service impact.
+                Topology explorer for registered configuration items. Selection is a visual what-if only; no live network changes, impact calculation or escalation occurs.
               </p>
             </div>
 
@@ -551,7 +597,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
               }`}
             >
-              {simulatedOutageNode ? 'Reset Outage Simulation' : 'Simulate Core Switch Failure'}
+              {simulatedOutageNode ? 'Clear What-if Selection' : 'Select Topology Scenario'}
             </button>
           </div>
 
@@ -562,11 +608,11 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-12 text-center text-slate-500 space-y-3 col-span-full">
                   <Server className="w-10 h-10 text-slate-700 mx-auto" />
                   <h4 className="font-bold text-slate-300 text-sm">No CMDB Topology Discovered</h4>
-                  <p className="text-xs text-slate-500 max-w-sm mx-auto">Run network auto-discovery to map IT switches, hypervisors, and service dependency graphs.</p>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto">No verified topology is available. Network auto-discovery is not implemented.</p>
                 </div>
               ) : (
                 cmdbNodes.map((node) => {
-                  const isDown = simulatedOutageNode === node.id || (simulatedOutageNode === 'cmdb-4' && ['cmdb-1', 'cmdb-2', 'cmdb-3'].includes(node.id));
+                  const isDown = simulatedOutageNode === node.id;
                   return (
                     <div
                       key={node.id}
@@ -583,7 +629,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                       
                       <div className="mt-2 pt-2 border-t border-slate-800 text-[10px] font-bold">
                         {isDown ? (
-                          <span className="text-rose-400 animate-pulse">IMPACTED (DOWN)</span>
+                          <span className="text-rose-400 animate-pulse">SELECTED (WHAT-IF)</span>
                         ) : (
                           <span className="text-emerald-400">OPERATIONAL</span>
                         )}
@@ -598,10 +644,12 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             {simulatedOutageNode && (
               <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-800 text-xs text-rose-200">
                 <span className="font-bold block text-sm mb-1 text-rose-400">
-                  🚨 CASCADING FAILURE IMPACT ANALYSIS:
+                  VISUAL WHAT-IF — NO LIVE INCIDENT:
                 </span>
                 <p>
-                  Failure of Core Network Switch (Cisco CBS350) severs connectivity between the <strong>Trading API Gateway</strong> and the <strong>PostgreSQL High-Availability Cluster</strong>. 2 Enterprise client services are currently at risk. Automated failover route via Secondary SFP Uplink and Telegram Escalation initiated.
+                  A topology item is selected for review. No outage, downstream service impact, customer count,
+                  automatic failover or Telegram escalation has been measured or triggered. Connect a verified
+                  discovery/telemetry adapter before using this view for operational decisions.
                 </p>
               </div>
             )}
@@ -721,8 +769,8 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow">
               <span className="text-xs text-slate-400 font-medium">Self-Service Deflection Rate</span>
               <div className="text-2xl font-bold text-emerald-400 mt-1 flex items-baseline gap-2">
-                <span>{kbArticles.length === 0 ? '0.0%' : '42.8%'}</span>
-                <span className="text-xs text-emerald-500 font-normal">{kbArticles.length === 0 ? 'Baseline' : '↑ 6.4% MoM'}</span>
+                <span>N/A</span>
+                <span className="text-xs text-emerald-500 font-normal">No measured deflection data</span>
               </div>
               <p className="text-[11px] text-slate-500 mt-1">Issues solved before raising ticket</p>
             </div>
@@ -739,10 +787,10 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow">
               <span className="text-xs text-slate-400 font-medium">Mean Time to Self-Resolve</span>
               <div className="text-2xl font-bold text-amber-300 mt-1 flex items-baseline gap-2">
-                <span>2.4 min</span>
+                <span>N/A</span>
                 <span className="text-xs text-slate-400 font-normal">avg</span>
               </div>
-              <p className="text-[11px] text-slate-500 mt-1">vs 3.8 hrs human response SLA</p>
+              <p className="text-[11px] text-slate-500 mt-1">No measured resolution-duration telemetry</p>
             </div>
 
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow">
@@ -819,27 +867,23 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 </p>
               </div>
               <button
-                onClick={() => {
-                  const newArticle: KnowledgeArticle = {
-                    id: `sop-${Date.now()}`,
-                    title: 'New Enterprise IT SOP Runbook',
-                    category: 'Network & VPN',
-                    readTime: '3 min read',
-                    views: 1,
-                    solvedCount: 0,
-                    tags: ['SOP', 'Operations', 'Internal'],
-                    summary: 'Standard operating procedure for incident troubleshooting and resolution.',
-                    symptoms: ['Document observed symptoms, event log errors, or failure indicators.'],
-                    selfServiceSteps: [
-                      'Verify physical layer and network IP configuration.',
-                      'Check endpoint event logs for correlating error codes.',
-                      'Restart target service daemon and verify port binding.'
-                    ]
-                  };
-                  setKbArticles([newArticle]);
-                  setSelectedArticleId(newArticle.id);
-                  setResolvedKbCount(0);
-                }}
+                onClick={async () => {
+                    const title = window.prompt('Knowledge article title (actual validated SOP):')?.trim();
+                    if (!title) return;
+                    const summary = window.prompt('Write a factual summary or issue description:')?.trim();
+                    if (!summary) return;
+                    const stepsText = window.prompt('Enter verified troubleshooting steps (one per line):')?.trim();
+                    const steps = stepsText?.split(/\r?\n/).map(line => line.trim()).filter(Boolean) || [];
+                    if (!steps.length) return;
+                    const saved = await onCreateKnowledgeArticle({
+                      title, summary, category: 'General', selfServiceSteps: steps,
+                      symptoms: [], tags: []
+                    });
+                    if (saved) {
+                      setSelectedArticleId(saved.id);
+                      setSolvedBanner('Knowledge article saved to the server.');
+                    }
+                  }}
                 className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs cursor-pointer shadow-lg inline-flex items-center gap-2 transition"
               >
                 <Plus className="w-4 h-4" />
@@ -990,10 +1034,9 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
 
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => {
-                            setResolvedKbCount(prev => prev + 1);
-                            setSolvedBanner(`"${activeArt.title}" marked as resolved`);
-                            setKbArticles(prev => prev.map(a => a.id === activeArt.id ? { ...a, solvedCount: a.solvedCount + 1 } : a));
+                          onClick={async () => {
+                            const saved = await onMarkKnowledgeSolved(activeArt.id);
+                            if (saved) setSolvedBanner(`"${saved.title}" self-resolution acknowledged and saved.`);
                           }}
                           className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow transition cursor-pointer flex items-center gap-1.5"
                         >
@@ -1043,11 +1086,11 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                   <h3 className="text-sm font-bold text-white font-mono flex items-center gap-2">
                     <span>Remote Terminal & Diagnostic Session: {remoteSessionDevice.deviceName}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
-                      Encrypted TLS 1.3
+                      Not Connected
                     </span>
                   </h3>
                   <span className="text-[11px] text-slate-400">
-                    User: {remoteSessionDevice.assignedUser} • IP: 192.168.10.142 • Consent Token: Verified
+                    User label: {remoteSessionDevice.assignedUser} • No verified IP, consent or active remote session
                   </span>
                 </div>
               </div>
@@ -1056,7 +1099,7 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 onClick={() => setRemoteSessionDevice(null)}
                 className="text-slate-400 hover:text-white text-xs px-2.5 py-1 rounded-lg bg-slate-800 cursor-pointer"
               >
-                Terminate Session
+                Close Preview
               </button>
             </div>
 
@@ -1154,8 +1197,9 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!newTitle.trim() || !onCreateTicket) return;
+                if (!newTitle.trim() || !newTicketCustomerId || !onCreateTicket) return;
                 onCreateTicket({
+                  customerId: newTicketCustomerId,
                   title: newTitle,
                   requesterName: newRequester || 'Enterprise Employee',
                   requesterDept: newDept,
@@ -1168,11 +1212,21 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
                 });
                 setShowNewTicketModal(false);
                 setNewTitle('');
+                setNewTicketCustomerId('');
                 setNewRequester('');
                 setNewDescription('');
               }}
               className="p-5 space-y-3.5 text-xs"
             >
+              <div>
+                <label className="text-slate-400 block mb-1 font-semibold">Registered Customer *</label>
+                <select aria-label="Ticket customer" required value={newTicketCustomerId}
+                  onChange={e => setNewTicketCustomerId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-white">
+                  <option value="">Select customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
               <div>
                 <label className="text-slate-400 block mb-1 font-semibold">Incident Summary / Title</label>
                 <input
@@ -1287,6 +1341,14 @@ export const ITSMDesk: React.FC<ITSMDeskProps> = ({
             </div>
 
             <form onSubmit={handleEnrollEndpointSubmit} className="space-y-3.5 text-xs">
+              <label className="block text-slate-300 font-semibold">Registered Customer *
+                <select aria-label="Endpoint customer" required value={newEpCustomerId}
+                  onChange={e => setNewEpCustomerId(e.target.value)}
+                  className="block w-full mt-1 bg-slate-950 border border-slate-700 rounded-lg p-2 text-white">
+                  <option value="">Select customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
               <div>
                 <label className="text-slate-400 block mb-1 font-semibold">Device Hostname *</label>
                 <input

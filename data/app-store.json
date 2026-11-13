@@ -8,17 +8,7 @@
     "logoText": "APEX",
     "isConfigured": false
   },
-  "users": [
-    {
-      "id": "usr-1",
-      "username": "admin",
-      "name": "Enterprise IT Administrator",
-      "email": "admin@apex-it.internal",
-      "role": "BUSINESS_OWNER",
-      "tenantId": "tenant-1",
-      "createdAt": "2026-11-05T00:46:23.954Z"
-    }
-  ],
+  "users": [],
   "products": [],
   "leads": [],
   "quotes": [],
@@ -128,5 +118,6 @@
   "crmOpportunities": [],
   "marketplaceDisputes": [],
   "inventoryTransactions": [],
-  "lastUpdated": "2026-11-05T00:46:23.954Z"
+  "lastUpdated": "2026-11-05T00:46:23.954Z",
+  "sessions": []
 }

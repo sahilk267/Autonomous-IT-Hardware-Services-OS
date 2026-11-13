@@ -24,14 +24,21 @@ import {
   Check,
   X
 } from 'lucide-react';
-import { AssetItem, SoftwareLicense, AMCContract, RMAClaim } from '../types';
+import { AssetItem, SoftwareLicense, AMCContract, RMAClaim, CustomerAccount } from '../types';
 
 interface AssetAMCManagerProps {
+  customers: CustomerAccount[];
   assets: AssetItem[];
   licenses: SoftwareLicense[];
   amcs: AMCContract[];
+  rmaClaims: RMAClaim[];
+  onCreateRMA: (claim: Pick<RMAClaim, 'assetTag' | 'faultSymptom'>) => Promise<RMAClaim | null>;
+  onUpdateRMA: (id: string, updates: Partial<RMAClaim>) => Promise<RMAClaim | null>;
   onReclaimLicenses: (licenseId: string) => void;
   onUpdateAssetStatus: (assetId: string, status: AssetItem['status']) => void;
+  fieldEngineers: { id: string; name: string; username: string }[];
+  canManageAssignments: boolean;
+  onAssignAsset: (assetId: string, assignedUserId: string | null) => void;
   onExecuteJML: (type: 'JOINER' | 'LEAVER', employeeName: string) => void;
   onAddAsset?: (asset: AssetItem) => void;
   onAddAMC?: (amc: AMCContract) => void;
@@ -39,11 +46,18 @@ interface AssetAMCManagerProps {
 }
 
 export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
+  customers,
   assets,
   licenses,
   amcs,
+  rmaClaims,
+  onCreateRMA,
+  onUpdateRMA,
   onReclaimLicenses,
   onUpdateAssetStatus,
+  fieldEngineers,
+  canManageAssignments,
+  onAssignAsset,
   onExecuteJML,
   onAddAsset,
   onAddAMC
@@ -53,7 +67,6 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
 
   // RMA State - starts empty
-  const [rmaClaims, setRmaClaims] = useState<RMAClaim[]>([]);
   const [showNewRmaModal, setShowNewRmaModal] = useState(false);
   const [newRmaAssetTag, setNewRmaAssetTag] = useState(assets[0]?.assetTag || '');
   const [newRmaSymptom, setNewRmaSymptom] = useState('');
@@ -62,6 +75,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
   // Asset Registration Modal State
   const [showAddAssetModal, setShowAddAssetModal] = useState(false);
+  const [newAssetCustomerId, setNewAssetCustomerId] = useState('');
   const [newAssetName, setNewAssetName] = useState('');
   const [newAssetTag, setNewAssetTag] = useState('');
   const [newAssetSerial, setNewAssetSerial] = useState('');
@@ -76,7 +90,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
   // AMC Modal State
   const [showAddAmcModal, setShowAddAmcModal] = useState(false);
-  const [newAmcClient, setNewAmcClient] = useState('');
+  const [newAmcCustomerId, setNewAmcCustomerId] = useState('');
   const [newAmcType, setNewAmcType] = useState<AMCContract['type']>('COMPREHENSIVE');
   const [newAmcDeviceCount, setNewAmcDeviceCount] = useState('1');
   const [newAmcAnnualValue, setNewAmcAnnualValue] = useState('');
@@ -84,12 +98,14 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
   const handleAddAmcSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAmcClient.trim()) return;
+    const customer = customers.find(c => c.id === newAmcCustomerId);
+    if (!customer) return;
 
     const newAmc: AMCContract = {
       id: `amc-${Date.now()}`,
       contractNumber: `AMC-${Date.now().toString().slice(-6)}`,
-      clientName: newAmcClient.trim(),
+      customerId: customer.id,
+      clientName: customer.name,
       type: newAmcType,
       startDate: new Date().toISOString().split('T')[0],
       endDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
@@ -104,14 +120,15 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
       onAddAMC(newAmc);
     }
     setShowAddAmcModal(false);
-    setNewAmcClient('');
+    setNewAmcCustomerId('');
   };
 
   const handleAddAssetSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAssetName || !newAssetTag) return;
+    if (!newAssetName || !newAssetTag || !newAssetCustomerId) return;
 
     const newAsset: AssetItem = {
+      customerId: newAssetCustomerId,
       id: `ast-${Date.now()}`,
       assetTag: newAssetTag.toUpperCase(),
       serialNumber: newAssetSerial.trim() || 'UNTRACKED',
@@ -132,6 +149,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
       onAddAsset(newAsset);
     }
     setShowAddAssetModal(false);
+    setNewAssetCustomerId('');
     setNewAssetName('');
     setNewAssetTag('');
     setNewAssetSerial('');
@@ -369,6 +387,20 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                       <td className="py-3.5 px-4">
                         <div className="text-slate-200 font-medium">{asset.assignedUser}</div>
                         <div className="text-[10px] text-slate-500">{asset.department}</div>
+                        {canManageAssignments && (
+                          <label className="block mt-1 text-[10px] text-slate-400">
+                            Assigned service engineer
+                            <select aria-label={`Engineer assigned to asset ${asset.assetTag}`}
+                              value={asset.assignedUserId || ''}
+                              onChange={e => onAssignAsset(asset.id, e.target.value || null)}
+                              className="block w-full mt-1 bg-slate-950 border border-slate-700 p-1 rounded text-xs text-white">
+                              <option value="">Unassigned (private)</option>
+                              {fieldEngineers.map(engineer => (
+                                <option key={engineer.id} value={engineer.id}>{engineer.name} ({engineer.username})</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                       </td>
 
                       <td className="py-3.5 px-4 text-slate-300">
@@ -399,7 +431,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
-                          {asset.status === 'IN_USE' ? (
+                          {canManageAssignments && (asset.status === 'IN_USE' ? (
                             <button
                               onClick={() => onUpdateAssetStatus(asset.id, 'UNDER_REPAIR')}
                               className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 text-[11px] font-semibold border border-slate-700 cursor-pointer"
@@ -413,7 +445,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                             >
                               Re-allocate
                             </button>
-                          )}
+                          ))}
                         </div>
                       </td>
                     </tr>
@@ -788,7 +820,7 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                     </div>
 
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800 flex-shrink-0">
-                      {claim.warrantyStatus === 'ACTIVE_WARRANTY' ? 'Free OEM Care' : 'Extended AMC'}
+                      {claim.warrantyStatus === 'ACTIVE_WARRANTY' ? 'Warranty recorded active' : claim.warrantyStatus === 'UNVERIFIED' ? 'Warranty unverified' : claim.warrantyStatus === 'EXTENDED_CARE' ? 'Extended care' : 'Out of warranty'}
                     </span>
                   </div>
 
@@ -832,20 +864,29 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
                     {claim.stage !== 'TESTED_CLOSED' ? (
                       <button
-                        onClick={() => {
-                          setRmaClaims(prev => prev.map(c => {
-                            if (c.id !== claim.id) return c;
-                            const nextStageMap: Record<RMAClaim['stage'], RMAClaim['stage']> = {
-                              FAULT_LOGGED: 'OEM_APPROVED',
-                              OEM_APPROVED: 'IN_TRANSIT',
-                              IN_TRANSIT: 'SERVICE_CENTER',
-                              SERVICE_CENTER: 'REPLACED_RETURN',
-                              REPLACED_RETURN: 'TESTED_CLOSED',
-                              TESTED_CLOSED: 'TESTED_CLOSED'
-                            };
-                            return { ...c, stage: nextStageMap[c.stage] };
-                          }));
-                          setNoticeBanner(`RMA #${claim.rmaNumber} advanced to next lifecycle stage.`);
+                        onClick={async () => {
+                          const nextStageMap: Record<RMAClaim['stage'], RMAClaim['stage']> = {
+                            FAULT_LOGGED: 'OEM_APPROVED', OEM_APPROVED: 'IN_TRANSIT',
+                            IN_TRANSIT: 'SERVICE_CENTER', SERVICE_CENTER: 'REPLACED_RETURN',
+                            REPLACED_RETURN: 'TESTED_CLOSED', TESTED_CLOSED: 'TESTED_CLOSED'
+                          };
+                          const nextStage = nextStageMap[claim.stage];
+                          const changes: Partial<RMAClaim> = { stage: nextStage };
+                          if (nextStage === 'OEM_APPROVED') {
+                            const caseNumber = window.prompt('Enter the verified OEM case number:')?.trim();
+                            if (!caseNumber) return;
+                            changes.oemCaseNumber = caseNumber;
+                          }
+                          if (nextStage === 'IN_TRANSIT') {
+                            const courier = window.prompt('Enter the actual courier company:')?.trim();
+                            if (!courier) return;
+                            const awb = window.prompt('Enter actual tracking/AWB:')?.trim();
+                            if (!awb) return;
+                            changes.courierPartner = courier;
+                            changes.courierTracking = awb;
+                          }
+                          const saved = await onUpdateRMA(claim.id, changes);
+                          if (saved) setNoticeBanner(`RMA #${saved.rmaNumber} saved as ${saved.stage}; external dispatch is not implied.`);
                         }}
                         className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition cursor-pointer flex items-center gap-1"
                       >
@@ -932,38 +973,23 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
-                      if (!newRmaSymptom.trim()) {
-                        setNoticeBanner("Please specify the diagnosed hardware symptom.");
+                    onClick={async () => {
+                      if (!newRmaSymptom.trim() || !assets.some(a => a.assetTag === newRmaAssetTag)) {
+                        setNoticeBanner('Choose a registered asset and enter its actual fault.');
                         return;
                       }
-                      const selectedAsset = assets.find(a => a.assetTag === newRmaAssetTag);
-                      const newClaim: RMAClaim = {
-                        id: `rma-${Date.now()}`,
-                        rmaNumber: `RMA-${Date.now().toString().slice(-6)}`,
-                        assetTag: newRmaAssetTag || (selectedAsset?.assetTag || 'AST-N/A'),
-                        assetName: selectedAsset?.name || 'Enterprise Hardware Asset',
-                        serialNumber: selectedAsset?.serialNumber || 'N/A',
-                        oemBrand: selectedAsset?.brand || 'OEM Partner',
-                        oemCaseNumber: '',
-                        faultSymptom: newRmaSymptom,
-                        warrantyStatus: 'ACTIVE_WARRANTY',
-                        courierTracking: '',
-                        courierPartner: newRmaCourier || 'Express Logistics',
-                        stage: 'FAULT_LOGGED',
-                        createdAt: new Date().toISOString().split('T')[0]
-                      };
-                      setRmaClaims([newClaim, ...rmaClaims]);
-                      if (selectedAsset) {
-                        onUpdateAssetStatus(selectedAsset.id, 'UNDER_REPAIR');
+                      const saved = await onCreateRMA({ assetTag: newRmaAssetTag, faultSymptom: newRmaSymptom.trim() });
+                      if (!saved) {
+                        setNoticeBanner('RMA was not saved. No external dispatch occurred.');
+                        return;
                       }
                       setShowNewRmaModal(false);
                       setNewRmaSymptom('');
-                      setNoticeBanner(`RMA Claim ${newClaim.rmaNumber} logged at FAULT_LOGGED. OEM case ID and courier tracking await provider assignment.`);
+                      setNoticeBanner(`RMA ${saved.rmaNumber} recorded; OEM, warranty and courier confirmation are pending.`);
                     }}
                     className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-semibold text-xs cursor-pointer shadow"
                   >
-                    Dispatch RMA Claim
+                    Record RMA Claim
                   </button>
                 </div>
               </div>
@@ -990,6 +1016,15 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
             </div>
 
             <form onSubmit={handleAddAssetSubmit} className="space-y-3.5 text-xs">
+              <label className="block text-slate-300 font-semibold">
+                Registered Customer *
+                <select aria-label="Asset customer" required value={newAssetCustomerId}
+                  onChange={e => setNewAssetCustomerId(e.target.value)}
+                  className="block w-full mt-1 bg-slate-950 border border-slate-700 rounded-xl p-2 text-white">
+                  <option value="">Select customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </label>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">Asset Tag *</label>
@@ -1144,15 +1179,13 @@ export const AssetAMCManager: React.FC<AssetAMCManagerProps> = ({
 
             <form onSubmit={handleAddAmcSubmit} className="space-y-3.5 text-xs">
               <div>
-                <label className="text-slate-400 block mb-1 font-semibold">Client Enterprise Name *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Nexus FinTech Solutions Ltd"
-                  value={newAmcClient}
-                  onChange={(e) => setNewAmcClient(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:border-emerald-500 focus:outline-none"
-                />
+                <label className="text-slate-400 block mb-1 font-semibold">Registered Customer *</label>
+                <select aria-label="AMC customer" required value={newAmcCustomerId}
+                  onChange={e => setNewAmcCustomerId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white">
+                  <option value="">Select customer</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">

@@ -18,6 +18,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [setupToken, setSetupToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -52,7 +53,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const endpoint = isSetup ? '/api/auth/setup' : '/api/auth/login';
       const body = isSetup 
-        ? { username: username.trim(), password, name: name.trim(), email: email.trim() }
+        ? { username: username.trim(), password, name: name.trim(), email: email.trim(), setupToken }
         : { username: username.trim(), password };
 
       const res = await fetch(endpoint, {
@@ -170,6 +171,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               />
             </div>
           </div>
+
+          {isSetup && (
+            <div>
+              <label className="text-xs font-semibold text-slate-300 block mb-1">One-time Setup Token (production)</label>
+              <input
+                type="password"
+                value={setupToken}
+                onChange={e => setSetupToken(e.target.value)}
+                placeholder="APEX_INITIAL_SETUP_TOKEN from server environment"
+                className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white"
+              />
+            </div>
+          )}
 
           {isSetup && (
             <div>

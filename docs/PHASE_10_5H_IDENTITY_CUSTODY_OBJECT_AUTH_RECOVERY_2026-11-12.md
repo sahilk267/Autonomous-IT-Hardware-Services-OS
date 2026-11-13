@@ -1,0 +1,59 @@
+# Phase 10.5H — Independent Reviewer Identity and Custody, Customer Object Authorization, Measured Recovery
+
+**Date:** 12 November 2026, Asia/Kolkata. **Development:** `fix/phase1-security-integrity-20261106`, Draft PR #1. **Production state:** BLOCKED; JSON system of record remains authoritative. This phase creates only synthetic verification and review tooling; it does not enroll real reviewers, attest their actual employment, migrate live customer data, deploy SQL business routes, or start external delivery.
+
+
+## Verified implementation CI evidence — 12 November 2026
+
+**Code SHA:** [`f98d4c19`](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/commit/f98d4c19c87da4c77a3f54daf05fad6cd2dda965).
+
+- [Push #43269141150](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43269141150) **completed success**: backend verify, Chromium browser, and real PostgreSQL 16 staging.
+- [Draft PR #43269153828](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43269153828) **completed success**, same three job classes.
+- **51/51** JSON object cross-customer test assertions: 11 customer-bound collections, 10 unauthorized creates, 12 unauthorized existing-ID mutations, 11 no-write integrity comparisons, owner cross-customer assignment denied, immediate revoke on 5 related lists. 30 dynamic object-route registrations were inventoried: 12 customer-scoped write routes exercised, 18 owner-only/global/unmapped exclusions explicitly documented.
+- **18/18** dual-independent-issuer reviewer and custody cryptographic negative controls; **15/15** synthetic recovery measurement and operator budget negative controls.
+- Controlled CI rehearsal restored an actual PG16 source archive into a separate disposable clone, **detected deliberate clone-only corruption**, restored from the unchanged SHA256 archive and reran **30/30** restore acceptance assertions. The independent 18-table/16 FORCE-RLS/8-marker data/schema digest matched.
+- Observed CI runner timings: initial restore **1,046 ms**; clone rollback restore + verification **973 ms**; corruption detection to verified rollback **977 ms**; synthetic no-write window **2,473 ms**; archive age surrogate **161 ms**. Explicit **CI-only** budgets: RPO surrogate 10 min, rollback RTO 5 min, no-write window 10 min. **Budgets met in this disposable CI fixture only.**
+- All safety gates still report `productionCutoverReady:false`. No real HR/identity system verification, real operator approval, customer-data-loss measurement, production RPO/RTO assertion or actual customer migration was performed. This report is evidence of staged tests, **not production sign-off**.
+
+## A. Independently witnessed identity / evidence custody
+
+**New:** `scripts/postgres/identity_custody_gate.mjs`. It first runs all Phase 10.5G Ed25519 reviewer-chain, pinned review-registry, bounded rehearsal-plan, owner-only historical row and SQL restore-evidence checks. It requires two **additional** independently pinned public Ed25519 keys (in strict order `PERSONNEL_OFFICER`, `SECURITY_COMPLIANCE_OFFICER`), distinct from one another and all four reviewer keys. The dedicated issuer registry has scope `OFFLINE_INDEPENDENT_ISSUER_CLAIMS`, a `issuers` array of exactly two records (`role,keyId,principal,publicKeyPem`), and is pinned by `APEX_REVIEW_IDENTITY_ROOT_SHA256` from an external independent custody channel.
+
+For each of four roles, an identity `claim` must contain:
+`role,keyId,principal,publicKeySha256,organizationIdSha256,identityState,verifiedAt,expiresAt,registrySha256,revocationsSha256`. Both issuers independently sign the canonical JSON claim with Ed25519; distinct organizational subject SHA256 values, active status, matching reviewer public-key fingerprint/role, nonexpired 90-day validity and recent verification (within 30 days) are enforced. Real identity labels/organization IDs are not returned. Every reviewer is independently **attested by both issuer keys** rather than by self-declaration, and no reviewer may sign their own identity as an issuer.
+
+A recent dual-signed revocation file is required (a trusted `asOf` no older than 24 hours plus `revokedPublicKeySha256` list), and all four key fingerprints must be unrevoked. The identity bundle binds the **exact** review registry SHA and revocation file SHA. Separately, a `custody` file with scope `OFFLINE_PRIVATE_EVIDENCE_CUSTODY` must carry exactly eight ordered `entries`, each with `claim`, `signatures` (both issuers), and a SHA256 hash chain linked via `prevReceiptSha256`. Receipt claims have `sequence,artifact,artifactSha256,observedAt,prevReceiptSha256,classification`; classification is `PRIVATE_RESTRICTED_REVIEW_ONLY`. Ordered artifacts: `source,review,trust,signoffs,plan,evidence,identities,revocations`. Any altered byte, omitted receipt, impersonated issuer, stale revocation, forbidden/expired reviewer, wrong sequence or changed prior link hard-fails.
+
+Signer domains are public specified strings `APEX_10_5H_REVIEWER_IDENTITY_V1\n`, `APEX_10_5H_REVOKED_KEYS_V1\n`, and `APEX_10_5H_CUSTODY_RECEIPT_V1\n` prefixed to recursively sorted canonical JSON claims; signatures are base64 Ed25519. All private inputs are distinct absolute files outside checkout, maximum 25MB each, and must not be world-readable on POSIX.
+
+**CLI** `npm run assess:identity-custody -- --source /private/source.json --review /private/review.json --trust /private/trust.json --signoffs /private/signoffs.json --plan /private/plan.json --evidence /private/evidence.json --roots /private/issuer-public-keys.json --identities /private/reviewer-identity-claims.json --revocations /private/revoked-keys.json --custody /private/custody-chain.json`
+
+Requires `APEX_REVIEW_IDENTITY_ACK=OFFLINE_CUSTODY_ONLY_NO_CUTOVER`, `APEX_REVIEW_TRUST_SHA256`, `APEX_REVIEW_IDENTITY_ROOT_SHA256`. This CLI returns **3 even after successful cryptographic validation**, 1 on mismatch, 2 on an unsafe environment/invalid invocation. It never produces an authorization token or signs for a human.
+
+**Trust limitation (material):** issuer signatures verify provenance only *relative to the roots supplied and independently pinned*. They do not prove that a real HR/identity system correctly vetted employees or that the keys are owned by legitimate organization officers. Real-world identity source access, revocation services, issuer enrollment and HSM/KMS custody are **PENDING**. Synthetic tests use temporary test keys.
+
+## B. Business API object-level cross-customer tests
+
+`tests/business_object_isolation_matrix.mjs` runs the real compiled production-mode JSON server with synthetic Customer A and Customer B, five separately authenticated roles, and overlapping *module types*. B is not granted to any non-owner. It checks 11 customer-scoped collections (projects, assets, endpoints, tickets, jobs, AMC, CRM, quotes, leads, proposals, RMA), including linked project/proposal and asset/RMA resolution. Read checks include forged tenant/customer headers; all non-owner reads must see A only. Existing B IDs are submitted to authorized-role PATCH/POST object endpoints, with expect-404 and unchanged business records; unauthorized create attempts target B by customer ID, project ID or asset tag. Owner still cannot assign A-only field staff to B. Finally, owner revokes A Sales and the same Sales session must immediately lose CRM, quotes, leads, projects and proposal views.
+
+The suite inventories all main dynamic `/:id`/`/:invoiceNo` routes using the Phase 10.5G TypeScript parser and requires every route be categorized as an actually exercised foreign-object denial OR an **explicit, named exclusion** (`OWNER_ONLY_*` or `UNSCOPED_*`). It intentionally does *not* attempt to deny the owner access to customer B, because the normal JSON runtime owner is tenant-wide; unsupported legacy collections are not falsely represented as customer-bound. PostgreSQL staged SQL still has separate two-tenant tests from 10.5F. Complete real multi-tenant JSON runtime object security remains **unproven** and a release blocker.
+
+## C. Measurable operator-controlled synthetic recovery acceptance
+
+`scripts/postgres/recovery_measurement_gate.mjs` verifies four separate private artifacts: `plan`, `observations`, independent Phase 10.5F `rehearsal_evidence` report, and original PostgreSQL 16 binary archive. All are size-bounded, outside repo, and the archive is hashed. The plan must bind source SHA, original archive SHA, final independent restored-clone evidence SHA, operator session ID, bounded recovery budget/window, required write-freeze and `approvalClassification:SYNTHETIC_CI_OPERATOR_NO_EXTERNAL_APPROVAL`.
+
+`observations` timestamps from the sequential **real PG16 CI clone** procedure include `archiveBeganMs,archiveFinishedMs,initialRestoreBeganMs,initialRestoreVerifiedMs,damageDetectedMs,rollbackBeganMs,rollbackRestoredMs,rollbackVerifiedMs,writesAllowedMs`, archive bytes, source SHA and evidence SHA. The validator rejects wrong order, out-of-window timestamps, modified archive, non-read-only recovery evidence, missing 18 tables/16 forced-RLS/8 migration markers, budget violations or mismatched recovered source.
+
+**Measured acceptance** (CI snapshot only):
+- **RTO:** elapsed `rollbackVerifiedMs − damageDetectedMs` must not exceed explicit `rtoMinutes`.
+- **Downtime window:** elapsed `writesAllowedMs − approvedWindowStart` must not exceed `maximumDowntimeMinutes`.
+- **RPO surrogate:** `archiveFinishedMs − approvedWindowStart` must not exceed `rpoMinutes`. This measures the frozen **synthetic source snapshot age**, **not production transaction loss**. The source's actual write-freeze is only a CI staged no-write assumption, not a distributed write barrier.
+- **Integrity:** exact archive and independently verified restored data digests must agree; repeated restoration and a deliberate clone-only corruption detection remain required.
+
+The validator is **read-only**, runs only with `PGHOST` loopback, two distinct `apex_stage_*` database names, `APEX_PG_STAGING_ACK=STAGING_ONLY_NO_PRODUCTION` and `APEX_PG_MEASURED_REHEARSAL_ACK=DISPOSABLE_CI_CLONE_ONLY`. Successful synthetic budget assessment exits **3 / CUTOVER BLOCKED**; it is never an operator approval, an RPO assurance, or a restoration command.
+
+## D. CI and remaining manual release gates
+
+GitHub CI `verify` runs signed issuer/custody negative tests, two-customer object HTTP isolation, measured recovery budget negative tests, and every earlier route-role/business/TypeScript regression. PostgreSQL CI measures real **runner** elapsed times around one disposable `pg_dump`, clone restore, clone corruption detection, rollback restore and final independent SQL evidence; checks the planned synthetic RPO-age/RTO/downtime budgets. Browser and previous PG staging SQL/grant/restore multi-tenant suites continue.
+
+**Approval states:** no genuine personnel identity vetting was performed, no externally signed corporate authorization was obtained, no customer history was migrated or mapping applied, no actual production RPO/RTO was measured, no distributed multi-tenant JSON access was proven, no external provider or finance delivery was enabled. The existing `assess:pg:cutover` always returns `BLOCKED` exit 3. Only a human-led, independently audited and *separately authorized* real rehearsal can supply operational acceptance. **Keep Draft PR #1, leave `main` untouched, do not deploy to Hostinger.**

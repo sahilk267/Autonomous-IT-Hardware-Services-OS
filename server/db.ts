@@ -25,6 +25,7 @@ import {
   CRMOpportunity,
   MarketplaceDispute,
   TenantInfo,
+  CustomerAccount,
   UserAccount,
   UserRole,
   InvoiceRecord,
@@ -62,12 +63,14 @@ export interface InventoryTransaction {
 
 export interface AppStoreState {
   tenant: TenantInfo;
+  customers: CustomerAccount[];
   users: ServerUser[];
   sessions: SessionRecord[];
   products: ProductItem[];
   leads: Lead[];
   quotes: Quotation[];
   telegramMessages: TelegramMessage[];
+  processedTelegramUpdateIds: number[];
   suppliers: SupplierInfo[];
   rfqs: RFQItem[];
   tickets: ITSMTicket[];
@@ -92,7 +95,22 @@ export interface AppStoreState {
 }
 
 const DATA_DIR = path.join(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'app-store.json');
+// Explicitly isolated database path is required for API smoke tests and deployments.
+const configuredDataFile = process.env.APEX_DATA_FILE?.trim();
+const DB_FILE = configuredDataFile
+  ? path.resolve(configuredDataFile)
+  : path.join(DATA_DIR, 'app-store.json');
+
+// A deployment checkout can overwrite repository-tracked data/app-store.json.
+// Production must use a separately provisioned private location outside this checkout.
+if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'staging') {
+  const checkedPath = fs.existsSync(DB_FILE) ? fs.realpathSync(DB_FILE) : DB_FILE;
+  const relative = path.relative(process.cwd(), checkedPath);
+  const insideCheckout = relative === '' || (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative));
+  if (!configuredDataFile || !path.isAbsolute(configuredDataFile) || insideCheckout) {
+    throw new Error('PRODUCTION DATA SAFETY: set APEX_DATA_FILE to an explicit private absolute path outside the application checkout. Deployment aborted; no data was overwritten.');
+  }
+}
 
 export const defaultConnectors: IntegrationConnector[] = [
   {
@@ -190,12 +208,14 @@ export function getInitialCleanState(): AppStoreState {
       logoText: 'APEX',
       isConfigured: false
     },
+    customers: [],
     users: [],
     sessions: [],
     products: [],
     leads: [],
     quotes: [],
     telegramMessages: [],
+    processedTelegramUpdateIds: [],
     suppliers: [],
     rfqs: [],
     tickets: [],
@@ -305,6 +325,53 @@ export class PersistentStore {
     });
   }
 
+  // Customer identities and staff grants share one atomic store commit with their audit event.
+  public registerCustomer(name: string, actor: string): CustomerAccount {
+    return this.commit(draft => {
+      if (draft.customers.some(c => c.name.toLowerCase() === name.toLowerCase())) {
+        throw new Error('Customer name already registered.');
+      }
+      const customer: CustomerAccount = {
+        id: 'cust-' + crypto.randomUUID(),
+        tenantId: draft.tenant.id, name, createdAt: new Date().toISOString(), staffUserIds: []
+      };
+      draft.customers.unshift(customer);
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'CustomerRegistered', agent: actor,
+        summary: 'Customer record registered: ' + customer.id,
+        autonomousActionTaken: 'Created internal customer registry record; no external account provisioned.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return customer;
+    });
+  }
+
+  public setCustomerStaffAccess(customerId: string, userId: string, grant: boolean, actor: string): CustomerAccount | null {
+    return this.commit(draft => {
+      const customer = draft.customers.find(c => c.id === customerId && c.tenantId === draft.tenant.id);
+      if (!customer) return null;
+      const staff = draft.users.find(u => u.id === userId && u.tenantId === draft.tenant.id &&
+        u.role !== 'BUSINESS_OWNER' && !u.disabledAt);
+      if (!staff) throw new Error('An active local nonowner staff identity is required.');
+      customer.staffUserIds = grant
+        ? Array.from(new Set([...customer.staffUserIds, staff.id]))
+        : customer.staffUserIds.filter(id => id !== staff.id);
+      // Revoke per-project shares at the same time; permission check still enforces the customer grant.
+      if (!grant) for (const project of draft.projects.filter(p => p.customerId === customerId)) {
+        project.collaboratorUserIds = (project.collaboratorUserIds || []).filter(id => id !== userId);
+      }
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'CustomerStaffAccessChanged', agent: actor,
+        summary: 'Customer ' + customer.id + ' staff access ' + (grant ? 'granted' : 'revoked') + '.',
+        autonomousActionTaken: 'Committed customer access change and dependent project-share revocation locally.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return customer;
+    });
+  }
+
   // Users & Sessions
   public getUsers(): ServerUser[] {
     return this.state.users;
@@ -320,7 +387,74 @@ export class PersistentStore {
 
   public addUser(user: ServerUser): ServerUser {
     return this.commit((draft) => {
+      if (draft.users.some(existing => existing.username.toLowerCase() === user.username.toLowerCase())) {
+        throw new Error('Username already exists.');
+      }
+      if (draft.users.some(existing => existing.email.toLowerCase() === user.email.toLowerCase())) {
+        throw new Error('Email address already belongs to another user.');
+      }
       draft.users.push(user);
+      return user;
+    });
+  }
+
+  public addStaffUser(user: ServerUser, actor: string): ServerUser {
+    return this.commit((draft) => {
+      if (draft.users.some(existing =>
+        existing.username.toLowerCase() === user.username.toLowerCase() ||
+        existing.email.toLowerCase() === user.email.toLowerCase())) {
+        throw new Error('Username or email is already in use.');
+      }
+      draft.users.push(user);
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'StaffAccountCreated', agent: actor,
+        summary: 'Created staff account ' + user.username + ' with role ' + user.role + '.',
+        autonomousActionTaken: 'Owner-authorized local identity created; no external provider provisioning.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return user;
+    });
+  }
+
+  // Admin-controlled disable. Never allow removing the business owner via staff API.
+  // Revocation and account state change are written in one atomic file commit.
+  public disableStaffUser(id: string, actor: string): ServerUser | null {
+    return this.commit((draft) => {
+      const user = draft.users.find(item => item.id === id);
+      if (!user) return null;
+      if (user.role === 'BUSINESS_OWNER') {
+        throw new Error('Business owner cannot be disabled through staff management.');
+      }
+      if (!user.disabledAt) user.disabledAt = new Date().toISOString();
+      draft.sessions = draft.sessions.filter(session => session.userId !== id);
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'StaffAccountDisabled', agent: actor,
+        summary: 'Disabled staff account ' + user.username + ' and revoked active sessions.',
+        autonomousActionTaken: 'Local login blocked. External Microsoft/SSO access remains unmanaged.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return user;
+    });
+  }
+
+  // Password rotation revokes all active sessions, including current one.
+  public rotateUserPassword(id: string, newSalt: string, newHash: string): ServerUser | null {
+    return this.commit((draft) => {
+      const user = draft.users.find(item => item.id === id);
+      if (!user || user.disabledAt) return null;
+      user.salt = newSalt;
+      user.passwordHash = newHash;
+      user.passwordChangedAt = new Date().toISOString();
+      draft.sessions = draft.sessions.filter(session => session.userId !== id);
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'PasswordChanged', agent: user.username,
+        summary: 'Password rotated for local account ' + user.username + '; all sessions revoked.',
+        autonomousActionTaken: 'Local credential changed; external SSO credentials unchanged.',
+        humanApprovalRequired: false, approvalStatus: 'AUTO_APPROVED', confidenceScore: 1
+      });
       return user;
     });
   }
@@ -353,7 +487,10 @@ export class PersistentStore {
     if (new Date(session.expiresAt) <= new Date()) {
       return null;
     }
-    return session;
+    // Reject legacy passwordless users and apply the user's current role.
+    const user = this.state.users.find(u => u.id === session.userId);
+    if (!user || !user.passwordHash || !user.salt || user.disabledAt) return null;
+    return { ...session, role: user.role, username: user.username };
   }
 
   public deleteSession(token: string): boolean {
@@ -381,10 +518,49 @@ export class PersistentStore {
     });
   }
 
+  // Identity-based ticket assignment. Legacy assignedAgent display labels are not authorization.
+  public assignTicket(id: string, userId: string | null, actor: string): ITSMTicket | null {
+    return this.commit((draft) => {
+      const ticket = draft.tickets.find(t => t.id === id);
+      if (!ticket) return null;
+      const staff = userId ? draft.users.find(u => u.id === userId &&
+        u.role === 'FIELD_ENGINEER' && !u.disabledAt && u.tenantId === draft.tenant.id) : null;
+      if (userId && !staff) throw new Error('Assign an active local field engineer by exact user ID.');
+      ticket.assignedUserId = staff?.id;
+      ticket.assignedAgent = staff?.name || 'Unassigned';
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'TicketEngineerAssigned', agent: actor,
+        summary: 'Ticket ' + ticket.ticketNumber + ' assigned to ' + (staff?.username || 'unassigned') + '.',
+        autonomousActionTaken: 'Saved local assignment only; no external technician notification.',
+        humanApprovalRequired: false, approvalStatus: 'AUTO_APPROVED', confidenceScore: 1
+      });
+      return ticket;
+    });
+  }
+
   // Endpoints
   public addEndpoint(endpoint: EndpointHealth): EndpointHealth {
     return this.commit((draft) => {
       draft.endpoints = [endpoint, ...draft.endpoints];
+      return endpoint;
+    });
+  }
+
+  // Assignment and audit update are committed together; never use a display name as identity.
+  public assignEndpoint(id: string, userId: string | null, actor: string): EndpointHealth | null {
+    return this.commit(draft => {
+      const endpoint = draft.endpoints.find(e => e.id === id);
+      if (!endpoint) return null;
+      if (userId) endpoint.assignedUserId = userId;
+      else delete endpoint.assignedUserId;
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'EndpointEngineerAssigned', agent: actor,
+        summary: 'Endpoint ' + endpoint.id + ' engineer assignment changed.',
+        autonomousActionTaken: 'Local access grant updated; no RMM agent enrolled.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
       return endpoint;
     });
   }
@@ -402,6 +578,23 @@ export class PersistentStore {
   public addAsset(asset: AssetItem): AssetItem {
     return this.commit((draft) => {
       draft.assets = [asset, ...draft.assets];
+      return asset;
+    });
+  }
+
+  public assignAsset(id: string, userId: string | null, actor: string): AssetItem | null {
+    return this.commit(draft => {
+      const asset = draft.assets.find(a => a.id === id);
+      if (!asset) return null;
+      if (userId) asset.assignedUserId = userId;
+      else delete asset.assignedUserId;
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'AssetEngineerAssigned', agent: actor,
+        summary: 'Asset ' + asset.assetTag + ' engineer assignment changed.',
+        autonomousActionTaken: 'Local service access updated; no OEM or customer notification sent.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
       return asset;
     });
   }
@@ -452,16 +645,72 @@ export class PersistentStore {
     });
   }
 
-  public settleInvoice(invoiceNo: string, settlementInfo?: { paymentReference?: string; method?: string }): InvoiceRecord | null {
+  public settleInvoice(invoiceNo: string, settlementInfo: { paymentReference: string; method?: string }): InvoiceRecord | null {
+    const reference = settlementInfo?.paymentReference?.trim();
+    if (!reference || reference.length < 4 || reference.length > 200) {
+      throw new Error('A verified bank/UPI payment reference (4-200 characters) is required.');
+    }
     return this.commit((draft) => {
       const inv = draft.invoices.find(i => i.invoiceNo === invoiceNo);
       if (!inv) return null;
+      if (inv.status === 'SETTLED' || inv.status === 'CANCELLED') {
+        throw new Error('This invoice cannot be settled again or is cancelled.');
+      }
       inv.status = 'SETTLED';
       inv.settledAt = new Date().toISOString();
-      if (settlementInfo?.paymentReference) {
-        inv.paymentReference = settlementInfo.paymentReference;
-      }
+      inv.paymentReference = reference;
       return inv;
+    });
+  }
+
+  // Proposal submission and project bid count must share one durable store commit.
+  // Provider identity/ratings are locally self-reported, never independently verified.
+  public submitProjectProposal(proposal: Proposal): Proposal {
+    return this.commit((draft) => {
+      const project = draft.projects.find(p => p.id === proposal.projectId);
+      if (!project) throw new Error('Referenced project does not exist.');
+      if (project.status !== 'PROPOSALS_OPEN') throw new Error('Project is not accepting new proposals.');
+      if (draft.proposals.some(p => p.id === proposal.id)) throw new Error('Duplicate proposal identifier.');
+      draft.proposals.unshift(proposal);
+      project.proposalsCount = draft.proposals.filter(p => p.projectId === project.id).length;
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'ProjectProposalSubmitted', agent: 'Project Marketplace',
+        summary: 'Unverified proposal ' + proposal.id + ' registered for project ' + project.projectCode + '.',
+        autonomousActionTaken: 'Saved internal proposal and project count; no external verification, bid message or payment executed.',
+        humanApprovalRequired: false, approvalStatus: 'AUTO_APPROVED', confidenceScore: 1
+      });
+      return proposal;
+    });
+  }
+
+  // One project may have exactly one accepted proposal; all competing submissions are
+  // rejected in the SAME commit as project award and audit event.
+  public acceptProjectProposal(id: string, actor: string): { proposal: Proposal; project: Project; proposals: Proposal[] } | null {
+    return this.commit((draft) => {
+      const proposal = draft.proposals.find(p => p.id === id);
+      if (!proposal) return null;
+      const project = draft.projects.find(p => p.id === proposal.projectId);
+      if (!project) throw new Error('Proposal is not linked to an existing project.');
+      if (project.status !== 'PROPOSALS_OPEN' || proposal.status !== 'SUBMITTED' ||
+          draft.proposals.some(p => p.projectId === project.id && p.status === 'ACCEPTED')) {
+        throw new Error('Project has already been awarded or proposal is not awaiting acceptance.');
+      }
+      proposal.status = 'ACCEPTED';
+      project.status = 'IN_PROGRESS';
+      for (const item of draft.proposals) {
+        if (item.projectId === project.id && item.id !== proposal.id && item.status === 'SUBMITTED') {
+          item.status = 'REJECTED';
+        }
+      }
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'ProjectProposalAccepted', agent: actor,
+        summary: 'Proposal ' + proposal.id + ' was selected for project ' + project.projectCode + '.',
+        autonomousActionTaken: 'Recorded internal award only; no vendor dispatch, escrow release or payment performed.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
+      return { proposal, project, proposals: draft.proposals.filter(p => p.projectId === project.id) };
     });
   }
 
@@ -485,6 +734,10 @@ export class PersistentStore {
   // Products
   public addProduct(product: ProductItem): ProductItem {
     return this.commit((draft) => {
+      if (draft.products.some(p => p.id === product.id ||
+          p.sku.toLowerCase() === product.sku.toLowerCase())) {
+        throw new Error('Product ID or SKU already exists.');
+      }
       draft.products = [product, ...draft.products];
       return product;
     });
@@ -494,7 +747,16 @@ export class PersistentStore {
     return this.commit((draft) => {
       const idx = draft.products.findIndex(p => p.id === id);
       if (idx === -1) return null;
-      draft.products[idx] = { ...draft.products[idx], ...updates };
+      if (updates.id !== undefined && updates.id !== id)
+        throw new Error('Catalog source identity cannot be reassigned.');
+      const proposedSku=updates.sku;
+      if (proposedSku && draft.products.some(p=>p.id!==id &&
+          p.sku.toLowerCase()===proposedSku.toLowerCase()))
+        throw new Error('Product SKU already exists.');
+      const next={...draft.products[idx],...updates,id};
+      if ((next.stockReserved ?? 0) > (next.stockAvailable ?? 0))
+        throw new Error('Reserved stock cannot exceed stock available.');
+      draft.products[idx] = next;
       return draft.products[idx];
     });
   }
@@ -515,6 +777,19 @@ export class PersistentStore {
     });
   }
 
+  // Keep a bounded durable replay ledger for Telegram update IDs.
+  public markTelegramUpdateProcessed(updateId: number): boolean {
+    if (!Number.isSafeInteger(updateId) || updateId < 0) {
+      throw new Error('Telegram update_id must be a positive safe integer.');
+    }
+    if (this.state.processedTelegramUpdateIds.includes(updateId)) return false;
+    return this.commit((draft) => {
+      if (draft.processedTelegramUpdateIds.includes(updateId)) return false;
+      draft.processedTelegramUpdateIds = [...draft.processedTelegramUpdateIds, updateId].slice(-2048);
+      return true;
+    });
+  }
+
   // RFQs
   public addRFQ(rfq: RFQItem): RFQItem {
     return this.commit((draft) => {
@@ -527,6 +802,10 @@ export class PersistentStore {
     return this.commit((draft) => {
       const rfq = draft.rfqs.find(r => r.id === rfqId);
       if (!rfq) return null;
+      if (rfq.status === 'PO_PREPARED' || rfq.status === 'PO_DISPATCHED')
+        throw new Error('A prepared PO freezes its original supplier quotation set.');
+      if (rfq.supplierQuotes.some(q=>q.supplierId===quote.supplierId))
+        throw new Error('Each supplier may submit only one quote per RFQ.');
       rfq.supplierQuotes.push(quote);
       if (rfq.status === 'OPEN' && rfq.supplierQuotes.length > 1) {
         rfq.status = 'COMPARED';
@@ -535,11 +814,38 @@ export class PersistentStore {
     });
   }
 
-  public dispatchPO(rfqId: string, supplierId: string): RFQItem | null {
+  // Prepare an internal purchase order; no vendor email or portal submission occurs.
+  // All supplier amounts come from the actual recorded quote, never caller input.
+  public preparePO(rfqId: string, supplierId: string, preparedBy: string): RFQItem | null {
     return this.commit((draft) => {
       const rfq = draft.rfqs.find(r => r.id === rfqId);
       if (!rfq) return null;
-      rfq.status = 'PO_DISPATCHED';
+      if (rfq.status === 'PO_PREPARED' || rfq.status === 'PO_DISPATCHED') {
+        throw new Error('Purchase order is already prepared or previously recorded dispatched.');
+      }
+      if (!Number.isSafeInteger(rfq.requiredQty) || rfq.requiredQty <= 0) {
+        throw new Error('RFQ quantity must be a positive integer.');
+      }
+      const supplierQuote = rfq.supplierQuotes.find(q => q.supplierId === supplierId);
+      if (!supplierQuote) throw new Error('Supplier must have an actual quotation recorded for this RFQ.');
+      if (!Number.isFinite(supplierQuote.unitCost) || supplierQuote.unitCost < 0) {
+        throw new Error('Supplier quote must have a valid non-negative unit cost.');
+      }
+      const amount = Math.round(rfq.requiredQty * supplierQuote.unitCost * 100) / 100;
+      if (!Number.isSafeInteger(Math.round(amount * 100))) throw new Error('Purchase order value exceeds safe numeric limits.');
+      const id = crypto.randomUUID();
+      rfq.preparedPO = {
+        poReference: 'PO-DRAFT-' + id.slice(0, 12).toUpperCase(),
+        supplierId,
+        supplierName: supplierQuote.supplierName,
+        qty: rfq.requiredQty,
+        unitCost: supplierQuote.unitCost,
+        amount,
+        preparedAt: new Date().toISOString(),
+        preparedBy,
+        deliveryStatus: 'NOT_SENT'
+      };
+      rfq.status = 'PO_PREPARED';
       return rfq;
     });
   }
@@ -561,11 +867,31 @@ export class PersistentStore {
     });
   }
 
+  // Assignment and audit are written in a single JSON transaction.
+  public assignJob(id: string, userId: string | null, actor: string): FieldJob | null {
+    return this.commit((draft) => {
+      const job = draft.jobs.find(j => j.id === id);
+      if (!job) return null;
+      const staff = userId ? draft.users.find(u => u.id === userId &&
+        u.role === 'FIELD_ENGINEER' && !u.disabledAt && u.tenantId === draft.tenant.id) : null;
+      if (userId && !staff) throw new Error('Assign an active local field engineer by exact user ID.');
+      job.assignedUserId = staff?.id;
+      job.technicianName = staff?.name || 'Unassigned';
+      draft.events.push({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'JobEngineerAssigned', agent: actor,
+        summary: 'Job ' + job.jobCode + ' assigned to ' + (staff?.username || 'unassigned') + '.',
+        autonomousActionTaken: 'Saved local assignment only; no external dispatch sent.',
+        humanApprovalRequired: false, approvalStatus: 'AUTO_APPROVED', confidenceScore: 1
+      });
+      return job;
+    });
+  }
+
   public consumeJobPart(
     jobId: string,
     productIdOrName: string,
-    quantity: number = 1,
-    explicitCost?: number
+    quantity: number = 1
   ): FieldJob | null {
     return this.commit((draft) => {
       // 1. Find actual job
@@ -575,15 +901,13 @@ export class PersistentStore {
       }
 
       // 2. Validate quantity (positive integer)
-      const qty = Math.floor(quantity);
-      if (!qty || qty <= 0) {
+      const qty = quantity;
+      if (!Number.isSafeInteger(qty) || qty <= 0) {
         throw new Error(`Invalid consumption quantity: must be positive integer`);
       }
 
-      // 3. Find exact product by ID first, then fallback to exact name/SKU
-      const product = draft.products.find(
-        p => p.id === productIdOrName || p.name === productIdOrName || p.sku === productIdOrName
-      );
+      // 3. Use only an exact, stable inventory product ID.
+      const product = draft.products.find(p => p.id === productIdOrName);
       if (!product) {
         throw new Error(`Product not found in warehouse inventory: ${productIdOrName}`);
       }
@@ -601,7 +925,7 @@ export class PersistentStore {
       product.stockAvailable -= qty;
 
       // 6. Append matching job part with authoritative purchaseCost
-      const authoritativeCost = explicitCost !== undefined ? explicitCost : (product.purchaseCost || 0);
+      const authoritativeCost = product.purchaseCost || 0;
       job.partsConsumed.push({
         partName: product.name,
         qty,
@@ -633,6 +957,25 @@ export class PersistentStore {
   public addProject(project: Project): Project {
     return this.commit((draft) => {
       draft.projects = [project, ...draft.projects];
+      return project;
+    });
+  }
+
+  public setProjectCollaborator(projectId: string, userId: string, grant: boolean, actor: string): Project | null {
+    return this.commit(draft => {
+      const project = draft.projects.find(p => p.id === projectId);
+      if (!project) return null;
+      const collaborators = Array.isArray(project.collaboratorUserIds) ? project.collaboratorUserIds : [];
+      project.collaboratorUserIds = grant
+        ? Array.from(new Set([...collaborators, userId]))
+        : collaborators.filter(id => id !== userId);
+      draft.events.unshift({
+        id: 'evt-' + crypto.randomUUID(), timestamp: new Date().toISOString(),
+        eventType: 'ProjectStaffAccessChanged', agent: actor,
+        summary: 'Internal project ' + project.projectCode + ' staff access ' + (grant ? 'granted' : 'revoked') + '.',
+        autonomousActionTaken: 'Updated local staff access only; no external customer access.',
+        humanApprovalRequired: true, approvalStatus: 'AUTHORIZED', confidenceScore: 1
+      });
       return project;
     });
   }
@@ -764,6 +1107,15 @@ export class PersistentStore {
       if (idx === -1) return null;
       draft.knowledgeArticles[idx] = { ...draft.knowledgeArticles[idx], ...updates };
       return draft.knowledgeArticles[idx];
+    });
+  }
+
+  public markKnowledgeArticleSolved(id: string): KnowledgeArticle | null {
+    return this.commit((draft) => {
+      const item = draft.knowledgeArticles.find(a => a.id === id);
+      if (!item) return null;
+      item.solvedCount = Math.max(0, item.solvedCount || 0) + 1;
+      return item;
     });
   }
 
