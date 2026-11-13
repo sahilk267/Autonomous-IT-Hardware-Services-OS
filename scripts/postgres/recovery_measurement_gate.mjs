@@ -30,7 +30,7 @@ export function assessRecovery({plan,observations,evidence,archive}){
   const p=JSON.parse(plan),o=JSON.parse(observations),proof=JSON.parse(evidence);
   keys(p,['scope','operatorSession','sourceSha256','archiveSha256','evidenceSha256',
     'rpoMinutes','rtoMinutes','maximumDowntimeMinutes','windowStart','windowEnd',
-    'writeFreezeRequired','approvalClassification']);
+    'writeFreezeRequired','approvalClassification','freezeMonotonicMs']);
   assert.equal(p.scope,'DISPOSABLE_PG16_RECOVERY_REHEARSAL');
   assert.equal(p.approvalClassification,'SYNTHETIC_CI_OPERATOR_NO_EXTERNAL_APPROVAL');
   assert.ok(typeof p.operatorSession==='string'&&/^[A-Za-z0-9_-]{12,120}$/.test(p.operatorSession));
@@ -38,6 +38,7 @@ export function assessRecovery({plan,observations,evidence,archive}){
   assert.equal(p.archiveSha256,sha(archive),'archive hash differs from sealed plan');
   assert.equal(p.evidenceSha256,sha(evidence),'verified restore evidence differs from sealed plan');
   assert.equal(p.writeFreezeRequired,true);
+  bounded(p.freezeMonotonicMs,1,9_999_999_999_999,'monotonic freeze anchor');
   for(const k of ['rpoMinutes','rtoMinutes','maximumDowntimeMinutes'])
     bounded(p[k],1,240,k);
   assert.ok(p.rtoMinutes<=p.maximumDowntimeMinutes,'RTO exceeds downtime target');
@@ -47,12 +48,13 @@ export function assessRecovery({plan,observations,evidence,archive}){
   keys(o,['operatorSession','sourceSha256','archiveSha256','evidenceSha256','archiveSizeBytes',
     'clock','writeFrozen','archiveBeganMs','archiveFinishedMs',
     'initialRestoreBeganMs','initialRestoreVerifiedMs','damageDetectedMs',
-    'rollbackBeganMs','rollbackRestoredMs','rollbackVerifiedMs','writesAllowedMs']);
+    'rollbackBeganMs','rollbackRestoredMs','rollbackVerifiedMs','writesAllowedMs',
+    'monotonicEventMs']);
   assert.equal(o.operatorSession,p.operatorSession);
   assert.equal(o.sourceSha256,p.sourceSha256);
   assert.equal(o.archiveSha256,p.archiveSha256);
   assert.equal(o.evidenceSha256,p.evidenceSha256);
-  assert.equal(o.clock,'CI_RUNNER_WALL_CLOCK_MILLISECONDS');
+  assert.equal(o.clock,'CI_RUNNER_WALL_AND_MONOTONIC_MILLISECONDS');
   assert.equal(o.writeFrozen,true,'source writes were not frozen at rehearsal boundary');
   bounded(o.archiveSizeBytes,1,500_000_000,'archive size');
   assert.equal(o.archiveSizeBytes,archive.byteLength,'archive size mismatch');
@@ -62,29 +64,37 @@ export function assessRecovery({plan,observations,evidence,archive}){
     'damageDetectedMs','rollbackBeganMs','rollbackRestoredMs',
     'rollbackVerifiedMs','writesAllowedMs'
   ];
-  // CI uses wall-clock samples from independent shell processes. NTP slews
-  // can make the first archive sample appear up to ~1s before the previously
-  // captured freeze boundary. Allow only a 2-second *start* skew, never an
-  // extended recovery deadline. Event-to-event ordering and every RPO/RTO/
-  // downtime budget remain unchanged; this is NOT a production clock SLA.
+  // Linux /proc/uptime supplies a monotonic shared-host clock across shell
+  // invocations. CI wall clock can slew backwards on NTP synchronization.
+  // Enforce causal order and RPO/RTO/downtime using monotonic samples, never
+  // absolute wall-clock deltas. Audit wall-clock samples separately against
+  // the declared UTC window with a tight 2-second drift tolerance only.
   const wallClockStartSkewToleranceMs=2000;
+  keys(o.monotonicEventMs,events);
+  let maximumAbsoluteWallClockDriftMs=0;
   for(let i=0;i<events.length;i++){
-    const value=o[events[i]];
-    bounded(value,1,9_999_999_999_999,'timestamp '+events[i]);
-    assert.ok(value>=windowStart-wallClockStartSkewToleranceMs&&value<=windowEnd,
-      'measurement outside bounded rehearsal window: '+events[i] +
-      ' startOffsetMs='+(value-windowStart)+' endOffsetMs='+(value-windowEnd) +
-      ' currentWindowMs='+(windowEnd-windowStart));
-    if(i)assert.ok(value>=o[events[i-1]],
-      'impossible time ordering in operator rehearsal');
+    const key=events[i],value=o[key],mono=o.monotonicEventMs[key];
+    bounded(value,1,9_999_999_999_999,'wall timestamp '+key);
+    bounded(mono,1,9_999_999_999_999,'monotonic timestamp '+key);
+    const elapsed=mono-p.freezeMonotonicMs;
+    assert.ok(elapsed>=0&&elapsed<=windowEnd-windowStart,
+      'monotonic measurement outside bounded rehearsal window: '+key);
+    if(i)assert.ok(mono>=o.monotonicEventMs[events[i-1]],
+      'impossible monotonic event ordering in operator rehearsal');
+    const expectedWall=windowStart+elapsed;
+    const drift=Math.abs(value-expectedWall);
+    assert.ok(drift<=wallClockStartSkewToleranceMs,
+      'independent wall clock drift exceeds bounded tolerance: '+key+
+      ' observedDriftMs='+drift);
+    maximumAbsoluteWallClockDriftMs=Math.max(maximumAbsoluteWallClockDriftMs,drift);
   }
-  // Age of a no-write synthetic source snapshot at archive capture (RPO
-  // surrogate), not actual restored production transaction-loss measurement.
-  const archiveAgeMs=o.archiveFinishedMs-windowStart;
-  const rtoMs=o.rollbackVerifiedMs-o.damageDetectedMs;
-  const downtimeMs=o.writesAllowedMs-windowStart;
-  const firstRestoreMs=o.initialRestoreVerifiedMs-o.initialRestoreBeganMs;
-  const rollbackMs=o.rollbackVerifiedMs-o.rollbackBeganMs;
+  // Frozen synthetic snapshot-age surrogate: NOT customer transaction loss.
+  const mono=o.monotonicEventMs;
+  const archiveAgeMs=mono.archiveFinishedMs-p.freezeMonotonicMs;
+  const rtoMs=mono.rollbackVerifiedMs-mono.damageDetectedMs;
+  const downtimeMs=mono.writesAllowedMs-p.freezeMonotonicMs;
+  const firstRestoreMs=mono.initialRestoreVerifiedMs-mono.initialRestoreBeganMs;
+  const rollbackMs=mono.rollbackVerifiedMs-mono.rollbackBeganMs;
   assert.ok(archiveAgeMs<=p.rpoMinutes*60000,
     'archive source-age surrogate exceeds configured RPO budget');
   assert.ok(rtoMs<=p.rtoMinutes*60000,'measured rollback RTO exceeds target');
@@ -116,8 +126,8 @@ export function assessRecovery({plan,observations,evidence,archive}){
     proposedRpoBudgetMs:p.rpoMinutes*60000,
     proposedRtoBudgetMs:p.rtoMinutes*60000,
     proposedDowntimeBudgetMs:p.maximumDowntimeMinutes*60000,
-    budgetsMet:true,clockSource:'CI_RUNNER_WALL_CLOCK_MILLISECONDS',
-    wallClockStartSkewToleranceMs,
+    budgetsMet:true,clockSource:'CI_RUNNER_MONOTONIC_PROC_UPTIME_MILLISECONDS',
+    wallClockStartSkewToleranceMs,maximumAbsoluteWallClockDriftMs,
     observedArchiveStartOffsetMs:o.archiveBeganMs-windowStart,
     realCustomerDataLossMeasured:false,productionRpoRtoValidated:false,
     independentOperatorApprovalVerified:false,

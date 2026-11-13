@@ -27,14 +27,22 @@ const plan={scope:'DISPOSABLE_PG16_RECOVERY_REHEARSAL',operatorSession:'phase_i_
   evidenceSha256:hash(evidence),rpoMinutes:3,rtoMinutes:2,
   maximumDowntimeMinutes:5,windowStart:new Date(time).toISOString(),
   windowEnd:new Date(t(180000)).toISOString(),writeFreezeRequired:true,
+  freezeMonotonicMs:60000000,
   approvalClassification:'SYNTHETIC_CI_OPERATOR_NO_EXTERNAL_APPROVAL'};
 const observations={operatorSession:plan.operatorSession,sourceSha256:sourceHash,
   archiveSha256:hash(archive),evidenceSha256:hash(evidence),
-  archiveSizeBytes:archive.length,clock:'CI_RUNNER_WALL_CLOCK_MILLISECONDS',
+  archiveSizeBytes:archive.length,clock:'CI_RUNNER_WALL_AND_MONOTONIC_MILLISECONDS',
   writeFrozen:true,archiveBeganMs:t(1000),archiveFinishedMs:t(2000),
   initialRestoreBeganMs:t(3000),initialRestoreVerifiedMs:t(12000),
   damageDetectedMs:t(14000),rollbackBeganMs:t(15000),
-  rollbackRestoredMs:t(33000),rollbackVerifiedMs:t(41000),writesAllowedMs:t(43000)};
+  rollbackRestoredMs:t(33000),rollbackVerifiedMs:t(41000),writesAllowedMs:t(43000),
+  monotonicEventMs:Object.fromEntries([
+    ['archiveBeganMs',1000],['archiveFinishedMs',2000],
+    ['initialRestoreBeganMs',3000],['initialRestoreVerifiedMs',12000],
+    ['damageDetectedMs',14000],['rollbackBeganMs',15000],
+    ['rollbackRestoredMs',33000],['rollbackVerifiedMs',41000],
+    ['writesAllowedMs',43000]
+  ].map(([key,delta])=>[key,plan.freezeMonotonicMs+delta]))};
 const planBytes=json(plan),observedBytes=json(observations);
 const roles=['DBA_REHEARSAL_OPERATOR','INDEPENDENT_SECURITY_WITNESS'];
 const signers=roles.map((role,i)=>{

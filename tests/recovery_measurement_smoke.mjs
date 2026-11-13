@@ -29,18 +29,25 @@ const plan={scope:'DISPOSABLE_PG16_RECOVERY_REHEARSAL',
   maximumDowntimeMinutes:5,
   windowStart:new Date(time(0)).toISOString(),
   windowEnd:new Date(time(240000)).toISOString(),
-  writeFreezeRequired:true,
+  writeFreezeRequired:true,freezeMonotonicMs:50000000,
   approvalClassification:'SYNTHETIC_CI_OPERATOR_NO_EXTERNAL_APPROVAL'};
 const observations={
   operatorSession:plan.operatorSession,sourceSha256:sourceSha,
   archiveSha256:plan.archiveSha256,evidenceSha256:plan.evidenceSha256,
-  archiveSizeBytes:archive.byteLength,clock:'CI_RUNNER_WALL_CLOCK_MILLISECONDS',
+  archiveSizeBytes:archive.byteLength,clock:'CI_RUNNER_WALL_AND_MONOTONIC_MILLISECONDS',
   writeFrozen:true,
   archiveBeganMs:time(1000),archiveFinishedMs:time(2000),
   initialRestoreBeganMs:time(3000),initialRestoreVerifiedMs:time(12000),
   damageDetectedMs:time(14000),rollbackBeganMs:time(15000),
   rollbackRestoredMs:time(35000),rollbackVerifiedMs:time(42000),
-  writesAllowedMs:time(43000)
+  writesAllowedMs:time(43000),
+  monotonicEventMs:Object.fromEntries([
+    ['archiveBeganMs',1000],['archiveFinishedMs',2000],
+    ['initialRestoreBeganMs',3000],['initialRestoreVerifiedMs',12000],
+    ['damageDetectedMs',14000],['rollbackBeganMs',15000],
+    ['rollbackRestoredMs',35000],['rollbackVerifiedMs',42000],
+    ['writesAllowedMs',43000]
+  ].map(([k,delta])=>[k,plan.freezeMonotonicMs+delta]))
 };
 const bundle={plan:json(plan),observations:json(observations),
   evidence:evidenceBytes,archive};
@@ -72,6 +79,11 @@ try{
   });
   bad('Clock skew larger than the bounded 2-second allowance is rejected',
     change('observations',x=>x.archiveBeganMs=time(-2500)));
+  bad('Out-of-order monotonic recovery events cannot be hidden by plausible wall-clock values',
+    change('observations',x=>
+      x.monotonicEventMs.rollbackVerifiedMs=x.monotonicEventMs.rollbackBeganMs-100));
+  bad('An implausible monotonic drift outside the declared window is denied',
+    change('observations',x=>x.monotonicEventMs.archiveFinishedMs=plan.freezeMonotonicMs+250000));
   bad('Archive bytes changed from sealed operator plan',{...bundle,archive:crypto.randomBytes(128)});
   bad('RTO over budget fails independent evaluator',change('plan',x=>x.rtoMinutes=0));
   bad('Too-small rollback RTO budget rejects measured recovery',
