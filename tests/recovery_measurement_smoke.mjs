@@ -63,6 +63,15 @@ try{
     assert.equal(result.independentOperatorApprovalVerified,false);
     assert.equal(result.productionCutoverReady,false);
   });
+  const skewed={...observations,archiveBeganMs:time(-1000)};
+  test('Small isolated CI wall-clock backward slews are explicitly tolerated at freeze start',()=>{
+    const row=assessRecovery({...bundle,observations:Buffer.from(JSON.stringify(skewed))});
+    assert.equal(row.wallClockStartSkewToleranceMs,2000);
+    assert.equal(row.observedArchiveStartOffsetMs,-1000);
+    assert.equal(row.productionCutoverReady,false);
+  });
+  bad('Clock skew larger than the bounded 2-second allowance is rejected',
+    change('observations',x=>x.archiveBeganMs=time(-2500)));
   bad('Archive bytes changed from sealed operator plan',{...bundle,archive:crypto.randomBytes(128)});
   bad('RTO over budget fails independent evaluator',change('plan',x=>x.rtoMinutes=0));
   bad('Too-small rollback RTO budget rejects measured recovery',

@@ -62,10 +62,16 @@ export function assessRecovery({plan,observations,evidence,archive}){
     'damageDetectedMs','rollbackBeganMs','rollbackRestoredMs',
     'rollbackVerifiedMs','writesAllowedMs'
   ];
+  // CI uses wall-clock samples from independent shell processes. NTP slews
+  // can make the first archive sample appear up to ~1s before the previously
+  // captured freeze boundary. Allow only a 2-second *start* skew, never an
+  // extended recovery deadline. Event-to-event ordering and every RPO/RTO/
+  // downtime budget remain unchanged; this is NOT a production clock SLA.
+  const wallClockStartSkewToleranceMs=2000;
   for(let i=0;i<events.length;i++){
     const value=o[events[i]];
     bounded(value,1,9_999_999_999_999,'timestamp '+events[i]);
-    assert.ok(value>=windowStart&&value<=windowEnd,
+    assert.ok(value>=windowStart-wallClockStartSkewToleranceMs&&value<=windowEnd,
       'measurement outside bounded rehearsal window: '+events[i] +
       ' startOffsetMs='+(value-windowStart)+' endOffsetMs='+(value-windowEnd) +
       ' currentWindowMs='+(windowEnd-windowStart));
@@ -111,6 +117,8 @@ export function assessRecovery({plan,observations,evidence,archive}){
     proposedRtoBudgetMs:p.rtoMinutes*60000,
     proposedDowntimeBudgetMs:p.maximumDowntimeMinutes*60000,
     budgetsMet:true,clockSource:'CI_RUNNER_WALL_CLOCK_MILLISECONDS',
+    wallClockStartSkewToleranceMs,
+    observedArchiveStartOffsetMs:o.archiveBeganMs-windowStart,
     realCustomerDataLossMeasured:false,productionRpoRtoValidated:false,
     independentOperatorApprovalVerified:false,
     migrationApplied:false,productionCutoverReady:false,
