@@ -734,6 +734,10 @@ export class PersistentStore {
   // Products
   public addProduct(product: ProductItem): ProductItem {
     return this.commit((draft) => {
+      if (draft.products.some(p => p.id === product.id ||
+          p.sku.toLowerCase() === product.sku.toLowerCase())) {
+        throw new Error('Product ID or SKU already exists.');
+      }
       draft.products = [product, ...draft.products];
       return product;
     });
@@ -743,7 +747,16 @@ export class PersistentStore {
     return this.commit((draft) => {
       const idx = draft.products.findIndex(p => p.id === id);
       if (idx === -1) return null;
-      draft.products[idx] = { ...draft.products[idx], ...updates };
+      if (updates.id !== undefined && updates.id !== id)
+        throw new Error('Catalog source identity cannot be reassigned.');
+      const proposedSku=updates.sku;
+      if (proposedSku && draft.products.some(p=>p.id!==id &&
+          p.sku.toLowerCase()===proposedSku.toLowerCase()))
+        throw new Error('Product SKU already exists.');
+      const next={...draft.products[idx],...updates,id};
+      if ((next.stockReserved ?? 0) > (next.stockAvailable ?? 0))
+        throw new Error('Reserved stock cannot exceed stock available.');
+      draft.products[idx] = next;
       return draft.products[idx];
     });
   }
@@ -789,6 +802,10 @@ export class PersistentStore {
     return this.commit((draft) => {
       const rfq = draft.rfqs.find(r => r.id === rfqId);
       if (!rfq) return null;
+      if (rfq.status === 'PO_PREPARED' || rfq.status === 'PO_DISPATCHED')
+        throw new Error('A prepared PO freezes its original supplier quotation set.');
+      if (rfq.supplierQuotes.some(q=>q.supplierId===quote.supplierId))
+        throw new Error('Each supplier may submit only one quote per RFQ.');
       rfq.supplierQuotes.push(quote);
       if (rfq.status === 'OPEN' && rfq.supplierQuotes.length > 1) {
         rfq.status = 'COMPARED';

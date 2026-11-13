@@ -337,3 +337,18 @@ Commit `ac27a4e` completed [CI #42714106305](https://github.com/sahilk267/Autono
 - **CI verified at implementation SHA `f98d4c1`:** [Push #43269141150](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43269141150) and [PR #43269153828](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43269153828) **both SUCCESS**, with verify/Chromium/PostgreSQL jobs. Object BOLA **51/51**, dual-issuer custody **18/18**, synthetic recovery budget **15/15**, restored PostgreSQL acceptance **30/30**. Measured disposable corruption→verified rollback **977ms**, rollback restore+verify **973ms**, initial restore **1046ms**, no-write window **2473ms**, source-age surrogate **161ms**. Production RTO/RPO remains unapproved. Documentation-only SHA gets separate CI. [Phase 10.5H report](PHASE_10_5H_IDENTITY_CUSTODY_OBJECT_AUTH_RECOVERY_2026-11-12.md).
 
 **No customer migration, SQL business endpoint rollout, Hostinger production deployment, or outbox provider dispatch.**
+
+
+---
+
+## Phase 10.5I — legacy scope hardening, exhaustive object route denial, independently witnessed operator evidence (13 November 2026)
+
+**Development branch:** `fix/phase1-security-integrity-20261106`; Draft PR #1. Keep main unchanged and do not enable production migration, provider dispatch or new SQL read-through endpoints.
+
+- Legacy object routes: add `tests/legacy_object_integrity_matrix.mjs` testing the **18** previously excluded dynamic routes, both wrong-role and missing-ID denial/501 behavior, unchanged persistent state, and full 30-route dynamic API accounting alongside the 12 10.5H customer-scoped BOLA checks. These tests do not certify cross-customer access for owner-only/tenant-global records.
+- Prevent direct caller-controlled Product/Supplier/RFQ source IDs or arbitrary Product fields in `server.ts`, enforce strict typed catalog mutation, SKU uniqueness and stock invariants; reject forged RFQ quote/PO creation, duplicate supplier quotes and supplier quote revisions after PO preparation; `server/db.ts` adds defensive transaction-time ID/SKU and PO quote immutability.
+- Add `scripts/postgres/governed_handoff_gate.mjs` and `tests/governed_handoff_smoke.mjs`: require separately pinned Ed25519 DBA operator + independent security witness signing the exact synthetic CI recovery plan, archived PostgreSQL dump, observed restore/damage/rollback timings, independent SQL digest, run session, and externally reviewed-ticket SHA256. All signatures/approval claims are **synthetic evidence** and success returns `BLOCKED` status 3.
+- CI `verify` now runs both independent negative-control suites on every push and PR; Chromium, original customer BOLA, two-tenant SQL, PostgreSQL 16 recovery and blocked cutover tests unchanged. **CI status:** await explicit GitHub workflow confirmation.
+- **Still blockers:** genuine operator identity verified by actual organization, externally archived dual-signed approvals, real customer historical ownership decisions, confirmed live encrypted offsite backups and RTO/RPO, independently proved all runtime multi-tenant endpoints, legal invoice/payment reconciliation and Hostinger deployment sign-off. Production cutover NO-GO.
+
+[10.5I technical and safety report](PHASE_10_5I_LEGACY_OBJECT_GOVERNED_HANDOFF_2026-11-13.md).

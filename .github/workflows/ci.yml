@@ -44,8 +44,12 @@ jobs:
         run: npm run smoke:review-signoff
       - name: Exhaustive customer-scoped object denial and grant-revocation acceptance
         run: npm run smoke:object-isolation
+      - name: All 18 previously excluded legacy/owner-only dynamic object routes and catalog integrity
+        run: npm run smoke:legacy-object
       - name: Two-independent-issuer signed reviewer identity and custody negative controls
         run: npm run smoke:identity-custody
+      - name: Independent operator/witness signed offline recovery handoff negative controls
+        run: npm run smoke:governed-handoff
       - name: Recovery operator timing budget, archive integrity and no-go negative controls
         run: npm run smoke:recovery-measurement
       - name: Production data-path and offline backup smoke test

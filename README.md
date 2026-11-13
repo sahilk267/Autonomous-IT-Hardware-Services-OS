@@ -287,3 +287,33 @@ and returns **exit 3 (BLOCKED)** even on valid timings. For exact gates and
 remaining manual approvals, read [Phase 10.5H report](docs/PHASE_10_5H_IDENTITY_CUSTODY_OBJECT_AUTH_RECOVERY_2026-11-12.md).
 
 **Phase 10.5H implementation verified:** [Push #43269141150](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43269141150) and [Draft PR #43269153828](https://github.com/sahilk267/Autonomous-IT-Hardware-Services-OS/actions/runs/43269153828) both succeeded on code SHA `f98d4c1`. Cross-customer object isolation **51/51**, reviewer/issuer-custody **18/18**, recovery measurement **15/15**. The throwaway PostgreSQL recovery took **977ms from detected corruption to verified rollback**; these are runner-only measurements, not real customer RTO/RPO or corporate approvals. Production remains **BLOCKED**.
+
+
+## Phase 10.5I — legacy object integrity, 100% dynamic route test classification and governed operator handoff
+
+`npm run smoke:legacy-object` exercises all **18** dynamic object routes
+previously excluded from the customer-scoped BOLA matrix, with real
+cookie-authenticated allowed/disallowed roles, nonexistent-object denial
+or explicit disabled-adapter responses, and zero unauthorized state changes.
+Together with the existing 12 customer-scoped BOLA mutation routes, all
+**30** dynamic routes are explicitly exercised in synthetic HTTP tests.
+This does **not** imply customer tenancy for global catalog, knowledge,
+licenses, invoice, administrative or workflow objects.
+
+An actual integrity flaw was closed in the legacy catalog APIs:
+`POST/PATCH /api/products` now require strictly typed/allowlisted fields,
+server-issued identities, duplicate SKU denial, and stock invariants;
+supplier IDs are server-issued; RFQs cannot be created with injected
+supplier histories, prepared PO, or caller-assigned IDs. Supplier quotation
+fields must be valid, duplicates are blocked, and internal PO preparation
+freezes the quote set. External PO dispatch remains permanently disabled.
+
+`npm run assess:governed-handoff` is a read-only offline review of the
+measured disposable PostgreSQL recovery, requiring an independently SHA256-
+pinned two-key Ed25519 operator/security-witness registry. Two hash-linked
+signatures bind the run session, archive, observations, restore evidence,
+recovery plan, and an **unverified external ticket digest**. Valid review
+evidence returns **exit 3 / BLOCKED**; no real operator identity, ticket
+issuer, governance authority, live customer RTO/RPO or production approval
+is conferred. The tool cannot restore or deploy anything. See
+[Phase 10.5I technical report](docs/PHASE_10_5I_LEGACY_OBJECT_GOVERNED_HANDOFF_2026-11-13.md).

@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { GoogleGenAI } from '@google/genai';
 import { createServer as createViteServer } from 'vite';
 import { dbStore, defaultConnectors, hashPassword, verifyPassword } from './server/db.ts';
-import { UserRole, Project, ProjectMilestone } from './src/types.ts';
+import { UserRole, Project, ProjectMilestone, ProductItem, SupplierInfo, RFQItem } from './src/types.ts';
 import { loginAttemptLimiter } from './server/login_limit.ts';
 import { registerPostgresPilotRoutes } from './server/postgres_pilot.ts';
 
@@ -553,6 +553,53 @@ app.post('/api/state/reset', requireAuth, requireRole('BUSINESS_OWNER'), (req, r
   }
 });
 
+// Phase 10.5I: legacy catalogs are tenant-level, NOT customer-owned.
+// Constrain mutable business fields and prohibit supplied object IDs, metadata,
+// grants, settlement flags, or nested objects that could corrupt identity.
+const productTextFields = new Set([
+  'sku','name','brand','specs','warehouseLocation','hsn'
+]);
+const productMoneyFields = new Set([
+  'purchaseCost','marketPrice','sellingPrice','minPrice','targetMarginPercent',
+  'gstPercent','warrantyYears'
+]);
+const productStockFields = new Set(['stockAvailable','stockReserved']);
+const productCategories = new Set([
+  'Laptop','Desktop','Server','Networking','Power','Component','Storage','Peripheral'
+]);
+const productEditableFields = new Set([
+  ...productTextFields,...productMoneyFields,...productStockFields,
+  'category','serialTrackingRequired'
+]);
+function validatedProductFields(body: unknown, required: boolean): Partial<ProductItem> | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const input = body as Record<string, unknown>;
+  const entries = Object.entries(input);
+  if (!entries.length || entries.some(([k])=>!productEditableFields.has(k))) return null;
+  const fields: Record<string, unknown> = {};
+  for (const [key,value] of entries) {
+    if (productTextFields.has(key)) {
+      if (typeof value !== 'string' || !value.trim() || value.length > 200) return null;
+      fields[key]=value.trim();
+    } else if (productMoneyFields.has(key)) {
+      if (typeof value !== 'number' || !Number.isFinite(value) ||
+          value > 1_000_000_000_000 ||
+          (key === 'gstPercent' ? (value !== -1 && (value < 0 || value > 100)) : value < 0)) return null;
+      fields[key]=value;
+    } else if (productStockFields.has(key)) {
+      if (!Number.isSafeInteger(value) || (value as number)<0 || (value as number)>10000000) return null;
+      fields[key]=value;
+    } else if (key === 'category') {
+      if (typeof value !== 'string' || !productCategories.has(value)) return null;
+      fields[key]=value;
+    } else if (key === 'serialTrackingRequired') {
+      if (typeof value !== 'boolean') return null;
+      fields[key]=value;
+    }
+  }
+  if (required && (!fields.sku || !fields.name)) return null;
+  return fields as Partial<ProductItem>;
+}
 // Products CRUD (Protected)
 app.get('/api/products', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAGER', 'PROCUREMENT_LEAD', 'FIELD_ENGINEER'), (req, res) => {
   res.json({ success: true, data: dbStore.getState().products });
@@ -560,13 +607,26 @@ app.get('/api/products', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANAG
 
 app.post('/api/products', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const prod = req.body;
-    if (!prod || !prod.name || !prod.sku) {
-      return res.status(400).json({ success: false, error: 'Product name and SKU are required' });
+    const prod = validatedProductFields(req.body, true);
+    if (!prod?.sku || !prod.name) {
+      return res.status(400).json({ success: false, error: 'Only allowed product fields, name and SKU are accepted.' });
+    }
+    if ((prod.stockReserved ?? 0) > (prod.stockAvailable ?? 0)) {
+      return res.status(400).json({success:false,error:'Reserved stock cannot exceed available stock.'});
+    }
+    if (dbStore.getState().products.some(p=>p.sku.toLowerCase()===prod.sku!.toLowerCase())) {
+      return res.status(409).json({ success: false, error: 'Product SKU already registered.' });
     }
     const created = dbStore.addProduct({
-      ...prod,
-      id: prod.id || `prod-${crypto.randomUUID()}`
+      id: 'prod-' + crypto.randomUUID(), sku:prod.sku, name:prod.name,
+      brand:prod.brand ?? '',category:prod.category ?? 'Component',
+      specs:prod.specs ?? '', purchaseCost:prod.purchaseCost ?? 0,
+      marketPrice:prod.marketPrice ?? 0,sellingPrice:prod.sellingPrice ?? 0,
+      minPrice:prod.minPrice ?? 0,targetMarginPercent:prod.targetMarginPercent ?? 0,
+      stockAvailable:prod.stockAvailable ?? 0,stockReserved:prod.stockReserved ?? 0,
+      warehouseLocation:prod.warehouseLocation ?? '',hsn:prod.hsn ?? '',
+      gstPercent:prod.gstPercent ?? -1,warrantyYears:prod.warrantyYears ?? 0,
+      serialTrackingRequired:prod.serialTrackingRequired ?? false
     });
 
     dbStore.addEvent({
@@ -589,7 +649,19 @@ app.post('/api/products', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMEN
 
 app.patch('/api/products/:id', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const updated = dbStore.updateProduct(req.params.id, req.body);
+    const changes = validatedProductFields(req.body, false);
+    if (!changes) return res.status(400).json({
+      success: false,error: 'Only allowed typed catalog fields may be changed; object IDs and provenance are immutable.'
+    });
+    const existing = dbStore.getState().products.find(p=>p.id===req.params.id);
+    if (changes.sku && dbStore.getState().products.some(
+      p=>p.id!==req.params.id && p.sku.toLowerCase()===changes.sku!.toLowerCase()
+    )) return res.status(409).json({success:false,error:'Product SKU already registered.'});
+    if (existing && ((changes.stockReserved ?? existing.stockReserved ?? 0) >
+                     (changes.stockAvailable ?? existing.stockAvailable ?? 0))) {
+      return res.status(400).json({success:false,error:'Reserved stock exceeds available stock.'});
+    }
+    const updated = dbStore.updateProduct(req.params.id, changes);
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Product not found' });
     }
@@ -618,14 +690,33 @@ app.get('/api/suppliers', requireAuth, requireRole('BUSINESS_OWNER', 'SALES_MANA
 
 app.post('/api/suppliers', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const supp = req.body;
-    if (!supp || !supp.name) {
-      return res.status(400).json({ success: false, error: 'Supplier name is required' });
+    const supp = req.body as Record<string, unknown> | undefined;
+    const permitted = new Set([
+      'name','rating','deliveryScore','defectRate','paymentTerms','authorizedBrands','contactPerson','phone'
+    ]);
+    if (!supp || typeof supp !== 'object' || Array.isArray(supp) ||
+        Object.keys(supp).some(k=>!permitted.has(k)) ||
+        typeof supp.name !== 'string' || !supp.name.trim() || supp.name.length > 160 ||
+        ['rating','deliveryScore','defectRate'].some(k=>
+          supp[k] !== undefined && (typeof supp[k] !== 'number' ||
+            !Number.isFinite(supp[k]) || (supp[k] as number)<0 || (supp[k] as number)>100)) ||
+        ['paymentTerms','contactPerson','phone'].some(k=>
+          supp[k] !== undefined && (typeof supp[k] !== 'string' || (supp[k] as string).length>200)) ||
+        (supp.authorizedBrands !== undefined &&
+          (!Array.isArray(supp.authorizedBrands) || supp.authorizedBrands.length>50 ||
+            supp.authorizedBrands.some((x: unknown)=>typeof x!=='string'||!x.trim()||x.length>100)))) {
+      return res.status(400).json({ success: false, error: 'Only valid supplier catalog details are accepted.' });
     }
     const created = dbStore.addSupplier({
-      ...supp,
-      id: supp.id || `sup-${crypto.randomUUID()}`
-    });
+      id:'sup-'+crypto.randomUUID(),name:supp.name.trim(),
+      rating:(supp.rating as number | undefined)??0,
+      deliveryScore:(supp.deliveryScore as number | undefined)??0,
+      defectRate:(supp.defectRate as number | undefined)??0,
+      paymentTerms:(supp.paymentTerms as string | undefined)??'',
+      authorizedBrands:(supp.authorizedBrands as string[] | undefined)??[],
+      contactPerson:(supp.contactPerson as string | undefined)??'',
+      phone:(supp.phone as string | undefined)??''
+    } as SupplierInfo);
     res.status(201).json({ success: true, data: created });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -639,15 +730,23 @@ app.get('/api/rfqs', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEA
 
 app.post('/api/rfqs', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const rfq = req.body;
-    if (!rfq || !rfq.productName) {
-      return res.status(400).json({ success: false, error: 'productName is required' });
+    const rfq = req.body as Record<string, unknown> | undefined;
+    if (!rfq || typeof rfq !== 'object' || Array.isArray(rfq) ||
+        Object.keys(rfq).some(k=>!['productName','requiredQty','urgency','status'].includes(k)) ||
+        (rfq.status !== undefined && rfq.status !== 'PO_DISPATCHED') ||
+        typeof rfq.productName !== 'string' || !rfq.productName.trim() ||
+        rfq.productName.length > 200 ||
+        !Number.isSafeInteger(rfq.requiredQty) || (rfq.requiredQty as number)<=0 ||
+        (rfq.requiredQty as number)>10000000 ||
+        !['HIGH','MEDIUM','LOW'].includes(rfq.urgency as string)) {
+      return res.status(400).json({
+        success: false,error:'RFQ requires a product, positive quantity and urgency. Supplier quotes/PO status cannot be supplied.'
+      });
     }
     const created = dbStore.addRFQ({
-      ...rfq,
-      id: rfq.id || `rfq-${Date.now().toString().slice(-6)}`,
-      supplierQuotes: rfq.supplierQuotes || [],
-      status: 'OPEN'
+      id:'rfq-'+crypto.randomUUID(), productName:rfq.productName.trim(),
+      requiredQty:rfq.requiredQty as number, urgency:rfq.urgency as RFQItem['urgency'],
+      supplierQuotes:[],status:'OPEN'
     });
 
     dbStore.addEvent({
@@ -670,17 +769,33 @@ app.post('/api/rfqs', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LE
 
 app.post('/api/rfqs/:id/quotes', requireAuth, requireRole('BUSINESS_OWNER', 'PROCUREMENT_LEAD'), (req, res) => {
   try {
-    const quote = req.body;
-    if (!quote || !quote.supplierName || quote.unitCost === undefined) {
-      return res.status(400).json({ success: false, error: 'supplierName and unitCost are required' });
+    const quote = req.body as Record<string, unknown> | undefined;
+    if (!quote || typeof quote !== 'object' || Array.isArray(quote) ||
+        Object.keys(quote).sort().join(',') !== 'inStock,leadTimeDays,supplierId,supplierName,unitCost' ||
+        typeof quote.supplierId !== 'string' || !quote.supplierId.trim() ||
+        quote.supplierId.length > 160 ||
+        typeof quote.supplierName !== 'string' || !quote.supplierName.trim() ||
+        quote.supplierName.length > 200 ||
+        typeof quote.unitCost !== 'number' || !Number.isFinite(quote.unitCost) ||
+        quote.unitCost<0 || quote.unitCost>1_000_000_000 ||
+        !Number.isSafeInteger(quote.leadTimeDays) || (quote.leadTimeDays as number)<0 ||
+        (quote.leadTimeDays as number)>3650 || typeof quote.inStock !== 'boolean') {
+      return res.status(400).json({
+        success: false,error:'Supplier quote requires exact verified-format fields; no client PO or recommendation flags.'
+      });
     }
-    const updated = dbStore.addSupplierQuoteToRFQ(req.params.id, quote);
+    const updated = dbStore.addSupplierQuoteToRFQ(req.params.id, {
+      supplierId:quote.supplierId.trim(),supplierName:quote.supplierName.trim(),
+      unitCost:quote.unitCost,leadTimeDays:quote.leadTimeDays as number,
+      inStock:quote.inStock
+    });
     if (!updated) {
       return res.status(404).json({ success: false, error: 'RFQ not found' });
     }
     res.json({ success: true, data: updated });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch {
+    res.status(409).json({ success: false,
+      error: 'RFQ supplier quote cannot be duplicated or added after PO preparation.' });
   }
 });
 

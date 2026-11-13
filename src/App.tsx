@@ -1002,10 +1002,13 @@ export default function App() {
   // Handler: Add Product
   const handleAddProduct = async (prod: ProductItem) => {
     try {
+      // The catalog ID belongs to the server, never to the UI form.
+      // Client-only prototype IDs are intentionally not submitted.
+      const { id: _clientPrototypeId, ...productFields } = prod;
       const res = await fetch('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(prod)
+        body: JSON.stringify(productFields)
       });
       const data = await res.json();
       if (data.success && data.data) {
@@ -1020,10 +1023,12 @@ export default function App() {
   // Handler: Create RFQ
   const handleCreateRFQ = async (rfq: RFQItem) => {
     try {
+      // Supplier quotes, status, and RFQ identity are authoritative server data.
+      const { productName, requiredQty, urgency } = rfq;
       const res = await fetch('/api/rfqs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rfq)
+        body: JSON.stringify({ productName, requiredQty, urgency })
       });
       const data = await res.json();
       if (data.success && data.data) {
